@@ -68,9 +68,9 @@ _Avoid_: Object payload, callback argument
 The vertically clipped window through which a Wrist Menu presents an ordered Menu Definition that does not fit at once.
 _Avoid_: Submenu, separate page
 
-**Scroll Control**:
-A package-owned up or down affordance that moves the Menu Viewport without representing a Host Application Menu Item or emitting a Selection Intent.
-_Avoid_: Menu Item, Host action
+**Scroll Ownership**:
+The temporary exclusive relationship between one Selection Source and the Menu Viewport during continuous drag scrolling.
+_Avoid_: Selection Ownership, page navigation
 
 **Action Item**:
 A Menu Item whose Selection Intent requests an operation without proposing a new displayed value.
