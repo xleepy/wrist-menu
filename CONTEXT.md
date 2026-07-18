@@ -32,6 +32,10 @@ _Avoid_: Full editor, generic sandbox
 An independently bootstrapped realization of the Primitive Workshop using one supported Renderer Integration; the Example App contains React and vanilla variants.
 _Avoid_: Runtime mode, framework toggle
 
+**Workshop Model**:
+The framework-neutral Primitive Workshop state and transitions shared by both Example Variants.
+_Avoid_: Renderer abstraction, shared scene implementation
+
 **Selection Source**:
 The tracked hand or motion controller through which a user targets a Wrist Menu item.
 _Avoid_: Pointer, input device
