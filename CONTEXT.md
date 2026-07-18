@@ -44,6 +44,10 @@ _Avoid_: Menu pointer, teleport target
 A cube, sphere, or cylinder spawned into the Primitive Workshop and available for scene selection or removal.
 _Avoid_: Menu Item, arbitrary scene entity
 
+**Controller Wrist Proxy**:
+The configurable transform derived from a motion controller's grip space that approximates a wrist anchor and orientation when no articulated wrist joint is available.
+_Avoid_: Tracked wrist, controller hand
+
 **Selection Source**:
 The tracked hand or motion controller through which a user targets a Wrist Menu item.
 _Avoid_: Pointer, input device
