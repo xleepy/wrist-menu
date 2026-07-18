@@ -64,6 +64,14 @@ _Avoid_: Dropdown, submenu, cycling option
 The short-lived reveal, hover, ownership, dwell, and tracking state owned by the Wrist Menu Package.
 _Avoid_: Application state, menu data
 
+**Frame Sample**:
+The normalized description of poses, lifecycle visibility, and Selection Source state observed for one current WebXR frame.
+_Avoid_: XRFrame, raw frame data
+
+**Renderer Integration**:
+The boundary connecting Wrist Menu Package behavior and presentation to a Host Application's rendering lifecycle.
+_Avoid_: Framework plugin, separate renderer
+
 **Selection Intent**:
 The source-independent request emitted after a Selection Commit for the Host Application to interpret.
 _Avoid_: Click event, automatic state update
