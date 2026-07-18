@@ -1,0 +1,7 @@
+{
+  "name": "wrist-menu-prototype-worktree",
+  "private": true,
+  "scripts": {
+    "prototype:wrist-panel": "node prototype-wrist-panel/server.mjs"
+  }
+}

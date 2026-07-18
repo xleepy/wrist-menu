@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Wrist panel — throwaway presentation prototype</title>
+    <link rel="stylesheet" href="/prototype/wrist-panel/styles.css" />
+  </head>
+  <body>
+    <!--
+      THROWAWAY UI PROTOTYPE — never promote directly to the Wrist Menu Package.
+      Three variants of a wrist-panel presentation, switchable via ?variant=,
+      on the isolated /prototype/wrist-panel route (UI sub-shape B).
+    -->
+    <main class="prototype-shell" id="prototype-shell">
+      <header class="prototype-note" aria-label="Prototype status">
+        <span class="prototype-note__dot"></span>
+        <span>Throwaway / HITL artifact</span>
+        <span class="prototype-note__divider"></span>
+        <span>Presentation study · not package UI</span>
+      </header>
+
+      <section class="headset-view" aria-label="Simulated VR headset view">
+        <div class="ambient ambient--one"></div>
+        <div class="ambient ambient--two"></div>
+        <div class="world-grid" aria-hidden="true"></div>
+        <div class="horizon" aria-hidden="true"></div>
+        <div class="headset-vignette" aria-hidden="true"></div>
+
+        <div class="xr-readout xr-readout--top">
+          <span class="live-pip"></span>
+          <span>IMMERSIVE PREVIEW</span>
+          <span class="readout-rule"></span>
+          <span>PALM · 31°</span>
+          <span>0.72 m</span>
+        </div>
+
+        <aside class="theme-hud" aria-label="Host customization seams">
+          <p class="hud-eyebrow">HOST SEAMS</p>
+          <h2>Neutral by default.<br />Yours by design.</h2>
+          <div class="theme-token-row">
+            <span><i class="token-dot token-dot--accent"></i>accent</span>
+            <span><i class="token-dot token-dot--surface"></i>surface</span>
+          </div>
+          <div class="theme-token-row">
+            <span>radius</span><span>type</span><span>motion</span>
+          </div>
+          <p class="hud-footnote">Shared content. Different spatial grammar.</p>
+        </aside>
+
+        <aside class="state-hud" id="state-hud" aria-live="polite"></aside>
+
+        <div class="scene-marker scene-marker--left" aria-hidden="true">
+          <span>1.8 M</span>
+        </div>
+        <div class="scene-marker scene-marker--right" aria-hidden="true">
+          <span>SAFE REACH</span>
+        </div>
+
+        <section class="wrist-rig" aria-label="Simulated raised left wrist">
+          <div class="panel-cast" aria-hidden="true"></div>
+          <div class="wrist-panel" id="wrist-panel"></div>
+
+          <div class="hand-model" aria-hidden="true">
+            <div class="forearm">
+              <span class="forearm-line forearm-line--one"></span>
+              <span class="forearm-line forearm-line--two"></span>
+            </div>
+            <div class="wrist-band"><span></span></div>
+            <div class="palm">
+              <span class="palm-line palm-line--one"></span>
+              <span class="palm-line palm-line--two"></span>
+            </div>
+            <div class="finger finger--thumb"></div>
+            <div class="finger finger--index"></div>
+            <div class="finger finger--middle"></div>
+            <div class="finger finger--ring"></div>
+            <div class="finger finger--little"></div>
+          </div>
+
+          <div class="interaction-ray" aria-hidden="true">
+            <span class="ray-dot"></span>
+          </div>
+          <p class="wrist-caption">LEFT WRIST · PALM FACING VIEWER</p>
+        </section>
+
+        <div class="view-caption">
+          <span class="view-caption__index">PRESENTATION STUDY / 01</span>
+          <p>One content model.<br />Three ways to reach it.</p>
+        </div>
+      </section>
+
+      <nav class="prototype-switcher" id="prototype-switcher" aria-label="Prototype variant switcher">
+        <button type="button" class="switcher-arrow" data-cycle="-1" aria-label="Previous variant">←</button>
+        <div class="switcher-copy">
+          <span>STRUCTURE</span>
+          <strong id="switcher-label"></strong>
+        </div>
+        <div class="switcher-dots" id="switcher-dots" aria-hidden="true"></div>
+        <button type="button" class="switcher-arrow" data-cycle="1" aria-label="Next variant">→</button>
+      </nav>
+
+      <p class="keyboard-hint">← → cycle · click controls to expose state</p>
+    </main>
+
+    <script type="module" src="/prototype/wrist-panel/app.js"></script>
+  </body>
+</html>
