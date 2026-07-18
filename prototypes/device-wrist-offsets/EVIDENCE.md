@@ -2,6 +2,14 @@
 
 Captured 2026-07-18 for [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12).
 
+## Artifact
+
+- Throwaway branch: [`prototype/issue-12-device-wrist-offsets`](https://github.com/xleepy/wrist-menu/tree/prototype/issue-12-device-wrist-offsets)
+- Runnable lab and setup: [`prototypes/device-wrist-offsets`](https://github.com/xleepy/wrist-menu/tree/prototype/issue-12-device-wrist-offsets/prototypes/device-wrist-offsets)
+- Exact physical gate: [`HITL-CHECKLIST.md`](https://github.com/xleepy/wrist-menu/blob/prototype/issue-12-device-wrist-offsets/prototypes/device-wrist-offsets/HITL-CHECKLIST.md)
+
+This is a progress artifact. The issue remains open because no agent-generated trace can substitute for a headset wearer's feedback.
+
 ## Deterministic findings
 
 `pnpm traces` replayed the pure boundary used by the WebXR harness and exposed these exact transitions:
