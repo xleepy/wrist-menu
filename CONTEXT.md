@@ -12,6 +12,10 @@ _Avoid_: Module, one-off menu
 The live, disposable realization of one Menu Definition within a Host Application's rendering lifecycle.
 _Avoid_: Handle, controller, singleton
 
+**Active Menu Ownership**:
+The exclusive relationship between one XR session and its currently enabled Wrist Menu Instance.
+_Avoid_: Global singleton, Selection Ownership
+
 **Host Application**:
 A VR application that consumes and configures the Wrist Menu Package.
 _Avoid_: Client, parent app
