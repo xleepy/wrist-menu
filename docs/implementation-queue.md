@@ -4,16 +4,15 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-- [Prototype wrist anchoring and intentional reveal](https://github.com/xleepy/wrist-menu/issues/3) — HITL logic prototype, promoted after the runtime research closed; it remains open until user feedback resolves the behavior.
+None.
 
 ## Ready
 
-None.
+- [Define cross-input selection semantics](https://github.com/xleepy/wrist-menu/issues/5) — both prerequisite prototypes are resolved; ready for a HITL grilling session.
 
 ## Blocked
 
-- [Define cross-input selection semantics](https://github.com/xleepy/wrist-menu/issues/5) — waiting for **Prototype wrist anchoring and intentional reveal**.
-- [Define the public menu and host-control contract](https://github.com/xleepy/wrist-menu/issues/6) — waiting for **Prototype wrist anchoring and intentional reveal** and **Define cross-input selection semantics**.
+- [Define the public menu and host-control contract](https://github.com/xleepy/wrist-menu/issues/6) — waiting for **Define cross-input selection semantics**.
 - [Design package boundaries and renderer integrations](https://github.com/xleepy/wrist-menu/issues/7) — waiting for **Define the public menu and host-control contract**.
 - [Set compatibility, performance, and validation gates](https://github.com/xleepy/wrist-menu/issues/8) — waiting for **Design package boundaries and renderer integrations**.
 - [Specify the external-consumer Example App](https://github.com/xleepy/wrist-menu/issues/9) — waiting for **Define the public menu and host-control contract** and **Design package boundaries and renderer integrations**.
