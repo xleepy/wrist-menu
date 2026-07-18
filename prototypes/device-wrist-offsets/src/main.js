@@ -10,6 +10,7 @@ import {
   presetsForSourceKind,
   snapshotState,
 } from './anchor-model.mjs'
+import { captureBrowserErrors, createVrTestLogger } from './vr-test-logger.mjs'
 import './style.css'
 
 const prototypeIdentity = Object.freeze({
@@ -17,6 +18,18 @@ const prototypeIdentity = Object.freeze({
   branch: 'prototype/issue-12-device-wrist-offsets',
   artifact: 'prototypes/device-wrist-offsets',
 })
+
+const vrTestLogger = import.meta.env.DEV
+  ? createVrTestLogger({
+      prototype: prototypeIdentity,
+      userAgent: navigator.userAgent,
+      secureContext: window.isSecureContext,
+    })
+  : null
+if (vrTestLogger) {
+  captureBrowserErrors(vrTestLogger)
+  window.__VR_TEST_LOG__ = vrTestLogger.record
+}
 
 const elements = Object.fromEntries([
   'device-target', 'os-version', 'browser-version', 'run-label', 'source-kind',
@@ -588,6 +601,7 @@ function recordObservation() {
 }
 
 async function copyEvidence() {
+  logEvent('evidence-copy-requested', { observationCount: run.observations.length })
   const evidence = JSON.stringify(buildEvidence(), null, 2)
   try {
     await navigator.clipboard.writeText(evidence)
@@ -676,6 +690,7 @@ function logConfigurationChange(reason) {
 function logEvent(type, details) {
   run.events.push({ at: new Date().toISOString(), type, details })
   if (run.events.length > 300) run.events.splice(0, run.events.length - 300)
+  vrTestLogger?.record(`prototype.${type}`, details)
 }
 
 function renderEventLog() {

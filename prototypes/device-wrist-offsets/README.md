@@ -26,6 +26,24 @@ adb reverse tcp:5173 tcp:5173
 
 Open `http://localhost:5173` in Meta Quest Browser. Alternatively, build with `pnpm --dir prototypes/device-wrist-offsets build` and serve `dist/` from any trusted HTTPS origin. WebXR will not start from an ordinary insecure LAN URL.
 
+### Local VR test logs
+
+The development server forwards prototype lifecycle, anchor-state, configuration, selection, haptic, observation, and evidence-copy events to a small same-origin listener. Uncaught browser errors and promise rejections are included too.
+
+Each server start prints the exact local output path. Logs are newline-delimited JSON under:
+
+```text
+prototypes/device-wrist-offsets/.local/vr-test-logs/device-wrist-offsets-<timestamp>.jsonl
+```
+
+The `.local/` directory is ignored by Git and requests are limited to 64 KiB. Logging runs only in the Vite development server; the ordinary static build has no logging side effects.
+
+For an explicit marker from the browser console:
+
+```js
+window.__VR_TEST_LOG__('tester.note', { note: 'left controller clipped the panel' })
+```
+
 The deterministic interruption evidence is one command:
 
 ```powershell
