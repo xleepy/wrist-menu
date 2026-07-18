@@ -84,6 +84,10 @@ _Avoid_: XRFrame, raw frame data
 The renderer-neutral report that an Eligible Selection Source approaches or intersects one Menu Item during a Frame Sample; it is evidence for interaction, not hover or selection.
 _Avoid_: Hit event, click target
 
+**Hit Region**:
+The presentation-owned oriented volume associated with one interactive Menu Item from which a Renderer Integration derives Target Observations.
+_Avoid_: Visible mesh, button bounds, collider
+
 **Renderer Integration**:
 The boundary that produces Frame Samples and Target Observations from a Host Application's rendering lifecycle and realizes Wrist Menu presentation state.
 _Avoid_: Framework plugin, separate renderer
