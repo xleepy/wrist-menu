@@ -4,17 +4,18 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-- [Design package boundaries and renderer integrations](https://github.com/xleepy/wrist-menu/issues/7) — active HITL architecture session covering module seams, public exports, dependencies, lifecycle ownership, and renderer integrations.
+None.
 
 ## Ready
 
+- [Specify the external-consumer Example App](https://github.com/xleepy/wrist-menu/issues/9) — public contract and package boundaries are resolved; ready for HITL grilling.
 - [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12) — pose, presentation, and selection prerequisites are resolved; ready for a physical Quest HITL prototype.
+- [Prototype the default Three.js presentation and continuous scrolling](https://github.com/xleepy/wrist-menu/issues/13) — renderer architecture is resolved; ready for a production-shaped Three.js/IWER/Quest HITL prototype.
 
 ## Blocked
 
-- [Set compatibility, performance, and validation gates](https://github.com/xleepy/wrist-menu/issues/8) — waiting for **Design package boundaries and renderer integrations**.
-- [Specify the external-consumer Example App](https://github.com/xleepy/wrist-menu/issues/9) — waiting for **Design package boundaries and renderer integrations**.
-- [Define publication, documentation, and repository workflow](https://github.com/xleepy/wrist-menu/issues/10) — waiting for **Design package boundaries and renderer integrations** and **Specify the external-consumer Example App**.
+- [Set compatibility, performance, and validation gates](https://github.com/xleepy/wrist-menu/issues/8) — waiting for **Prototype device-specific wrist offsets and tracking degradation** and **Prototype the default Three.js presentation and continuous scrolling**.
+- [Define publication, documentation, and repository workflow](https://github.com/xleepy/wrist-menu/issues/10) — waiting for **Specify the external-consumer Example App**.
 - [Choose the implementation sequence and close remaining gaps](https://github.com/xleepy/wrist-menu/issues/11) — waiting for **Set compatibility, performance, and validation gates**, **Specify the external-consumer Example App**, and **Define publication, documentation, and repository workflow**.
 
 ## Production boundary
