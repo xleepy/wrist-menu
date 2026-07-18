@@ -24,6 +24,10 @@ _Avoid_: Client, parent app
 A separate repository that consumes the Wrist Menu Package and demonstrates a realistic use case.
 _Avoid_: Use-case repo, library demo
 
+**Primitive Workshop**:
+The Example App scenario in which a user chooses, spawns, selects, and removes simple shapes while controlling grid behavior through a Wrist Menu.
+_Avoid_: Full editor, generic sandbox
+
 **Selection Source**:
 The tracked hand or motion controller through which a user targets a Wrist Menu item.
 _Avoid_: Pointer, input device
