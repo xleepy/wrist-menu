@@ -36,6 +36,14 @@ _Avoid_: Runtime mode, framework toggle
 The framework-neutral Primitive Workshop state and transitions shared by both Example Variants.
 _Avoid_: Renderer abstraction, shared scene implementation
 
+**Placement Cursor**:
+The Host Application-owned tabletop marker at which the next selected primitive will be spawned.
+_Avoid_: Menu pointer, teleport target
+
+**Workshop Object**:
+A cube, sphere, or cylinder spawned into the Primitive Workshop and available for scene selection or removal.
+_Avoid_: Menu Item, arbitrary scene entity
+
 **Selection Source**:
 The tracked hand or motion controller through which a user targets a Wrist Menu item.
 _Avoid_: Pointer, input device
