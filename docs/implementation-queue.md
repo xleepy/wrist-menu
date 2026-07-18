@@ -4,11 +4,10 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-None.
+- [Design package boundaries and renderer integrations](https://github.com/xleepy/wrist-menu/issues/7) — active HITL architecture session covering module seams, public exports, dependencies, lifecycle ownership, and renderer integrations.
 
 ## Ready
 
-- [Design package boundaries and renderer integrations](https://github.com/xleepy/wrist-menu/issues/7) — public contract resolved; ready for HITL grilling.
 - [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12) — pose, presentation, and selection prerequisites are resolved; ready for a physical Quest HITL prototype.
 
 ## Blocked
