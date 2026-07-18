@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10151d" />
+    <title>Throwaway Wrist Offset Lab</title>
+  </head>
+  <body>
+    <main id="lab">
+      <header>
+        <p class="eyebrow">THROWAWAY PROTOTYPE · ISSUE 12</p>
+        <h1>Wrist offset & tracking degradation lab</h1>
+        <p>
+          Candidate values are calibration hypotheses, not package defaults. Real-device
+          observations decide what can ship.
+        </p>
+      </header>
+
+      <section class="card controls" aria-labelledby="session-heading">
+        <div class="section-heading">
+          <div>
+            <p class="step">1 · identify the run</p>
+            <h2 id="session-heading">Device and runtime</h2>
+          </div>
+          <div id="xr-entry"></div>
+        </div>
+
+        <div class="form-grid">
+          <label>
+            Device
+            <select id="device-target"></select>
+          </label>
+          <label>
+            Horizon OS version
+            <input id="os-version" placeholder="for example: v81" />
+          </label>
+          <label>
+            Meta Quest Browser version
+            <input id="browser-version" placeholder="copy from Browser settings" />
+          </label>
+          <label>
+            Run label
+            <input id="run-label" placeholder="for example: Quest 2 seated" />
+          </label>
+        </div>
+      </section>
+
+      <section class="card controls" aria-labelledby="calibration-heading">
+        <div class="section-heading">
+          <div>
+            <p class="step">2 · choose a hypothesis</p>
+            <h2 id="calibration-heading">Anchor configuration</h2>
+          </div>
+          <span class="badge" id="preset-status">unvalidated</span>
+        </div>
+
+        <div class="form-grid">
+          <label>
+            Anchor source
+            <select id="source-kind">
+              <option value="hand">Tracked hand wrist</option>
+              <option value="controller">Controller grip wrist proxy</option>
+            </select>
+          </label>
+          <label>
+            Menu wrist
+            <select id="menu-wrist">
+              <option value="left">Left</option>
+              <option value="right">Right</option>
+            </select>
+          </label>
+          <label>
+            Activation
+            <select id="activation-mode">
+              <option value="calibration">Calibration: diagnostic surface always visible</option>
+              <option value="automatic">Automatic: 35°/50° + dwell</option>
+            </select>
+          </label>
+          <label>
+            Device/profile preset
+            <select id="profile-preset"></select>
+          </label>
+        </div>
+
+        <p id="preset-hypothesis" class="callout"></p>
+
+        <div class="offset-grid" aria-label="Concrete handedness-specific offset">
+          <label>X translation (m)<input id="offset-x" type="number" step="0.001" /></label>
+          <label>Y translation (m)<input id="offset-y" type="number" step="0.001" /></label>
+          <label>Z translation (m)<input id="offset-z" type="number" step="0.001" /></label>
+          <label>X rotation (°)<input id="rotation-x" type="number" step="1" /></label>
+          <label>Y rotation (°)<input id="rotation-y" type="number" step="1" /></label>
+          <label>Z rotation (°)<input id="rotation-z" type="number" step="1" /></label>
+        </div>
+
+        <div class="timing-row">
+          <label>Visual grace (ms)<input id="grace-ms" type="number" min="0" step="25" value="250" /></label>
+          <label>Fresh dwell (ms)<input id="reacquire-ms" type="number" min="0" step="25" value="200" /></label>
+          <label class="check"><input id="probe-haptics" type="checkbox" checked /> Probe optional haptic on controller select</label>
+        </div>
+      </section>
+
+      <section class="card state-card" aria-labelledby="state-heading">
+        <div class="section-heading">
+          <div>
+            <p class="step">3 · inspect the full state</p>
+            <h2 id="state-heading">Current frame</h2>
+          </div>
+          <span class="status-dot" id="state-dot"></span>
+        </div>
+        <dl id="state-readout"></dl>
+        <p class="fine-print">
+          During visual grace, the last transform may remain visible in amber, but this lab
+          cancels pending intent and marks the surface non-interactive immediately.
+        </p>
+      </section>
+
+      <section class="card controls" aria-labelledby="observation-heading">
+        <div class="section-heading">
+          <div>
+            <p class="step">4 · let the physical tester speak</p>
+            <h2 id="observation-heading">Record one observation</h2>
+          </div>
+          <span id="observation-count" class="badge">0 recorded</span>
+        </div>
+
+        <div class="form-grid observation-grid">
+          <label>
+            Condition
+            <select id="condition">
+              <option value="anchor-comfort">Anchor comfort / reach</option>
+              <option value="hand-occlusion">Hand occlusion / grace</option>
+              <option value="controller-loss">Controller pose loss / grace</option>
+              <option value="source-replacement">Hands ↔ controllers replacement</option>
+              <option value="handedness">Left/right handedness parity</option>
+              <option value="haptics">Optional haptic capability</option>
+            </select>
+          </label>
+          <label>
+            Verdict
+            <select id="verdict">
+              <option value="pass">Pass</option>
+              <option value="adjust">Adjust</option>
+              <option value="fail">Fail</option>
+            </select>
+          </label>
+          <label class="wide">
+            Tester note
+            <textarea id="observation-note" rows="3" placeholder="What felt centered, clipped, lagged, or surprised you?"></textarea>
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button id="record-observation" type="button">Record observation</button>
+          <button id="copy-evidence" type="button" class="secondary">Copy evidence JSON</button>
+          <button id="clear-run" type="button" class="quiet">Clear in-memory run</button>
+        </div>
+        <p id="copy-status" role="status" class="fine-print"></p>
+      </section>
+
+      <section class="card log-card" aria-labelledby="log-heading">
+        <div class="section-heading">
+          <div>
+            <p class="step">Diagnostic only</p>
+            <h2 id="log-heading">Lifecycle event log</h2>
+          </div>
+        </div>
+        <pre id="event-log"></pre>
+      </section>
+    </main>
+
+    <div id="canvas-shell" aria-hidden="true"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,149 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0b0f15;
+  color: #e8eef5;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 15% 5%, rgba(54, 137, 180, 0.18), transparent 30rem),
+    #0b0f15;
+}
+
+#lab {
+  position: relative;
+  z-index: 2;
+  width: min(760px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 3rem 0 7rem;
+}
+
+header { margin-bottom: 1.5rem; }
+h1, h2, p { margin-top: 0; }
+h1 { max-width: 16ch; font-size: clamp(2rem, 6vw, 4.6rem); line-height: 0.98; letter-spacing: -0.04em; }
+h2 { margin-bottom: 0; font-size: 1.2rem; }
+header > p:last-child { max-width: 52rem; color: #9fb0c1; }
+
+.eyebrow, .step {
+  margin-bottom: 0.35rem;
+  color: #72d8ff;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.card {
+  margin-top: 1rem;
+  padding: 1.15rem;
+  border: 1px solid #273240;
+  border-radius: 1rem;
+  background: rgba(17, 23, 32, 0.94);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
+}
+
+.section-heading, .button-row, .timing-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.form-grid, .offset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.offset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.observation-grid .wide { grid-column: 1 / -1; }
+
+label {
+  display: grid;
+  gap: 0.35rem;
+  color: #aebdcb;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+input, select, textarea, button {
+  border: 1px solid #344252;
+  border-radius: 0.6rem;
+  background: #0e141c;
+  color: #eff7ff;
+  font: inherit;
+}
+
+input, select, textarea { width: 100%; padding: 0.65rem 0.7rem; }
+textarea { resize: vertical; }
+button { padding: 0.7rem 1rem; background: #57c9f4; color: #071018; font-weight: 800; cursor: pointer; }
+button.secondary { background: #172635; color: #c8edff; }
+button.quiet { border-color: transparent; background: transparent; color: #9fb0c1; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #72d8ff; outline-offset: 2px; }
+
+.timing-row { align-items: end; flex-wrap: wrap; margin-top: 0.85rem; }
+.timing-row label { flex: 1 1 9rem; }
+.timing-row .check { display: flex; flex: 2 1 18rem; align-items: center; }
+.check input { width: auto; }
+
+.callout {
+  margin: 0.9rem 0 0;
+  padding: 0.7rem 0.8rem;
+  border-left: 3px solid #e7b85a;
+  background: #1d1a13;
+  color: #d8c9a5;
+  font-size: 0.84rem;
+}
+
+.badge {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid #3d4a57;
+  border-radius: 999px;
+  color: #a8bac8;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.state-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 1rem;
+  margin: 1rem 0 0;
+}
+
+.state-card dl > div { padding-bottom: 0.45rem; border-bottom: 1px solid #202a35; }
+dt { color: #7f91a2; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+dd { margin: 0.2rem 0 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+
+.status-dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: #77818b; box-shadow: 0 0 0 5px rgba(119, 129, 139, 0.12); }
+.status-dot.live { background: #67e58c; box-shadow: 0 0 0 5px rgba(103, 229, 140, 0.12); }
+.status-dot.warn { background: #e7b85a; box-shadow: 0 0 0 5px rgba(231, 184, 90, 0.12); }
+
+.button-row { justify-content: flex-start; flex-wrap: wrap; margin-top: 1rem; }
+.fine-print { margin: 0.8rem 0 0; color: #7f91a2; font-size: 0.78rem; }
+.log-card pre { max-height: 18rem; overflow: auto; white-space: pre-wrap; color: #9fb0c1; font-size: 0.72rem; }
+
+#canvas-shell {
+  position: fixed;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+}
+
+#canvas-shell canvas { width: 100%; height: 100%; }
+#xr-entry button { position: static !important; width: auto !important; min-width: 8rem; }
+
+@media (max-width: 620px) {
+  #lab { width: min(100% - 1rem, 760px); padding-top: 1.5rem; }
+  .form-grid, .offset-grid, .state-card dl { grid-template-columns: 1fr; }
+  .section-heading { align-items: flex-start; }
+}
