@@ -28,6 +28,10 @@ _Avoid_: Use-case repo, library demo
 The Example App scenario in which a user chooses, spawns, selects, and removes simple shapes while controlling grid behavior through a Wrist Menu.
 _Avoid_: Full editor, generic sandbox
 
+**Example Variant**:
+An independently bootstrapped realization of the Primitive Workshop using one supported Renderer Integration; the Example App contains React and vanilla variants.
+_Avoid_: Runtime mode, framework toggle
+
 **Selection Source**:
 The tracked hand or motion controller through which a user targets a Wrist Menu item.
 _Avoid_: Pointer, input device
