@@ -4,13 +4,13 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-- None.
+- [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12) — active isolated prototype session covering tracked-hand offsets, Controller Wrist Proxy presets, pose confidence, and tracking-loss behavior.
+- [Prototype the default Three.js presentation and continuous scrolling](https://github.com/xleepy/wrist-menu/issues/13) — active isolated prototype session covering the production-shaped Command slab, physical geometry, text, clipping, virtualization, and drag interaction.
+- [Define publication, documentation, and repository workflow](https://github.com/xleepy/wrist-menu/issues/10) — active isolated decision session covering package publication, documentation, CI, release, and cross-repository coordination.
 
 ## Ready
 
-- [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12) — pose, presentation, and selection prerequisites are resolved; ready for a physical Quest HITL prototype.
-- [Prototype the default Three.js presentation and continuous scrolling](https://github.com/xleepy/wrist-menu/issues/13) — renderer architecture is resolved; ready for a production-shaped Three.js/IWER/Quest HITL prototype.
-- [Define publication, documentation, and repository workflow](https://github.com/xleepy/wrist-menu/issues/10) — package boundaries and the external-consumer Example App contract are resolved; ready for the cross-repository publication workflow decision.
+- None.
 
 ## Blocked
 
