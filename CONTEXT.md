@@ -108,6 +108,10 @@ _Avoid_: Framework plugin, separate renderer
 The React Renderer Integration boundary that prevents a host scene target behind an active Wrist Menu Hit Region from receiving the same synthetic pointer action without deciding menu semantics.
 _Avoid_: Selection handler, raw event capture
 
+**Scene Input Claim**:
+The temporary assertion that a Selection Source's current physical action belongs to the Wrist Menu and should not also activate Host Application scene content.
+_Avoid_: Selection Ownership, Scroll Ownership, event cancellation
+
 **Presentation Model**:
 The read-only renderer-facing description of Menu Item content and visual cues derived from the current Host Snapshot and Interaction State.
 _Avoid_: Host Snapshot, scene graph, core state
