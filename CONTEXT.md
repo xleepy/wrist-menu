@@ -88,6 +88,10 @@ _Avoid_: Hit event, click target
 The boundary that produces Frame Samples and Target Observations from a Host Application's rendering lifecycle and realizes Wrist Menu presentation state.
 _Avoid_: Framework plugin, separate renderer
 
+**Presentation Model**:
+The read-only renderer-facing description of Menu Item content and visual cues derived from the current Host Snapshot and Interaction State.
+_Avoid_: Host Snapshot, scene graph, core state
+
 **Selection Intent**:
 The source-independent request emitted after a Selection Commit for the Host Application to interpret.
 _Avoid_: Click event, automatic state update
