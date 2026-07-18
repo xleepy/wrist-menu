@@ -20,6 +20,10 @@ _Avoid_: Use-case repo, library demo
 The tracked hand or motion controller through which a user targets a Wrist Menu item.
 _Avoid_: Pointer, input device
 
+**Eligible Selection Source**:
+A Selection Source permitted to operate the current wrist's menu, normally belonging to the opposite hand.
+_Avoid_: Active controller, primary pointer
+
 **Selection Ownership**:
 The temporary exclusive relationship between one Selection Source and one menu item while the user's intent is pending.
 _Avoid_: Focus lock, pointer capture
@@ -31,3 +35,7 @@ _Avoid_: Click, poke, trigger
 **Selection Cancellation**:
 The end of a pending selection without activating a Wrist Menu item.
 _Avoid_: Failed click, aborted trigger
+
+**Neutral Selection State**:
+The safe state in which a Selection Source has no pending intent and may acquire new Selection Ownership.
+_Avoid_: Idle pointer, cooldown
