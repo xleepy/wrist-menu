@@ -60,6 +60,10 @@ _Avoid_: Props, patch, partial config
 A stable, labeled entry in a Menu Definition: an Action Item, Toggle Item, choice option, or separator.
 _Avoid_: Button, control
 
+**Menu Value**:
+A portable scalar application value: a boolean for a Toggle Item or a string or finite number for a Choice Group option.
+_Avoid_: Object payload, callback argument
+
 **Action Item**:
 A Menu Item whose Selection Intent requests an operation without proposing a new displayed value.
 _Avoid_: Command button, callback item
