@@ -4,17 +4,17 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-- [Define the public menu and host-control contract](https://github.com/xleepy/wrist-menu/issues/6) — active HITL design session covering public content, state ownership, configuration, events, and lifecycle behavior.
+None.
 
 ## Ready
 
+- [Design package boundaries and renderer integrations](https://github.com/xleepy/wrist-menu/issues/7) — public contract resolved; ready for HITL grilling.
 - [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12) — pose, presentation, and selection prerequisites are resolved; ready for a physical Quest HITL prototype.
 
 ## Blocked
 
-- [Design package boundaries and renderer integrations](https://github.com/xleepy/wrist-menu/issues/7) — waiting for **Define the public menu and host-control contract**.
 - [Set compatibility, performance, and validation gates](https://github.com/xleepy/wrist-menu/issues/8) — waiting for **Design package boundaries and renderer integrations**.
-- [Specify the external-consumer Example App](https://github.com/xleepy/wrist-menu/issues/9) — waiting for **Define the public menu and host-control contract** and **Design package boundaries and renderer integrations**.
+- [Specify the external-consumer Example App](https://github.com/xleepy/wrist-menu/issues/9) — waiting for **Design package boundaries and renderer integrations**.
 - [Define publication, documentation, and repository workflow](https://github.com/xleepy/wrist-menu/issues/10) — waiting for **Design package boundaries and renderer integrations** and **Specify the external-consumer Example App**.
 - [Choose the implementation sequence and close remaining gaps](https://github.com/xleepy/wrist-menu/issues/11) — waiting for **Set compatibility, performance, and validation gates**, **Specify the external-consumer Example App**, and **Define publication, documentation, and repository workflow**.
 
