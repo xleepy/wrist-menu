@@ -1,1 +1,4 @@
 .worktrees/
+node_modules/
+dist/
+prototype-three-presentation/src/generated/bundled-font-data.js

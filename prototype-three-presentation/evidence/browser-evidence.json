@@ -1,0 +1,669 @@
+{
+  "schema": "wrist-menu-three-presentation-browser-evidence/v1",
+  "browserExecutable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "profiles": [
+    {
+      "capturedAt": "2026-07-18T21:28:02.397Z",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+      "xr": {
+        "presenting": false,
+        "frameRate": null,
+        "visibilityState": null
+      },
+      "geometry": {
+        "panelMm": [
+          180,
+          142
+        ],
+        "viewportMm": [
+          164,
+          96
+        ],
+        "rowMm": 18,
+        "handThresholdMm": 8,
+        "controllerThresholdMm": 12
+      },
+      "presentation": {
+        "profile": "A",
+        "scrollOffset": 0,
+        "maxScroll": 0.24200000000000002,
+        "anchor": {
+          "itemId": "spawn-cube",
+          "intraItemOffset": 0
+        },
+        "activePoolSlots": 6,
+        "activeHitRegions": 4,
+        "targetable": true,
+        "atlasUploads": 1
+      },
+      "resourceEstimate": {
+        "atlasTextures": 1,
+        "atlasBytes": 8388608,
+        "poolCapacity": 12,
+        "explicitHitRegionCapacity": 12,
+        "presentationBatches": 3
+      },
+      "renderer": {
+        "calls": 8,
+        "triangles": 540,
+        "lines": 223,
+        "geometries": 10,
+        "textures": 1,
+        "programs": 7
+      },
+      "updateMs": {
+        "p50": 0.30000000074505806,
+        "p95": 0.30000000074505806,
+        "p99": 0.30000000074505806,
+        "samples": 3
+      },
+      "recentEvents": []
+    },
+    {
+      "capturedAt": "2026-07-18T21:28:03.770Z",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+      "xr": {
+        "presenting": false,
+        "frameRate": null,
+        "visibilityState": null
+      },
+      "geometry": {
+        "panelMm": [
+          192,
+          158
+        ],
+        "viewportMm": [
+          176,
+          108
+        ],
+        "rowMm": 20,
+        "handThresholdMm": 9,
+        "controllerThresholdMm": 13
+      },
+      "presentation": {
+        "profile": "B",
+        "scrollOffset": 0,
+        "maxScroll": 0.27300000000000013,
+        "anchor": {
+          "itemId": "spawn-cube",
+          "intraItemOffset": 0
+        },
+        "activePoolSlots": 6,
+        "activeHitRegions": 4,
+        "targetable": true,
+        "atlasUploads": 1
+      },
+      "resourceEstimate": {
+        "atlasTextures": 1,
+        "atlasBytes": 8388608,
+        "poolCapacity": 12,
+        "explicitHitRegionCapacity": 12,
+        "presentationBatches": 3
+      },
+      "renderer": {
+        "calls": 8,
+        "triangles": 540,
+        "lines": 223,
+        "geometries": 10,
+        "textures": 1,
+        "programs": 7
+      },
+      "updateMs": {
+        "p50": 0,
+        "p95": 0.10000000149011612,
+        "p99": 0.19999999925494194,
+        "samples": 44
+      },
+      "recentEvents": []
+    },
+    {
+      "capturedAt": "2026-07-18T21:28:04.915Z",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+      "xr": {
+        "presenting": false,
+        "frameRate": null,
+        "visibilityState": null
+      },
+      "geometry": {
+        "panelMm": [
+          168,
+          128
+        ],
+        "viewportMm": [
+          152,
+          84
+        ],
+        "rowMm": 16,
+        "handThresholdMm": 7,
+        "controllerThresholdMm": 10
+      },
+      "presentation": {
+        "profile": "C",
+        "scrollOffset": 0,
+        "maxScroll": 0.21640000000000004,
+        "anchor": {
+          "itemId": "spawn-cube",
+          "intraItemOffset": 0
+        },
+        "activePoolSlots": 6,
+        "activeHitRegions": 4,
+        "targetable": true,
+        "atlasUploads": 1
+      },
+      "resourceEstimate": {
+        "atlasTextures": 1,
+        "atlasBytes": 8388608,
+        "poolCapacity": 12,
+        "explicitHitRegionCapacity": 12,
+        "presentationBatches": 3
+      },
+      "renderer": {
+        "calls": 8,
+        "triangles": 540,
+        "lines": 223,
+        "geometries": 10,
+        "textures": 1,
+        "programs": 7
+      },
+      "updateMs": {
+        "p50": 0,
+        "p95": 0.10000000149011612,
+        "p99": 0.19999999925494194,
+        "samples": 46
+      },
+      "recentEvents": []
+    }
+  ],
+  "actualDesktopInteraction": {
+    "tapEvents": [
+      {
+        "frame": 20,
+        "type": "selection-pending",
+        "source": "controller",
+        "targetId": "spawn-cube"
+      },
+      {
+        "frame": 20,
+        "type": "selection-commit",
+        "targetId": "spawn-cube",
+        "source": "controller"
+      }
+    ],
+    "dragEvents": [
+      {
+        "frame": 23,
+        "type": "selection-pending",
+        "source": "controller",
+        "targetId": "spawn-cube"
+      },
+      {
+        "frame": 25,
+        "type": "selection-cancelled",
+        "reason": "scroll-threshold",
+        "targetId": "spawn-cube"
+      },
+      {
+        "frame": 25,
+        "type": "scroll-ownership-acquired",
+        "source": "controller",
+        "threshold": 0.012,
+        "movement": 0.015108231965427654
+      },
+      {
+        "frame": 25,
+        "type": "scroll-changed",
+        "scrollOffset": 0.015108231965427654,
+        "movement": 0.015108231965427654
+      },
+      {
+        "frame": 26,
+        "type": "scroll-changed",
+        "scrollOffset": 0.020138405687052607,
+        "movement": 0.020138405687052607
+      },
+      {
+        "frame": 27,
+        "type": "scroll-ownership-released",
+        "targetableFrame": 28
+      },
+      {
+        "frame": 28,
+        "type": "targets-rearmed"
+      }
+    ],
+    "disabledEvents": [
+      {
+        "frame": 29,
+        "type": "selection-pending",
+        "source": "controller",
+        "targetId": "clear-selection"
+      },
+      {
+        "frame": 29,
+        "type": "unavailable-feedback",
+        "targetId": "clear-selection"
+      }
+    ],
+    "postInteractionSnapshot": {
+      "capturedAt": "2026-07-18T21:28:06.189Z",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+      "xr": {
+        "presenting": false,
+        "frameRate": null,
+        "visibilityState": null
+      },
+      "geometry": {
+        "panelMm": [
+          180,
+          142
+        ],
+        "viewportMm": [
+          164,
+          96
+        ],
+        "rowMm": 18,
+        "handThresholdMm": 8,
+        "controllerThresholdMm": 12
+      },
+      "presentation": {
+        "profile": "A",
+        "scrollOffset": 0.020138405687052607,
+        "maxScroll": 0.24200000000000002,
+        "anchor": {
+          "itemId": "spawn-sphere",
+          "intraItemOffset": 0.00013840568705261042
+        },
+        "activePoolSlots": 7,
+        "activeHitRegions": 3,
+        "targetable": true,
+        "atlasUploads": 3
+      },
+      "resourceEstimate": {
+        "atlasTextures": 1,
+        "atlasBytes": 8388608,
+        "poolCapacity": 12,
+        "explicitHitRegionCapacity": 12,
+        "presentationBatches": 3
+      },
+      "renderer": {
+        "calls": 8,
+        "triangles": 544,
+        "lines": 223,
+        "geometries": 10,
+        "textures": 1,
+        "programs": 7
+      },
+      "updateMs": {
+        "p50": 0,
+        "p95": 0.10000000149011612,
+        "p99": 0.10000000149011612,
+        "samples": 28
+      },
+      "recentEvents": [
+        {
+          "frame": 23,
+          "type": "selection-pending",
+          "source": "controller",
+          "targetId": "spawn-cube"
+        },
+        {
+          "frame": 25,
+          "type": "selection-cancelled",
+          "reason": "scroll-threshold",
+          "targetId": "spawn-cube"
+        },
+        {
+          "frame": 25,
+          "type": "scroll-ownership-acquired",
+          "source": "controller",
+          "threshold": 0.012,
+          "movement": 0.015108231965427654
+        },
+        {
+          "frame": 25,
+          "type": "scroll-changed",
+          "scrollOffset": 0.015108231965427654,
+          "movement": 0.015108231965427654
+        },
+        {
+          "frame": 26,
+          "type": "scroll-changed",
+          "scrollOffset": 0.020138405687052607,
+          "movement": 0.020138405687052607
+        },
+        {
+          "frame": 27,
+          "type": "scroll-ownership-released",
+          "targetableFrame": 28
+        },
+        {
+          "frame": 28,
+          "type": "targets-rearmed"
+        }
+      ]
+    }
+  },
+  "deterministicTrace": {
+    "schema": "wrist-menu-three-presentation-trace/v1",
+    "profile": {
+      "key": "A",
+      "panelMm": [
+        180,
+        142
+      ],
+      "viewportMm": [
+        164,
+        96
+      ],
+      "rowMm": 18,
+      "thresholdsMm": {
+        "hand": 8,
+        "controller": 12
+      }
+    },
+    "pool": {
+      "capacity": 12,
+      "samples": [
+        {
+          "scrollOffset": 0,
+          "activeSlots": 6,
+          "firstItem": "spawn-cube",
+          "intraItemOffset": 0
+        },
+        {
+          "scrollOffset": 0.037,
+          "activeSlots": 8,
+          "firstItem": "spawn-sphere",
+          "intraItemOffset": 0.017
+        },
+        {
+          "scrollOffset": 0.242,
+          "activeSlots": 7,
+          "firstItem": "material-gloss",
+          "intraItemOffset": 0.012
+        }
+      ]
+    },
+    "interactions": {
+      "handUnderThreshold": [
+        {
+          "type": "selection-pending",
+          "source": "hand",
+          "targetId": "snap-grid"
+        },
+        {
+          "type": "selection-commit",
+          "targetId": "snap-grid",
+          "source": "hand"
+        }
+      ],
+      "handAtThreshold": [
+        {
+          "type": "selection-pending",
+          "source": "hand",
+          "targetId": "snap-grid"
+        },
+        {
+          "type": "selection-cancelled",
+          "reason": "scroll-threshold",
+          "targetId": "snap-grid"
+        },
+        {
+          "type": "scroll-ownership-acquired",
+          "source": "hand",
+          "threshold": 0.008,
+          "movement": 0.008
+        },
+        {
+          "type": "scroll-changed",
+          "scrollOffset": 0.048,
+          "movement": 0.008
+        },
+        {
+          "type": "scroll-ownership-released",
+          "targetableFrame": 12
+        },
+        {
+          "type": "targets-rearmed",
+          "frame": 12
+        }
+      ],
+      "controllerUnderThreshold": [
+        {
+          "type": "selection-pending",
+          "source": "controller",
+          "targetId": "snap-grid"
+        },
+        {
+          "type": "selection-commit",
+          "targetId": "snap-grid",
+          "source": "controller"
+        }
+      ],
+      "controllerAtThreshold": [
+        {
+          "type": "selection-pending",
+          "source": "controller",
+          "targetId": "snap-grid"
+        },
+        {
+          "type": "selection-cancelled",
+          "reason": "scroll-threshold",
+          "targetId": "snap-grid"
+        },
+        {
+          "type": "scroll-ownership-acquired",
+          "source": "controller",
+          "threshold": 0.012,
+          "movement": 0.012
+        },
+        {
+          "type": "scroll-changed",
+          "scrollOffset": 0.052,
+          "movement": 0.012
+        },
+        {
+          "type": "scroll-ownership-released",
+          "targetableFrame": 12
+        },
+        {
+          "type": "targets-rearmed",
+          "frame": 12
+        }
+      ]
+    }
+  },
+  "iwerProbe": {
+    "immersiveVr": true,
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/33.0.0.x.x.x Chrome/126.0.6478.122 VR Safari/537.36"
+  },
+  "iwerSessionSnapshot": {
+    "capturedAt": "2026-07-18T21:28:07.619Z",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/33.0.0.x.x.x Chrome/126.0.6478.122 VR Safari/537.36",
+    "xr": {
+      "presenting": true,
+      "frameRate": 72,
+      "visibilityState": "visible"
+    },
+    "geometry": {
+      "panelMm": [
+        180,
+        142
+      ],
+      "viewportMm": [
+        164,
+        96
+      ],
+      "rowMm": 18,
+      "handThresholdMm": 8,
+      "controllerThresholdMm": 12
+    },
+    "presentation": {
+      "profile": "A",
+      "scrollOffset": 0,
+      "maxScroll": 0.24200000000000002,
+      "anchor": {
+        "itemId": "spawn-cube",
+        "intraItemOffset": 0
+      },
+      "activePoolSlots": 6,
+      "activeHitRegions": 4,
+      "targetable": true,
+      "atlasUploads": 1
+    },
+    "resourceEstimate": {
+      "atlasTextures": 1,
+      "atlasBytes": 8388608,
+      "poolCapacity": 12,
+      "explicitHitRegionCapacity": 12,
+      "presentationBatches": 3
+    },
+    "renderer": {
+      "calls": 20,
+      "triangles": 1080,
+      "lines": 450,
+      "geometries": 12,
+      "textures": 1,
+      "programs": 7
+    },
+    "updateMs": {
+      "p50": 0,
+      "p95": 0.10000000149011612,
+      "p99": 0.10000000149011612,
+      "samples": 14
+    },
+    "recentEvents": [
+      {
+        "frame": 11,
+        "type": "xr-review-slab-staged",
+        "distance": 0.5,
+        "verticalOffset": -0.15
+      }
+    ]
+  },
+  "finalSnapshot": {
+    "capturedAt": "2026-07-18T21:28:07.669Z",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/33.0.0.x.x.x Chrome/126.0.6478.122 VR Safari/537.36",
+    "xr": {
+      "presenting": false,
+      "frameRate": null,
+      "visibilityState": null
+    },
+    "geometry": {
+      "panelMm": [
+        180,
+        142
+      ],
+      "viewportMm": [
+        164,
+        96
+      ],
+      "rowMm": 18,
+      "handThresholdMm": 8,
+      "controllerThresholdMm": 12
+    },
+    "presentation": {
+      "profile": "A",
+      "scrollOffset": 0,
+      "maxScroll": 0.24200000000000002,
+      "anchor": {
+        "itemId": "spawn-cube",
+        "intraItemOffset": 0
+      },
+      "activePoolSlots": 6,
+      "activeHitRegions": 4,
+      "targetable": true,
+      "atlasUploads": 1
+    },
+    "resourceEstimate": {
+      "atlasTextures": 1,
+      "atlasBytes": 8388608,
+      "poolCapacity": 12,
+      "explicitHitRegionCapacity": 12,
+      "presentationBatches": 3
+    },
+    "renderer": {
+      "calls": 8,
+      "triangles": 540,
+      "lines": 223,
+      "geometries": 12,
+      "textures": 1,
+      "programs": 7
+    },
+    "updateMs": {
+      "p50": 0,
+      "p95": 0.10000000149011612,
+      "p99": 0.10000000149011612,
+      "samples": 18
+    },
+    "recentEvents": [
+      {
+        "frame": 11,
+        "type": "xr-review-slab-staged",
+        "distance": 0.5,
+        "verticalOffset": -0.15
+      }
+    ]
+  },
+  "resourceUrls": [
+    "http://127.0.0.1:4173/@vite/client",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/main.js",
+    "http://127.0.0.1:4173/node_modules/vite/dist/client/env.mjs",
+    "http://127.0.0.1:4173/node_modules/.vite/deps/three.js?v=5ed6a880",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/styles.css",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/config.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/fixtures/menu-definition.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/model/drag-session.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/performance-sampler.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/presentation/bundled-font.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/presentation/command-slab.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/scripts/trace-scenarios.mjs",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/generated/bundled-font-data.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/model/virtualized-layout.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/presentation/atlas.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/presentation/quad-batch.js"
+  ],
+  "consoleMessages": [
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    }
+  ],
+  "pageErrors": []
+}

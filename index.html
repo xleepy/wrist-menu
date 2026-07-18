@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5' fill='%239bffd7'/%3E%3C/svg%3E" />
+    <title>Three.js Command slab prototype</title>
+  </head>
+  <body>
+    <main id="prototype-shell">
+      <header class="prototype-header">
+        <div>
+          <p class="eyebrow"><span></span> Throwaway HITL artifact · issue 13</p>
+          <h1>Command slab / Three.js fidelity slice</h1>
+        </div>
+        <button id="enter-xr" type="button">Enter XR</button>
+      </header>
+
+      <section class="scene-frame" aria-label="Interactive Three.js presentation prototype">
+        <canvas id="scene"></canvas>
+        <div class="scene-vignette" aria-hidden="true"></div>
+
+        <aside class="hud hud--left">
+          <p class="hud-label">Evaluation profile</p>
+          <strong id="profile-name">A — Balanced</strong>
+          <dl id="geometry-readout"></dl>
+          <p class="hud-note">All dimensions are scene metres rendered as physical millimetres.</p>
+        </aside>
+
+        <aside class="hud hud--right">
+          <p class="hud-label">Live evidence</p>
+          <strong id="ownership-state">Neutral Selection State</strong>
+          <dl id="resource-readout"></dl>
+          <ol id="event-log" aria-label="Recent interaction events"></ol>
+        </aside>
+
+        <div class="source-switcher" role="group" aria-label="Selection Source proxy">
+          <span>Desktop proxy</span>
+          <button type="button" data-source="controller" aria-pressed="true">Controller ray</button>
+          <button type="button" data-source="hand" aria-pressed="false">Direct hand</button>
+          <button id="debug-toggle" type="button" aria-pressed="false">Hit Regions</button>
+          <button id="evidence-copy" type="button">Copy telemetry</button>
+        </div>
+
+        <p class="scene-caption">Drag vertically on a row or the viewport · wheel also scrolls · no inertia</p>
+      </section>
+
+      <nav id="prototype-switcher" class="prototype-switcher" aria-label="Prototype profile switcher">
+        <button type="button" data-cycle="-1" aria-label="Previous profile">←</button>
+        <div>
+          <span>PHYSICAL GEOMETRY</span>
+          <strong id="switcher-label">A — Balanced</strong>
+        </div>
+        <div id="switcher-dots" class="switcher-dots" aria-hidden="true"></div>
+        <button type="button" data-cycle="1" aria-label="Next profile">→</button>
+      </nav>
+    </main>
+    <script type="module" src="/prototype-three-presentation/src/main.js"></script>
+  </body>
+</html>

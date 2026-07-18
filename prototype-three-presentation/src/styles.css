@@ -1,0 +1,165 @@
+:root {
+  color-scheme: dark;
+  font-family: "WristMenuInter", Inter, system-ui, sans-serif;
+  --ink: #e8f7f3;
+  --muted: #79928d;
+  --dim: #4d6661;
+  --surface: #071011;
+  --line: rgba(172, 233, 217, 0.18);
+  --accent: #9bffd7;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; min-width: 320px; min-height: 100%; background: #020607; }
+
+body { min-height: 100vh; overflow: hidden; color: var(--ink); }
+
+button { color: inherit; font: inherit; }
+button:focus-visible { outline: 2px solid white; outline-offset: 3px; }
+
+#prototype-shell {
+  position: relative;
+  min-height: 100vh;
+  padding: 20px;
+  background:
+    radial-gradient(circle at 25% 30%, rgba(54, 174, 143, .12), transparent 38%),
+    radial-gradient(circle at 76% 42%, rgba(90, 86, 194, .13), transparent 42%),
+    #020607;
+}
+
+.prototype-header {
+  position: fixed;
+  z-index: 20;
+  top: 36px;
+  left: 50%;
+  width: min(1180px, calc(100vw - 92px));
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.prototype-header h1 { margin: 7px 0 0; font-size: 15px; font-weight: 560; letter-spacing: -.015em; }
+.eyebrow { display: flex; align-items: center; gap: 8px; margin: 0; color: #839d97; font-size: 8px; font-weight: 800; letter-spacing: .17em; text-transform: uppercase; }
+.eyebrow span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+
+#enter-xr {
+  min-height: 36px;
+  padding: 0 15px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(12, 27, 27, .86);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 750;
+  cursor: pointer;
+  pointer-events: auto;
+}
+#enter-xr:disabled { color: #51635f; cursor: not-allowed; }
+
+.scene-frame {
+  position: relative;
+  width: min(1440px, calc(100vw - 40px));
+  height: calc(100vh - 40px);
+  min-height: 650px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(166, 235, 216, .14);
+  border-radius: 34px;
+  background: #03090a;
+  box-shadow: inset 0 0 100px #000, 0 32px 100px rgba(0,0,0,.45);
+}
+
+#scene { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#scene.is-dragging { cursor: grabbing; }
+
+.scene-vignette { position: absolute; z-index: 4; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 90px 18px #010405, inset 0 0 1px 1px rgba(155,255,215,.06); }
+
+.hud {
+  position: absolute;
+  z-index: 8;
+  top: 132px;
+  width: 218px;
+  padding: 15px;
+  border-top: 1px solid rgba(155,255,215,.30);
+  border-bottom: 1px solid var(--line);
+  background: rgba(3, 10, 11, .55);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+.hud--left { left: 38px; }
+.hud--right { right: 38px; }
+.hud-label { margin: 0 0 6px; color: var(--accent); font-size: 8px; font-weight: 820; letter-spacing: .16em; text-transform: uppercase; }
+.hud > strong { font-size: 12px; font-weight: 650; }
+.hud dl { margin: 12px 0 0; }
+.hud dl div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; color: #6d8781; font-size: 9px; }
+.hud dd { margin: 0; color: #c1d7d2; font-weight: 680; text-align: right; }
+.hud-note { margin: 11px 0 0; padding-top: 9px; border-top: 1px dashed var(--line); color: #536d67; font-size: 8px; line-height: 1.45; }
+#event-log { display: grid; gap: 5px; margin: 11px 0 0; padding: 9px 0 0 14px; border-top: 1px dashed var(--line); color: #6e8781; font-size: 8px; }
+
+.source-switcher {
+  position: absolute;
+  z-index: 9;
+  left: 50%;
+  top: 96px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(3, 9, 10, .85);
+  backdrop-filter: blur(12px);
+}
+.source-switcher > span { margin: 0 7px 0 8px; color: #607a74; font-size: 7px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.source-switcher button { min-height: 29px; padding: 0 10px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: #6f8983; font-size: 9px; cursor: pointer; }
+.source-switcher button[aria-pressed="true"] { border-color: rgba(155,255,215,.34); background: rgba(155,255,215,.12); color: var(--accent); }
+
+.scene-caption { position: absolute; z-index: 7; left: 50%; bottom: 106px; margin: 0; transform: translateX(-50%); color: #4c655f; font-size: 8px; font-weight: 720; letter-spacing: .08em; pointer-events: none; }
+
+.prototype-switcher {
+  position: fixed;
+  z-index: 30;
+  left: 50%;
+  bottom: 38px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 374px;
+  height: 61px;
+  padding: 6px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255,255,255,.17);
+  border-radius: 999px;
+  background: rgba(2, 7, 8, .94);
+  box-shadow: 0 17px 52px rgba(0,0,0,.65), inset 0 1px rgba(255,255,255,.05);
+  backdrop-filter: blur(18px);
+}
+.prototype-switcher > button { display: grid; place-items: center; width: 47px; height: 47px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 50%; background: #122022; color: #d7e8e4; font-size: 19px; cursor: pointer; }
+.prototype-switcher > div:nth-child(2) { display: grid; min-width: 166px; gap: 2px; }
+.prototype-switcher span { color: #58716b; font-size: 7px; font-weight: 820; letter-spacing: .15em; }
+.prototype-switcher strong { font-size: 11px; font-weight: 680; }
+.switcher-dots { display: flex; gap: 4px; }
+.switcher-dots i { width: 4px; height: 4px; border-radius: 999px; background: #3d504c; }
+.switcher-dots i.is-active { width: 14px; background: var(--accent); }
+
+@media (max-width: 1050px) {
+  .hud { transform: scale(.84); }
+  .hud--left { transform-origin: top left; }
+  .hud--right { transform-origin: top right; }
+}
+
+@media (max-width: 780px) {
+  body { overflow: auto; }
+  .scene-frame { min-height: 760px; }
+  .hud--left { display: none; }
+  .hud--right { right: 18px; top: 143px; }
+  .source-switcher { top: 105px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

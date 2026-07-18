@@ -1,0 +1,22 @@
+{
+  "name": "wrist-menu-three-presentation-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node prototype-three-presentation/scripts/generate-font-module.mjs",
+    "prototype:three": "vite --host 127.0.0.1 --port 4173",
+    "build:prototype": "vite build --base=./",
+    "evidence:browser": "node prototype-three-presentation/scripts/capture-browser-evidence.mjs",
+    "test:prototype": "node --test --test-isolation=none prototype-three-presentation/tests/drag-session.test.js prototype-three-presentation/tests/virtualized-layout.test.js",
+    "trace:prototype": "node prototype-three-presentation/scripts/print-deterministic-trace.mjs"
+  },
+  "dependencies": {
+    "@fontsource/inter": "5.2.8",
+    "iwer": "2.3.0",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "playwright-core": "1.61.1",
+    "vite": "8.1.5"
+  }
+}
