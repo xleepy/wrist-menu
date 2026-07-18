@@ -4,11 +4,10 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-None.
+- [Define the public menu and host-control contract](https://github.com/xleepy/wrist-menu/issues/6) — active HITL design session covering public content, state ownership, configuration, events, and lifecycle behavior.
 
 ## Ready
 
-- [Define the public menu and host-control contract](https://github.com/xleepy/wrist-menu/issues/6) — cross-input selection semantics are resolved; ready for a HITL grilling session.
 - [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12) — pose, presentation, and selection prerequisites are resolved; ready for a physical Quest HITL prototype.
 
 ## Blocked
