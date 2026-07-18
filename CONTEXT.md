@@ -44,6 +44,22 @@ _Avoid_: Idle pointer, cooldown
 The ordered, Host Application-owned description of the items and current application state presented by a Wrist Menu.
 _Avoid_: Menu config, internal menu state
 
+**Menu Item**:
+A stable, labeled entry in a Menu Definition: an Action Item, Toggle Item, choice option, or separator.
+_Avoid_: Button, control
+
+**Action Item**:
+A Menu Item whose Selection Intent requests an operation without proposing a new displayed value.
+_Avoid_: Command button, callback item
+
+**Toggle Item**:
+A Menu Item that presents a Host Application-owned boolean value and proposes its inverse through a Selection Intent.
+_Avoid_: Switch component, internal toggle
+
+**Choice Group**:
+A stable group of directly visible option items with exactly one Host Application-owned selection.
+_Avoid_: Dropdown, submenu, cycling option
+
 **Interaction State**:
 The short-lived reveal, hover, ownership, dwell, and tracking state owned by the Wrist Menu Package.
 _Avoid_: Application state, menu data
