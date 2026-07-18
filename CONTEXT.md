@@ -64,6 +64,14 @@ _Avoid_: Button, control
 A portable scalar application value: a boolean for a Toggle Item or a string or finite number for a Choice Group option.
 _Avoid_: Object payload, callback argument
 
+**Menu Viewport**:
+The vertically clipped window through which a Wrist Menu presents an ordered Menu Definition that does not fit at once.
+_Avoid_: Submenu, separate page
+
+**Scroll Control**:
+A package-owned up or down affordance that moves the Menu Viewport without representing a Host Application Menu Item or emitting a Selection Intent.
+_Avoid_: Menu Item, Host action
+
 **Action Item**:
 A Menu Item whose Selection Intent requests an operation without proposing a new displayed value.
 _Avoid_: Command button, callback item
