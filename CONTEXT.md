@@ -48,6 +48,10 @@ _Avoid_: Idle pointer, cooldown
 The ordered, Host Application-owned description of the items and current application state presented by a Wrist Menu.
 _Avoid_: Menu config, internal menu state
 
+**Host Snapshot**:
+The complete immutable set of Host Application-owned inputs applied atomically to a Wrist Menu Instance, including its Menu Definition, activation mode, comfort overrides, and theme.
+_Avoid_: Props, patch, partial config
+
 **Menu Item**:
 A stable, labeled entry in a Menu Definition: an Action Item, Toggle Item, choice option, or separator.
 _Avoid_: Button, control
