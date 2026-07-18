@@ -1,6 +1,6 @@
 # WebXR runtime, ecosystem, and device constraints
 
-Research for [GitHub issue #2](https://github.com/xleepy/wrist-menu/issues/2), captured 2026-07-18. The scope is version 1 of the browser-only, `immersive-vr` Wrist Menu Package and its vanilla Three.js and React Three Fiber (R3F) integrations. Sources are specifications and first-party project/vendor documentation; version values are a point-in-time snapshot, not evergreen guarantees.
+Research for [Research WebXR runtime, ecosystem, and device constraints](https://github.com/xleepy/wrist-menu/issues/2), captured 2026-07-18. The scope is version 1 of the browser-only, `immersive-vr` Wrist Menu Package and its vanilla Three.js and React Three Fiber (R3F) integrations. Sources are specifications and first-party project/vendor documentation; version values are a point-in-time snapshot, not evergreen guarantees.
 
 ## Decision summary
 
@@ -256,4 +256,3 @@ Project recommendation (not a vendor rule): target menu-update CPU p95 below 1 m
 - **Broader Three.js range:** Compatibility below r185 has not been executed. Do not widen the published peer range based only on similar APIs or R3F's broader peer declaration.
 - **SSR framework matrix:** Node import safety can be automated immediately; Next.js/Remix/Astro-specific bundling behavior still needs explicit fixture tests if claimed in documentation.
 - **Final performance/render budgets:** The presentation prototype must establish text/layout geometry and a baseline before draw-call, triangle, texture-memory, and activation-latency limits become release criteria.
-
