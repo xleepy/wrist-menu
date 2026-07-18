@@ -4,11 +4,10 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-None.
+- [Specify the external-consumer Example App](https://github.com/xleepy/wrist-menu/issues/9) — active HITL product session covering the sandbox journey, package-consumer proof, device paths, failure states, and acceptance criteria.
 
 ## Ready
 
-- [Specify the external-consumer Example App](https://github.com/xleepy/wrist-menu/issues/9) — public contract and package boundaries are resolved; ready for HITL grilling.
 - [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12) — pose, presentation, and selection prerequisites are resolved; ready for a physical Quest HITL prototype.
 - [Prototype the default Three.js presentation and continuous scrolling](https://github.com/xleepy/wrist-menu/issues/13) — renderer architecture is resolved; ready for a production-shaped Three.js/IWER/Quest HITL prototype.
 
