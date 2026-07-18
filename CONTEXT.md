@@ -104,6 +104,10 @@ _Avoid_: Visible mesh, button bounds, collider
 The boundary that produces Frame Samples and Target Observations from a Host Application's rendering lifecycle and realizes Wrist Menu presentation state.
 _Avoid_: Framework plugin, separate renderer
 
+**Scene Event Shield**:
+The React Renderer Integration boundary that prevents a host scene target behind an active Wrist Menu Hit Region from receiving the same synthetic pointer action without deciding menu semantics.
+_Avoid_: Selection handler, raw event capture
+
 **Presentation Model**:
 The read-only renderer-facing description of Menu Item content and visual cues derived from the current Host Snapshot and Interaction State.
 _Avoid_: Host Snapshot, scene graph, core state
