@@ -8,6 +8,10 @@ This context defines a reusable spatial menu that VR applications can attach to 
 The reusable product consumed by both vanilla Three.js and React Three Fiber VR applications.
 _Avoid_: Module, one-off menu
 
+**Wrist Menu Instance**:
+The live, disposable realization of one Menu Definition within a Host Application's rendering lifecycle.
+_Avoid_: Handle, controller, singleton
+
 **Host Application**:
 A VR application that consumes and configures the Wrist Menu Package.
 _Avoid_: Client, parent app
