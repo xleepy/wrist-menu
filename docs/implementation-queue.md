@@ -4,18 +4,18 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-- [Specify the external-consumer Example App](https://github.com/xleepy/wrist-menu/issues/9) — active HITL product session covering the sandbox journey, package-consumer proof, device paths, failure states, and acceptance criteria.
+- None.
 
 ## Ready
 
 - [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12) — pose, presentation, and selection prerequisites are resolved; ready for a physical Quest HITL prototype.
 - [Prototype the default Three.js presentation and continuous scrolling](https://github.com/xleepy/wrist-menu/issues/13) — renderer architecture is resolved; ready for a production-shaped Three.js/IWER/Quest HITL prototype.
+- [Define publication, documentation, and repository workflow](https://github.com/xleepy/wrist-menu/issues/10) — package boundaries and the external-consumer Example App contract are resolved; ready for the cross-repository publication workflow decision.
 
 ## Blocked
 
 - [Set compatibility, performance, and validation gates](https://github.com/xleepy/wrist-menu/issues/8) — waiting for **Prototype device-specific wrist offsets and tracking degradation** and **Prototype the default Three.js presentation and continuous scrolling**.
-- [Define publication, documentation, and repository workflow](https://github.com/xleepy/wrist-menu/issues/10) — waiting for **Specify the external-consumer Example App**.
-- [Choose the implementation sequence and close remaining gaps](https://github.com/xleepy/wrist-menu/issues/11) — waiting for **Set compatibility, performance, and validation gates**, **Specify the external-consumer Example App**, and **Define publication, documentation, and repository workflow**.
+- [Choose the implementation sequence and close remaining gaps](https://github.com/xleepy/wrist-menu/issues/11) — waiting for **Set compatibility, performance, and validation gates** and **Define publication, documentation, and repository workflow**.
 
 ## Production boundary
 
