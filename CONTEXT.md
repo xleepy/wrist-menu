@@ -39,3 +39,15 @@ _Avoid_: Failed click, aborted trigger
 **Neutral Selection State**:
 The safe state in which a Selection Source has no pending intent and may acquire new Selection Ownership.
 _Avoid_: Idle pointer, cooldown
+
+**Menu Definition**:
+The ordered, Host Application-owned description of the items and current application state presented by a Wrist Menu.
+_Avoid_: Menu config, internal menu state
+
+**Interaction State**:
+The short-lived reveal, hover, ownership, dwell, and tracking state owned by the Wrist Menu Package.
+_Avoid_: Application state, menu data
+
+**Selection Intent**:
+The source-independent request emitted after a Selection Commit for the Host Application to interpret.
+_Avoid_: Click event, automatic state update
