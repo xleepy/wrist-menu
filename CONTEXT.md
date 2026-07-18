@@ -87,3 +87,7 @@ _Avoid_: Framework plugin, separate renderer
 **Selection Intent**:
 The source-independent request emitted after a Selection Commit for the Host Application to interpret.
 _Avoid_: Click event, automatic state update
+
+**Wrist Menu Event**:
+A source-independent notification emitted by a Wrist Menu Instance for a Selection Intent, visibility change, Selection Cancellation, or runtime status.
+_Avoid_: DOM event, renderer event, raw input event
