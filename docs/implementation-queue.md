@@ -4,11 +4,11 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-None.
+- [Define cross-input selection semantics](https://github.com/xleepy/wrist-menu/issues/5) — active HITL design session covering shared hover, commit, cancellation, ownership, and feedback semantics.
 
 ## Ready
 
-- [Define cross-input selection semantics](https://github.com/xleepy/wrist-menu/issues/5) — both prerequisite prototypes are resolved; ready for a HITL grilling session.
+None.
 
 ## Blocked
 
