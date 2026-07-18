@@ -72,8 +72,12 @@ _Avoid_: Application state, menu data
 The normalized description of poses, lifecycle visibility, and Selection Source state observed for one current WebXR frame.
 _Avoid_: XRFrame, raw frame data
 
+**Target Observation**:
+The renderer-neutral report that an Eligible Selection Source approaches or intersects one Menu Item during a Frame Sample; it is evidence for interaction, not hover or selection.
+_Avoid_: Hit event, click target
+
 **Renderer Integration**:
-The boundary connecting Wrist Menu Package behavior and presentation to a Host Application's rendering lifecycle.
+The boundary that produces Frame Samples and Target Observations from a Host Application's rendering lifecycle and realizes Wrist Menu presentation state.
 _Avoid_: Framework plugin, separate renderer
 
 **Selection Intent**:
