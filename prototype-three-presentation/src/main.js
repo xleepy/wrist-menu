@@ -6,9 +6,23 @@ import { DragSession, DRAG_STATES } from "./model/drag-session.js";
 import { PerformanceSampler } from "./performance-sampler.js";
 import { installBundledFont } from "./presentation/bundled-font.js";
 import { CommandSlabPresentation } from "./presentation/command-slab.js";
+import { captureBrowserErrors, createVrTestLogger } from "./vr-test-logger.js";
 import { generateTraceEvidence } from "../scripts/trace-scenarios.mjs";
 
 const searchParams = new URLSearchParams(window.location.search);
+const vrTestLogger = import.meta.env.DEV
+  ? createVrTestLogger({
+      issue: 13,
+      branch: "prototype/issue-13-three-presentation",
+      profile: searchParams.get("variant")?.toUpperCase() || "A",
+      userAgent: navigator.userAgent,
+      secureContext: window.isSecureContext,
+    })
+  : null;
+if (vrTestLogger) {
+  captureBrowserErrors(vrTestLogger);
+}
+
 if (searchParams.get("iwer") === "1") {
   const { installQuest2IwerRuntime } = await import("./iwer-runtime.js");
   await installQuest2IwerRuntime();
@@ -28,6 +42,8 @@ let activeHandSource = null;
 let currentSession = null;
 let xrPlacementPending = false;
 let lastHudUpdate = 0;
+let lastVrTelemetryAt = -Infinity;
+let lastLoggedScrollAt = -Infinity;
 const eventTrace = [];
 
 const canvas = document.querySelector("#scene");
@@ -156,8 +172,25 @@ function pushEvents(events) {
 }
 
 function recordEvent(event) {
-  eventTrace.push({ frame, ...event });
+  const record = { frame, ...event };
+  eventTrace.push(record);
   if (eventTrace.length > 50) eventTrace.shift();
+  const shouldPersist = event.type !== "scroll-changed" || performance.now() - lastLoggedScrollAt >= 500;
+  if (shouldPersist) {
+    if (event.type === "scroll-changed") lastLoggedScrollAt = performance.now();
+    vrTestLogger?.record(`prototype.${event.type}`, record);
+  }
+}
+
+function describeInputSource(inputSource) {
+  return {
+    handedness: inputSource.handedness,
+    targetRayMode: inputSource.targetRayMode,
+    profiles: [...inputSource.profiles],
+    hasHand: Boolean(inputSource.hand),
+    hasGripSpace: Boolean(inputSource.gripSpace),
+    gamepadMapping: inputSource.gamepad?.mapping ?? null,
+  };
 }
 
 function beginFromRay(raySource, source) {
@@ -242,10 +275,15 @@ function setupControllers() {
     rayLine.visible = false;
     rayLine.raycast = () => {};
     controller.add(rayLine);
-    controller.addEventListener("connected", () => { controller.userData.connected = true; rayLine.visible = true; });
+    controller.addEventListener("connected", (event) => {
+      controller.userData.connected = true;
+      rayLine.visible = true;
+      recordEvent({ type: "xr-controller-connected", index, source: describeInputSource(event.data) });
+    });
     controller.addEventListener("disconnected", () => {
       controller.userData.connected = false;
       rayLine.visible = false;
+      recordEvent({ type: "xr-controller-disconnected", index });
       if (activeXrController === controller) {
         pushEvents(drag.cancel("controller-disconnected"));
         activeXrController = null;
@@ -392,6 +430,7 @@ function telemetrySnapshot() {
       presenting: renderer.xr.isPresenting,
       frameRate: currentSession?.frameRate ?? null,
       visibilityState: currentSession?.visibilityState ?? null,
+      inputSources: currentSession ? [...currentSession.inputSources].map(describeInputSource) : [],
     },
     geometry: {
       panelMm: [millimetres(profile.panelWidth), millimetres(profile.panelHeight)],
@@ -449,6 +488,10 @@ function animate(time, xrFrame) {
   performanceSampler.record(performance.now() - updateStart);
   renderer.render(scene, camera);
   updateHud(time);
+  if (currentSession && time - lastVrTelemetryAt >= 5000) {
+    lastVrTelemetryAt = time;
+    vrTestLogger?.record("prototype.telemetry", telemetrySnapshot());
+  }
 }
 
 renderer.setAnimationLoop(animate);
@@ -456,6 +499,7 @@ renderer.setAnimationLoop(animate);
 function cycleProfile(direction) {
   const current = PROFILES.findIndex((candidate) => candidate.key === profile.key);
   const next = PROFILES[(current + direction + PROFILES.length) % PROFILES.length];
+  recordEvent({ type: "profile-switch-requested", from: profile.key, to: next.key });
   const url = new URL(window.location.href);
   url.searchParams.set("variant", next.key);
   window.location.assign(url);
@@ -508,7 +552,21 @@ enterXrButton.addEventListener("click", async () => {
   });
   currentSession = session;
   xrPlacementPending = true;
+  recordEvent({
+    type: "xr-session-started",
+    frameRate: session.frameRate ?? null,
+    visibilityState: session.visibilityState ?? null,
+    inputSources: [...session.inputSources].map(describeInputSource),
+  });
+  session.addEventListener("inputsourceschange", (event) => {
+    recordEvent({
+      type: "xr-input-sources-changed",
+      added: [...event.added].map(describeInputSource),
+      removed: [...event.removed].map(describeInputSource),
+    });
+  });
   session.addEventListener("end", () => {
+    recordEvent({ type: "xr-session-ended", telemetry: telemetrySnapshot() });
     currentSession = null;
     xrPlacementPending = false;
     attachmentHost.position.set(0, 1.37, -.55);
@@ -536,6 +594,7 @@ function clientPointForPanelMm(xMm, yMm) {
 }
 
 window.__WRIST_MENU_PROTOTYPE__ = Object.freeze({
+  testSessionId: vrTestLogger?.sessionId ?? null,
   snapshot: telemetrySnapshot,
   runDeterministicTrace: generateTraceEvidence,
   recentEvents() { return eventTrace.slice(); },
@@ -557,4 +616,5 @@ window.__WRIST_MENU_PROTOTYPE__ = Object.freeze({
 });
 
 document.body.dataset.prototypeReady = "true";
+vrTestLogger?.record("prototype.ready", telemetrySnapshot());
 window.dispatchEvent(new CustomEvent("wrist-menu-prototype-ready"));

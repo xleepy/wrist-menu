@@ -21,6 +21,15 @@ npm run prototype:three
 
 Open <http://127.0.0.1:4173/prototype/three-presentation?variant=A>.
 
+For a physical investigation, add a stable `testSession` value to keep A/B/C
+under one local log session, for example
+`?variant=A&testSession=quest2-issue13-20260719`. The development server prints
+the exact newline-delimited JSON log path when it starts. These local logs are
+ignored by Git and contain prototype events, five-second XR telemetry samples,
+and uncaught browser errors. High-frequency scroll motion is sampled at 500 ms
+while the exact trace remains in memory; the ordinary static build does not
+send logs.
+
 For a physical headset, load the same route from a trusted HTTPS origin that
 the headset can reach (for example, a temporary HTTPS deployment or trusted
 tunnel to the local Vite server). A plain `http://<LAN-IP>` URL is not a secure
