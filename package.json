@@ -7,7 +7,7 @@
     "prototype:three": "vite --host 127.0.0.1 --port 4173",
     "build:prototype": "vite build --base=./",
     "evidence:browser": "node prototype-three-presentation/scripts/capture-browser-evidence.mjs",
-    "test:prototype": "node --test --test-isolation=none prototype-three-presentation/tests/drag-session.test.js prototype-three-presentation/tests/virtualized-layout.test.js",
+    "test:prototype": "node --test --test-isolation=none prototype-three-presentation/tests/drag-session.test.js prototype-three-presentation/tests/typography-layout.test.js prototype-three-presentation/tests/virtualized-layout.test.js prototype-three-presentation/tests/xr-session.test.js",
     "trace:prototype": "node prototype-three-presentation/scripts/print-deterministic-trace.mjs"
   },
   "dependencies": {

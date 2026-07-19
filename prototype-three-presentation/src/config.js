@@ -1,8 +1,10 @@
+export const DEFAULT_PROFILE_KEY = "B";
+
 export const PROFILES = [
   {
     key: "A",
     name: "Balanced",
-    rationale: "Provisional default",
+    rationale: "Smaller comparison case",
     panelWidth: 0.18,
     panelHeight: 0.142,
     viewportWidth: 0.164,
@@ -16,7 +18,7 @@ export const PROFILES = [
   {
     key: "B",
     name: "Reach",
-    rationale: "Larger legibility contrast",
+    rationale: "Quest 2 legibility default",
     panelWidth: 0.192,
     panelHeight: 0.158,
     viewportWidth: 0.176,
@@ -47,7 +49,8 @@ export const POOL_CAPACITY = 12;
 export const OVERSCAN_ENTRIES = 1;
 
 export function getProfile(key) {
-  return PROFILES.find((profile) => profile.key === key?.toUpperCase()) ?? PROFILES[0];
+  return PROFILES.find((profile) => profile.key === key?.toUpperCase())
+    ?? PROFILES.find((profile) => profile.key === DEFAULT_PROFILE_KEY);
 }
 
 export function profileFromLocation(locationLike = window.location) {

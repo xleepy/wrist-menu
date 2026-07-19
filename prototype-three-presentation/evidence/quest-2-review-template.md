@@ -24,10 +24,10 @@ rows behaved as expected:
 
 ## Continuous drag
 
-- Controller: under 12 mm committed without false scroll:
-- Controller: over 12 mm scrolled without Selection Commit:
-- Direct hand: under 8 mm committed without false scroll:
-- Direct hand: over 8 mm scrolled without Selection Commit:
+- Controller: under 13 mm committed without false scroll:
+- Controller: at/over 13 mm scrolled without Selection Commit:
+- Direct hand: under 9 mm committed without false scroll:
+- Direct hand: at/over 9 mm scrolled without Selection Commit:
 - Hard clamps, no inertia/elastic overscroll, and next-frame rearm confirmed:
 - Missed drags, false commits, tracking loss, or comfort notes:
 
@@ -51,6 +51,6 @@ rows behaved as expected:
 
 ## Verdict
 
-- Accept profile A defaults, prefer another profile, or request changes:
+- Accept profile B defaults, prefer another profile, or request changes:
 - Additional observations:
 - Scope note: this is one Quest 2/browser/OS result, not a broad support claim.

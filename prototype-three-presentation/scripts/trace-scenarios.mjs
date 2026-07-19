@@ -8,7 +8,7 @@ function rounded(value) {
 }
 
 function dragTrace(source, movement) {
-  const profile = getProfile("A");
+  const profile = getProfile();
   const session = new DragSession(profile);
   const events = [];
   events.push(...session.begin({ source, pointY: 0, targetId: "snap-grid", scrollOffset: 0.04, frame: 10 }));
@@ -20,7 +20,7 @@ function dragTrace(source, movement) {
 }
 
 export function generateTraceEvidence() {
-  const profile = getProfile("A");
+  const profile = getProfile();
   const viewport = new VirtualizedMenuViewport(createMenuDefinition(), profile);
   const offsets = [0, 0.037, viewport.maxScroll()];
 
@@ -50,10 +50,10 @@ export function generateTraceEvidence() {
       }),
     },
     interactions: {
-      handUnderThreshold: dragTrace("hand", 0.0079),
-      handAtThreshold: dragTrace("hand", 0.008),
-      controllerUnderThreshold: dragTrace("controller", 0.0119),
-      controllerAtThreshold: dragTrace("controller", 0.012),
+      handUnderThreshold: dragTrace("hand", profile.handThreshold - .0001),
+      handAtThreshold: dragTrace("hand", profile.handThreshold),
+      controllerUnderThreshold: dragTrace("controller", profile.controllerThreshold - .0001),
+      controllerAtThreshold: dragTrace("controller", profile.controllerThreshold),
     },
   };
 }

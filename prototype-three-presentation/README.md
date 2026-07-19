@@ -19,11 +19,13 @@ npm install
 npm run prototype:three
 ```
 
-Open <http://127.0.0.1:4173/prototype/three-presentation?variant=A>.
+Open <http://127.0.0.1:4173/prototype/three-presentation>. The selected default
+is `B — Reach`; `?variant=A` and `?variant=C` remain available as comparison
+profiles.
 
 For a physical investigation, add a stable `testSession` value to keep A/B/C
 under one local log session, for example
-`?variant=A&testSession=quest2-issue13-20260719`. The development server prints
+`?testSession=quest2-issue13-20260719`. The development server prints
 the exact newline-delimited JSON log path when it starts. These local logs are
 ignored by Git and contain prototype events, five-second XR telemetry samples,
 and uncaught browser errors. High-frequency scroll motion is sampled at 500 ms
@@ -36,10 +38,10 @@ tunnel to the local Vite server). A plain `http://<LAN-IP>` URL is not a secure
 WebXR context. Do not add `?iwer=1` on the physical Quest; that flag deliberately
 replaces native WebXR with the pinned desktop emulator.
 
-- `A — Balanced` is the provisional default: 180 × 142 mm panel, 164 × 96 mm
-  Menu Viewport, 18 mm rows, 8/12 mm hand/controller drag thresholds.
-- `B — Reach` makes the contrast case physically larger: 192 × 158 mm panel,
-  176 × 108 mm viewport, 20 mm rows, 9/13 mm thresholds.
+- `B — Reach` is the Quest 2 legibility default: 192 × 158 mm panel, 176 ×
+  108 mm viewport, 20 mm rows, 9/13 mm hand/controller drag thresholds.
+- `A — Balanced` is the smaller comparison: 180 × 142 mm panel, 164 × 96 mm
+  Menu Viewport, 18 mm rows, 8/12 mm thresholds.
 - `C — Compact` makes the contrast case smaller: 168 × 128 mm panel, 152 ×
   84 mm viewport, 16 mm rows, 7/10 mm thresholds.
 
@@ -66,7 +68,9 @@ device-specific attachment is owned by the separate wrist-offset prototype.
   files are bundled into the JavaScript as data URLs; icon paths are drawn by
   the prototype. There are no implicit CDN, application-relative font, or icon
   requests.
-- One atlas-text batch and one row-background batch for the viewport. Rows and
+- One atlas-text batch and one row-background batch for the viewport. Each
+  header, row, separator, and footer UV slice matches its physical quad aspect
+  ratio, so structural text is no longer vertically squeezed. Rows and
   separators are clipped by two world-space Three.js clipping planes.
 - A fixed 12-slot visual pool sized from the compact profile's minimum entry
   height. Typical frames bind five visible entries and one overscan entry on
@@ -109,9 +113,9 @@ one device run as broad support evidence.
 2. At normal wrist viewing distance, compare A/B/C. For each, read every primary
    and secondary label, then target the first, middle, disabled, and partially
    clipped rows using a Touch controller.
-3. In `A`, make a short under-threshold controller movement and confirm it
-   commits; make a vertical movement over 12 mm and confirm it scrolls without
-   committing. Repeat with direct hand at the 8 mm threshold.
+3. In `B`, make a short under-threshold controller movement and confirm it
+   commits; make a vertical movement over 13 mm and confirm it scrolls without
+   committing. Repeat with direct hand at the 9 mm threshold.
 4. Scroll to both ends and confirm hard clamping, no inertia/elastic motion, no
    off-screen target, and target rearming only after release.
 5. Copy the live renderer readout after 30 seconds idle and after 30 seconds of

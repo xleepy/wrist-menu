@@ -45,13 +45,13 @@ for (const key of ["A", "B", "C"]) {
   await page.screenshot({ path: path.join(screenshotDirectory, `variant-${key.toLowerCase()}-${profileNames[key]}.png`), fullPage: true });
 }
 
-await page.goto("http://127.0.0.1:4173/prototype/three-presentation?variant=A", { waitUntil: "networkidle" });
+await page.goto("http://127.0.0.1:4173/prototype/three-presentation?variant=B", { waitUntil: "networkidle" });
 await page.waitForFunction(() => document.body.dataset.prototypeReady === "true");
 await page.evaluate(() => { window.__WRIST_MENU_PROTOTYPE__.setScrollMm(0); window.__WRIST_MENU_PROTOTYPE__.clearEvents(); });
 const closeupTopLeft = await page.evaluate(() => window.__WRIST_MENU_PROTOTYPE__.clientPointForPanelMm(-100, 82));
 const closeupBottomRight = await page.evaluate(() => window.__WRIST_MENU_PROTOTYPE__.clientPointForPanelMm(100, -86));
 await page.screenshot({
-  path: path.join(screenshotDirectory, "variant-a-balanced-closeup.png"),
+  path: path.join(screenshotDirectory, "variant-b-reach-closeup.png"),
   clip: {
     x: Math.max(0, closeupTopLeft.x),
     y: Math.max(0, closeupTopLeft.y),
@@ -97,7 +97,7 @@ assert.deepEqual(browserTrace, generateTraceEvidence());
 
 await page.click("#debug-toggle");
 await page.waitForTimeout(50);
-await page.screenshot({ path: path.join(screenshotDirectory, "variant-a-hit-regions.png"), fullPage: true });
+await page.screenshot({ path: path.join(screenshotDirectory, "variant-b-hit-regions.png"), fullPage: true });
 
 const resources = await page.evaluate(() => performance.getEntriesByType("resource").map((entry) => entry.name));
 const unexpectedOrigins = resources.filter((url) => url.startsWith("http") && !url.startsWith("http://127.0.0.1:4173/"));
@@ -107,7 +107,7 @@ assert.deepEqual(fontRequests, [], "the bundled WOFF2 data URLs should make no f
 assert.deepEqual(pageErrors, []);
 assert.deepEqual(consoleMessages.filter((message) => message.type === "error"), []);
 
-await page.goto("http://127.0.0.1:4173/prototype/three-presentation?variant=A&iwer=1", { waitUntil: "networkidle" });
+await page.goto("http://127.0.0.1:4173/prototype/three-presentation?variant=B&iwer=1", { waitUntil: "networkidle" });
 await page.waitForFunction(() => document.body.dataset.prototypeReady === "true");
 const iwerProbe = await page.evaluate(async () => ({
   immersiveVr: await navigator.xr.isSessionSupported("immersive-vr"),

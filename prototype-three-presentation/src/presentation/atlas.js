@@ -3,10 +3,17 @@ import { POOL_CAPACITY } from "../config.js";
 
 const WIDTH = 1024;
 const HEIGHT = 2048;
-const HEADER_HEIGHT = 160;
+const HEADER_HEIGHT = 192;
 const SLOT_HEIGHT = 128;
 const FOOTER_TOP = HEADER_HEIGHT + SLOT_HEIGHT * POOL_CAPACITY;
-const FOOTER_HEIGHT = 96;
+const FOOTER_HEIGHT = 64;
+const REGION_GUTTER = 2;
+
+export const TYPOGRAPHY_MM = Object.freeze({
+  meta: 4.75,
+  primary: 6.5,
+  title: 8,
+});
 
 const COLORS = {
   ink: "#ffffff",
@@ -83,6 +90,19 @@ function uvRect(top, height) {
   };
 }
 
+export function aspectMatchedAtlasRegion(top, capacityHeight, physicalWidth, physicalHeight) {
+  const availableHeight = Math.max(1, capacityHeight - REGION_GUTTER * 2);
+  const aspectMatchedHeight = physicalWidth > 0 && physicalHeight > 0
+    ? WIDTH * physicalHeight / physicalWidth
+    : availableHeight;
+  const height = Math.min(availableHeight, aspectMatchedHeight);
+  return { top: top + (capacityHeight - height) / 2, height };
+}
+
+export function atlasFontPixels(profile, physicalMillimetres) {
+  return Math.round((physicalMillimetres / 1000) * WIDTH / profile.viewportWidth);
+}
+
 export class PresentationAtlas {
   constructor(renderer) {
     this.canvas = document.createElement("canvas");
@@ -97,54 +117,76 @@ export class PresentationAtlas {
     this.texture.magFilter = THREE.LinearFilter;
     this.texture.generateMipmaps = false;
     this.texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    this.headerRegion = { top: REGION_GUTTER, height: HEADER_HEIGHT - REGION_GUTTER * 2 };
+    this.footerRegion = { top: FOOTER_TOP + REGION_GUTTER, height: FOOTER_HEIGHT - REGION_GUTTER * 2 };
+    this.rowRegions = Array.from({ length: POOL_CAPACITY }, (_, slot) => ({
+      top: HEADER_HEIGHT + slot * SLOT_HEIGHT + REGION_GUTTER,
+      height: SLOT_HEIGHT - REGION_GUTTER * 2,
+    }));
     this.dirty = true;
     this.uploads = 0;
   }
 
-  drawHeader(profile, anchor) {
+  drawHeader(profile, anchor, physicalSize) {
     const ctx = this.context;
+    this.headerRegion = aspectMatchedAtlasRegion(0, HEADER_HEIGHT, physicalSize.width, physicalSize.height);
+    const { top, height } = this.headerRegion;
+    const metaFont = atlasFontPixels(profile, TYPOGRAPHY_MM.meta);
+    const titleFont = atlasFontPixels(profile, TYPOGRAPHY_MM.title);
+    const lineGap = atlasFontPixels(profile, 1);
+    const contentHeight = metaFont * 2 + titleFont + lineGap * 2;
+    const paddingTop = Math.max(2, (height - contentHeight) / 2);
+    const eyebrowBaseline = top + paddingTop + metaFont;
+    const titleBaseline = eyebrowBaseline + lineGap + titleFont;
+    const subtitleBaseline = titleBaseline + lineGap + metaFont;
+
     ctx.clearRect(0, 0, WIDTH, HEADER_HEIGHT);
     ctx.fillStyle = COLORS.accent;
-    ctx.font = "600 22px WristMenuInter";
-    ctx.fillText("COMMAND SLAB · SCAN FIRST", 8, 31);
+    ctx.font = `600 ${metaFont}px WristMenuInter`;
+    ctx.fillText(fitText(ctx, "COMMAND SLAB · SCAN FIRST", 480), 8, eyebrowBaseline);
     ctx.fillStyle = COLORS.ink;
-    ctx.font = "600 48px WristMenuInter";
-    ctx.fillText("Quick kit", 8, 83);
+    ctx.font = `600 ${titleFont}px WristMenuInter`;
+    ctx.fillText("Quick kit", 8, titleBaseline);
     ctx.fillStyle = COLORS.muted;
-    ctx.font = "400 21px WristMenuInter";
-    ctx.fillText("Primitive Workshop", 8, 118);
+    ctx.font = `400 ${metaFont}px WristMenuInter`;
+    ctx.fillText(fitText(ctx, "Primitive Workshop", 480), 8, subtitleBaseline);
 
     ctx.textAlign = "right";
     ctx.fillStyle = COLORS.accent;
-    ctx.font = "600 22px WristMenuInter";
-    ctx.fillText("READY", WIDTH - 8, 33);
+    ctx.font = `600 ${metaFont}px WristMenuInter`;
+    ctx.fillText("READY", WIDTH - 8, eyebrowBaseline);
     ctx.fillStyle = COLORS.muted;
-    ctx.font = "400 18px WristMenuInter";
+    ctx.font = `400 ${metaFont}px WristMenuInter`;
     const anchorText = anchor ? `ANCHOR · ${anchor.itemId} +${Math.round(anchor.intraItemOffset * 1000)} mm` : "ANCHOR · TOP";
-    ctx.fillText(anchorText, WIDTH - 8, 80);
-    ctx.fillText(`${Math.round(profile.viewportWidth * 1000)} × ${Math.round(profile.viewportHeight * 1000)} mm VIEWPORT`, WIDTH - 8, 112);
+    ctx.fillText(fitText(ctx, anchorText, 480), WIDTH - 8, titleBaseline);
+    const viewportText = `${Math.round(profile.viewportWidth * 1000)} × ${Math.round(profile.viewportHeight * 1000)} mm VIEWPORT`;
+    ctx.fillText(fitText(ctx, viewportText, 480), WIDTH - 8, subtitleBaseline);
     ctx.textAlign = "left";
     this.dirty = true;
   }
 
-  drawRow(slot, item, cues = {}) {
-    const top = HEADER_HEIGHT + slot * SLOT_HEIGHT;
+  drawRow(slot, item, profile, cues = {}, physicalSize) {
+    const slotTop = HEADER_HEIGHT + slot * SLOT_HEIGHT;
     const ctx = this.context;
-    ctx.clearRect(0, top, WIDTH, SLOT_HEIGHT);
+    this.rowRegions[slot] = aspectMatchedAtlasRegion(slotTop, SLOT_HEIGHT, physicalSize.width, physicalSize.height);
+    const { top, height } = this.rowRegions[slot];
+    const metaFont = atlasFontPixels(profile, TYPOGRAPHY_MM.meta);
+    ctx.clearRect(0, slotTop, WIDTH, SLOT_HEIGHT);
 
     if (item.type === "separator") {
+      const center = top + height / 2;
       ctx.strokeStyle = "rgba(155,255,215,.22)";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(8, top + SLOT_HEIGHT / 2);
-      ctx.lineTo(300, top + SLOT_HEIGHT / 2);
-      ctx.moveTo(724, top + SLOT_HEIGHT / 2);
-      ctx.lineTo(WIDTH - 8, top + SLOT_HEIGHT / 2);
+      ctx.moveTo(8, center);
+      ctx.lineTo(300, center);
+      ctx.moveTo(724, center);
+      ctx.lineTo(WIDTH - 8, center);
       ctx.stroke();
       ctx.fillStyle = COLORS.dim;
       ctx.textAlign = "center";
-      ctx.font = "600 25px WristMenuInter";
-      ctx.fillText(item.label, WIDTH / 2, top + SLOT_HEIGHT / 2 + 9);
+      ctx.font = `600 ${metaFont}px WristMenuInter`;
+      ctx.fillText(fitText(ctx, item.label, 400), WIDTH / 2, center + metaFont * .35);
       ctx.textAlign = "left";
       this.dirty = true;
       return;
@@ -155,20 +197,22 @@ export class PresentationAtlas {
     const primary = disabled ? COLORS.disabled : cues.hovered || selected ? COLORS.selectedInk : COLORS.ink;
     const secondary = disabled ? COLORS.disabled : COLORS.muted;
     const iconColor = disabled ? COLORS.disabled : selected || cues.hovered ? COLORS.accent : "#86a49d";
-    drawIcon(ctx, item.icon, 60, top + SLOT_HEIGHT / 2, 54, iconColor);
+    const center = top + height / 2;
+    const primaryFont = atlasFontPixels(profile, TYPOGRAPHY_MM.primary);
+    drawIcon(ctx, item.icon, 60, center, 54, iconColor);
 
     ctx.fillStyle = primary;
-    ctx.font = "600 38px WristMenuInter";
-    ctx.fillText(fitText(ctx, item.label, 640), 112, top + 54);
+    ctx.font = `600 ${primaryFont}px WristMenuInter`;
+    ctx.fillText(fitText(ctx, item.label, 640), 112, top + height * .43);
     ctx.fillStyle = secondary;
-    ctx.font = "400 25px WristMenuInter";
-    ctx.fillText(fitText(ctx, item.secondary ?? "", 640), 112, top + 91);
+    ctx.font = `400 ${metaFont}px WristMenuInter`;
+    ctx.fillText(fitText(ctx, item.secondary ?? "", 640), 112, top + height * .79);
 
     ctx.textAlign = "right";
     ctx.fillStyle = disabled ? COLORS.disabled : selected ? COLORS.accent : COLORS.muted;
-    ctx.font = "600 26px WristMenuInter";
+    ctx.font = `600 ${metaFont}px WristMenuInter`;
     const trailing = disabled ? "UNAVAILABLE" : item.type === "toggle" ? (item.value ? "ON" : "OFF") : item.type === "choice" ? (item.selected ? "SELECTED" : "OPTION") : "ACTIVATE";
-    ctx.fillText(trailing, WIDTH - 24, top + 74);
+    ctx.fillText(trailing, WIDTH - 24, center + metaFont * .35);
     ctx.textAlign = "left";
     this.dirty = true;
   }
@@ -179,21 +223,25 @@ export class PresentationAtlas {
     this.dirty = true;
   }
 
-  drawFooter(profile) {
+  drawFooter(profile, physicalSize) {
     const ctx = this.context;
+    this.footerRegion = aspectMatchedAtlasRegion(FOOTER_TOP, FOOTER_HEIGHT, physicalSize.width, physicalSize.height);
+    const { top, height } = this.footerRegion;
+    const metaFont = atlasFontPixels(profile, TYPOGRAPHY_MM.meta);
+    const baseline = top + height / 2 + metaFont * .35;
     ctx.clearRect(0, FOOTER_TOP, WIDTH, FOOTER_HEIGHT);
     ctx.fillStyle = COLORS.dim;
-    ctx.font = "600 24px WristMenuInter";
-    ctx.fillText(`${Math.round(profile.panelWidth * 1000)} × ${Math.round(profile.panelHeight * 1000)} mm PANEL`, 8, FOOTER_TOP + 55);
+    ctx.font = `600 ${metaFont}px WristMenuInter`;
+    ctx.fillText(`${Math.round(profile.panelWidth * 1000)} × ${Math.round(profile.panelHeight * 1000)} mm PANEL`, 8, baseline);
     ctx.textAlign = "right";
-    ctx.fillText(`${POOL_CAPACITY} SLOT POOL · EMBEDDED FONT + PROCEDURAL ICONS`, WIDTH - 8, FOOTER_TOP + 55);
+    ctx.fillText(`${POOL_CAPACITY} SLOTS · 1 EMBEDDED ATLAS`, WIDTH - 8, baseline);
     ctx.textAlign = "left";
     this.dirty = true;
   }
 
-  headerUv() { return uvRect(0, HEADER_HEIGHT); }
-  rowUv(slot) { return uvRect(HEADER_HEIGHT + slot * SLOT_HEIGHT, SLOT_HEIGHT); }
-  footerUv() { return uvRect(FOOTER_TOP, FOOTER_HEIGHT); }
+  headerUv() { return uvRect(this.headerRegion.top, this.headerRegion.height); }
+  rowUv(slot) { return uvRect(this.rowRegions[slot].top, this.rowRegions[slot].height); }
+  footerUv() { return uvRect(this.footerRegion.top, this.footerRegion.height); }
 
   flush() {
     if (!this.dirty) return false;

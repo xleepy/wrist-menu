@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import "./styles.css";
-import { PROFILES, millimetres, profileFromLocation } from "./config.js";
+import { DEFAULT_PROFILE_KEY, PROFILES, millimetres, profileFromLocation } from "./config.js";
 import { createMenuDefinition, applySelectionIntent } from "./fixtures/menu-definition.js";
 import { DragSession, DRAG_STATES } from "./model/drag-session.js";
+import { endXrSession, listXrInputSources, snapshotXrSession } from "./model/xr-session.js";
 import { PerformanceSampler } from "./performance-sampler.js";
 import { installBundledFont } from "./presentation/bundled-font.js";
 import { CommandSlabPresentation } from "./presentation/command-slab.js";
@@ -14,7 +15,7 @@ const vrTestLogger = import.meta.env.DEV
   ? createVrTestLogger({
       issue: 13,
       branch: "prototype/issue-13-three-presentation",
-      profile: searchParams.get("variant")?.toUpperCase() || "A",
+      profile: searchParams.get("variant")?.toUpperCase() || DEFAULT_PROFILE_KEY,
       userAgent: navigator.userAgent,
       secureContext: window.isSecureContext,
     })
@@ -40,6 +41,7 @@ let activeTargetDisabled = false;
 let activeXrController = null;
 let activeHandSource = null;
 let currentSession = null;
+let xrTransitionPending = false;
 let xrPlacementPending = false;
 let lastHudUpdate = 0;
 let lastVrTelemetryAt = -Infinity;
@@ -336,7 +338,7 @@ function directHit(local, radius) {
 
 function updateHands(xrFrame) {
   if (!xrFrame || !currentSession) return;
-  const handSources = [...currentSession.inputSources].filter((inputSource) => inputSource.hand);
+  const handSources = listXrInputSources(currentSession).filter((inputSource) => inputSource.hand);
   let observedActiveHand = false;
 
   for (const inputSource of handSources) {
@@ -420,17 +422,18 @@ geometryReadout.innerHTML = `
   <div><dt>Controller drag</dt><dd>${millimetres(profile.controllerThreshold)} mm</dd></div>
 `;
 
-function telemetrySnapshot() {
+function telemetrySnapshot(
+  sessionSnapshot = snapshotXrSession(currentSession, describeInputSource),
+  presenting = renderer.xr.isPresenting,
+) {
   const rendererInfo = renderer.info;
   const timing = performanceSampler.snapshot();
   return {
     capturedAt: new Date().toISOString(),
     userAgent: navigator.userAgent,
     xr: {
-      presenting: renderer.xr.isPresenting,
-      frameRate: currentSession?.frameRate ?? null,
-      visibilityState: currentSession?.visibilityState ?? null,
-      inputSources: currentSession ? [...currentSession.inputSources].map(describeInputSource) : [],
+      presenting,
+      ...sessionSnapshot,
     },
     geometry: {
       panelMm: [millimetres(profile.panelWidth), millimetres(profile.panelHeight)],
@@ -539,46 +542,82 @@ document.querySelector("#evidence-copy").addEventListener("click", async () => {
 
 const enterXrButton = document.querySelector("#enter-xr");
 const xrSupported = navigator.xr ? await navigator.xr.isSessionSupported("immersive-vr") : false;
-enterXrButton.disabled = !xrSupported;
-enterXrButton.textContent = xrSupported ? "Enter XR" : "XR unavailable";
-enterXrButton.addEventListener("click", async () => {
-  if (currentSession) {
-    await currentSession.end();
-    return;
-  }
-  const session = await navigator.xr.requestSession("immersive-vr", {
-    requiredFeatures: ["local-floor"],
-    optionalFeatures: ["hand-tracking"],
-  });
-  currentSession = session;
-  xrPlacementPending = true;
-  recordEvent({
-    type: "xr-session-started",
-    frameRate: session.frameRate ?? null,
-    visibilityState: session.visibilityState ?? null,
-    inputSources: [...session.inputSources].map(describeInputSource),
-  });
-  session.addEventListener("inputsourceschange", (event) => {
-    recordEvent({
-      type: "xr-input-sources-changed",
-      added: [...event.added].map(describeInputSource),
-      removed: [...event.removed].map(describeInputSource),
+function syncXrButton() {
+  enterXrButton.disabled = !xrSupported || xrTransitionPending;
+  enterXrButton.textContent = xrSupported
+    ? (currentSession ? "End XR" : "Enter XR")
+    : "XR unavailable";
+}
+
+function finishXrSession(session, reason) {
+  if (currentSession !== session) return false;
+
+  const endedSessionSnapshot = snapshotXrSession(session, describeInputSource);
+  currentSession = null;
+  xrPlacementPending = false;
+  activeXrController = null;
+  activeHandSource = null;
+  activeTargetDisabled = false;
+  const cancellationEvents = drag.cancel("session-ended");
+  syncXrButton();
+
+  attachmentHost.position.set(0, 1.37, -.55);
+  attachmentHost.quaternion.identity();
+  pushEvents(cancellationEvents);
+  window.requestAnimationFrame(resize);
+  recordEvent({ type: "xr-session-ended", reason, telemetry: telemetrySnapshot(endedSessionSnapshot, false) });
+  return true;
+}
+
+function describeError(error) {
+  return error instanceof Error
+    ? { name: error.name, message: error.message, stack: error.stack }
+    : { name: "Error", message: String(error) };
+}
+
+async function toggleXrSession() {
+  if (xrTransitionPending) return;
+  xrTransitionPending = true;
+  syncXrButton();
+
+  try {
+    const sessionToEnd = currentSession;
+    if (sessionToEnd) {
+      const result = await endXrSession(sessionToEnd);
+      finishXrSession(sessionToEnd, result === "already-ended" ? "already-ended" : "end-request-completed");
+      return;
+    }
+
+    const session = await navigator.xr.requestSession("immersive-vr", {
+      requiredFeatures: ["local-floor"],
+      optionalFeatures: ["hand-tracking"],
     });
-  });
-  session.addEventListener("end", () => {
-    recordEvent({ type: "xr-session-ended", telemetry: telemetrySnapshot() });
-    currentSession = null;
-    xrPlacementPending = false;
-    attachmentHost.position.set(0, 1.37, -.55);
-    attachmentHost.quaternion.identity();
-    enterXrButton.textContent = "Enter XR";
-    pushEvents(drag.cancel("session-ended"));
-    activeXrController = null;
-    activeHandSource = null;
-    window.requestAnimationFrame(resize);
-  }, { once: true });
-  enterXrButton.textContent = "End XR";
-  await renderer.xr.setSession(session);
+    currentSession = session;
+    xrPlacementPending = true;
+    session.addEventListener("inputsourceschange", (event) => {
+      recordEvent({
+        type: "xr-input-sources-changed",
+        added: [...event.added].map(describeInputSource),
+        removed: [...event.removed].map(describeInputSource),
+      });
+    });
+    session.addEventListener("end", () => {
+      finishXrSession(session, "end-event");
+    }, { once: true });
+    recordEvent({ type: "xr-session-started", ...snapshotXrSession(session, describeInputSource) });
+    syncXrButton();
+    await renderer.xr.setSession(session);
+  } catch (error) {
+    recordEvent({ type: "xr-session-transition-failed", error: describeError(error) });
+  } finally {
+    xrTransitionPending = false;
+    syncXrButton();
+  }
+}
+
+syncXrButton();
+enterXrButton.addEventListener("click", () => {
+  void toggleXrSession();
 });
 
 function clientPointForPanelMm(xMm, yMm) {

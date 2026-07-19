@@ -3,12 +3,13 @@
   "browserExecutable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
   "profiles": [
     {
-      "capturedAt": "2026-07-18T21:28:02.397Z",
+      "capturedAt": "2026-07-19T11:12:58.566Z",
       "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
       "xr": {
         "presenting": false,
         "frameRate": null,
-        "visibilityState": null
+        "visibilityState": null,
+        "inputSources": []
       },
       "geometry": {
         "panelMm": [
@@ -52,20 +53,21 @@
         "programs": 7
       },
       "updateMs": {
-        "p50": 0.30000000074505806,
-        "p95": 0.30000000074505806,
-        "p99": 0.30000000074505806,
-        "samples": 3
+        "p50": 0,
+        "p95": 0.2000000011175871,
+        "p99": 0.2999999988824129,
+        "samples": 32
       },
       "recentEvents": []
     },
     {
-      "capturedAt": "2026-07-18T21:28:03.770Z",
+      "capturedAt": "2026-07-19T11:13:00.017Z",
       "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
       "xr": {
         "presenting": false,
         "frameRate": null,
-        "visibilityState": null
+        "visibilityState": null,
+        "inputSources": []
       },
       "geometry": {
         "panelMm": [
@@ -110,19 +112,20 @@
       },
       "updateMs": {
         "p50": 0,
-        "p95": 0.10000000149011612,
-        "p99": 0.19999999925494194,
-        "samples": 44
+        "p95": 0.19999999925494194,
+        "p99": 0.3999999985098839,
+        "samples": 46
       },
       "recentEvents": []
     },
     {
-      "capturedAt": "2026-07-18T21:28:04.915Z",
+      "capturedAt": "2026-07-19T11:13:01.411Z",
       "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
       "xr": {
         "presenting": false,
         "frameRate": null,
-        "visibilityState": null
+        "visibilityState": null,
+        "inputSources": []
       },
       "geometry": {
         "panelMm": [
@@ -167,9 +170,9 @@
       },
       "updateMs": {
         "p50": 0,
-        "p95": 0.10000000149011612,
-        "p99": 0.19999999925494194,
-        "samples": 46
+        "p95": 0.19999999925494194,
+        "p99": 0.2000000011175871,
+        "samples": 54
       },
       "recentEvents": []
     }
@@ -177,13 +180,13 @@
   "actualDesktopInteraction": {
     "tapEvents": [
       {
-        "frame": 20,
+        "frame": 29,
         "type": "selection-pending",
         "source": "controller",
         "targetId": "spawn-cube"
       },
       {
-        "frame": 20,
+        "frame": 29,
         "type": "selection-commit",
         "targetId": "spawn-cube",
         "source": "controller"
@@ -191,90 +194,91 @@
     ],
     "dragEvents": [
       {
-        "frame": 23,
+        "frame": 31,
         "type": "selection-pending",
         "source": "controller",
         "targetId": "spawn-cube"
       },
       {
-        "frame": 25,
+        "frame": 33,
         "type": "selection-cancelled",
         "reason": "scroll-threshold",
         "targetId": "spawn-cube"
       },
       {
-        "frame": 25,
+        "frame": 33,
         "type": "scroll-ownership-acquired",
         "source": "controller",
-        "threshold": 0.012,
+        "threshold": 0.013,
         "movement": 0.015108231965427654
       },
       {
-        "frame": 25,
+        "frame": 33,
         "type": "scroll-changed",
         "scrollOffset": 0.015108231965427654,
         "movement": 0.015108231965427654
       },
       {
-        "frame": 26,
+        "frame": 34,
         "type": "scroll-changed",
         "scrollOffset": 0.020138405687052607,
         "movement": 0.020138405687052607
       },
       {
-        "frame": 27,
+        "frame": 35,
         "type": "scroll-ownership-released",
-        "targetableFrame": 28
+        "targetableFrame": 36
       },
       {
-        "frame": 28,
+        "frame": 36,
         "type": "targets-rearmed"
       }
     ],
     "disabledEvents": [
       {
-        "frame": 29,
+        "frame": 37,
         "type": "selection-pending",
         "source": "controller",
         "targetId": "clear-selection"
       },
       {
-        "frame": 29,
+        "frame": 37,
         "type": "unavailable-feedback",
         "targetId": "clear-selection"
       }
     ],
     "postInteractionSnapshot": {
-      "capturedAt": "2026-07-18T21:28:06.189Z",
+      "capturedAt": "2026-07-19T11:13:03.205Z",
       "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
       "xr": {
         "presenting": false,
         "frameRate": null,
-        "visibilityState": null
+        "visibilityState": null,
+        "inputSources": []
       },
       "geometry": {
         "panelMm": [
-          180,
-          142
+          192,
+          158
         ],
         "viewportMm": [
-          164,
-          96
+          176,
+          108
         ],
-        "rowMm": 18,
-        "handThresholdMm": 8,
-        "controllerThresholdMm": 12
+        "rowMm": 20,
+        "handThresholdMm": 9,
+        "controllerThresholdMm": 13
       },
       "presentation": {
-        "profile": "A",
+        "profile": "B",
         "scrollOffset": 0.020138405687052607,
-        "maxScroll": 0.24200000000000002,
+        "maxScroll": 0.27300000000000013,
         "anchor": {
           "itemId": "spawn-sphere",
-          "intraItemOffset": 0.00013840568705261042
+          "intraItemOffset": -0.002361594312947392
         },
         "activePoolSlots": 7,
-        "activeHitRegions": 3,
+        "activeHitRegions": 4,
         "targetable": true,
         "atlasUploads": 3
       },
@@ -296,48 +300,48 @@
       "updateMs": {
         "p50": 0,
         "p95": 0.10000000149011612,
-        "p99": 0.10000000149011612,
-        "samples": 28
+        "p99": 0.19999999925494194,
+        "samples": 36
       },
       "recentEvents": [
         {
-          "frame": 23,
+          "frame": 31,
           "type": "selection-pending",
           "source": "controller",
           "targetId": "spawn-cube"
         },
         {
-          "frame": 25,
+          "frame": 33,
           "type": "selection-cancelled",
           "reason": "scroll-threshold",
           "targetId": "spawn-cube"
         },
         {
-          "frame": 25,
+          "frame": 33,
           "type": "scroll-ownership-acquired",
           "source": "controller",
-          "threshold": 0.012,
+          "threshold": 0.013,
           "movement": 0.015108231965427654
         },
         {
-          "frame": 25,
+          "frame": 33,
           "type": "scroll-changed",
           "scrollOffset": 0.015108231965427654,
           "movement": 0.015108231965427654
         },
         {
-          "frame": 26,
+          "frame": 34,
           "type": "scroll-changed",
           "scrollOffset": 0.020138405687052607,
           "movement": 0.020138405687052607
         },
         {
-          "frame": 27,
+          "frame": 35,
           "type": "scroll-ownership-released",
-          "targetableFrame": 28
+          "targetableFrame": 36
         },
         {
-          "frame": 28,
+          "frame": 36,
           "type": "targets-rearmed"
         }
       ]
@@ -346,19 +350,19 @@
   "deterministicTrace": {
     "schema": "wrist-menu-three-presentation-trace/v1",
     "profile": {
-      "key": "A",
+      "key": "B",
       "panelMm": [
-        180,
-        142
+        192,
+        158
       ],
       "viewportMm": [
-        164,
-        96
+        176,
+        108
       ],
-      "rowMm": 18,
+      "rowMm": 20,
       "thresholdsMm": {
-        "hand": 8,
-        "controller": 12
+        "hand": 9,
+        "controller": 13
       }
     },
     "pool": {
@@ -374,13 +378,13 @@
           "scrollOffset": 0.037,
           "activeSlots": 8,
           "firstItem": "spawn-sphere",
-          "intraItemOffset": 0.017
+          "intraItemOffset": 0.0145
         },
         {
-          "scrollOffset": 0.242,
+          "scrollOffset": 0.273,
           "activeSlots": 7,
           "firstItem": "material-gloss",
-          "intraItemOffset": 0.012
+          "intraItemOffset": 0.0135
         }
       ]
     },
@@ -411,13 +415,13 @@
         {
           "type": "scroll-ownership-acquired",
           "source": "hand",
-          "threshold": 0.008,
-          "movement": 0.008
+          "threshold": 0.009,
+          "movement": 0.009
         },
         {
           "type": "scroll-changed",
-          "scrollOffset": 0.048,
-          "movement": 0.008
+          "scrollOffset": 0.049,
+          "movement": 0.009
         },
         {
           "type": "scroll-ownership-released",
@@ -454,13 +458,13 @@
         {
           "type": "scroll-ownership-acquired",
           "source": "controller",
-          "threshold": 0.012,
-          "movement": 0.012
+          "threshold": 0.013,
+          "movement": 0.013
         },
         {
           "type": "scroll-changed",
-          "scrollOffset": 0.052,
-          "movement": 0.012
+          "scrollOffset": 0.053,
+          "movement": 0.013
         },
         {
           "type": "scroll-ownership-released",
@@ -478,30 +482,56 @@
     "userAgent": "Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/33.0.0.x.x.x Chrome/126.0.6478.122 VR Safari/537.36"
   },
   "iwerSessionSnapshot": {
-    "capturedAt": "2026-07-18T21:28:07.619Z",
+    "capturedAt": "2026-07-19T11:13:05.042Z",
     "userAgent": "Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/33.0.0.x.x.x Chrome/126.0.6478.122 VR Safari/537.36",
     "xr": {
       "presenting": true,
       "frameRate": 72,
-      "visibilityState": "visible"
+      "visibilityState": "visible",
+      "inputSources": [
+        {
+          "handedness": "left",
+          "targetRayMode": "tracked-pointer",
+          "profiles": [
+            "oculus-touch-v3",
+            "oculus-touch",
+            "generic-trigger-squeeze-thumbstick"
+          ],
+          "hasHand": false,
+          "hasGripSpace": true,
+          "gamepadMapping": "xr-standard"
+        },
+        {
+          "handedness": "right",
+          "targetRayMode": "tracked-pointer",
+          "profiles": [
+            "oculus-touch-v3",
+            "oculus-touch",
+            "generic-trigger-squeeze-thumbstick"
+          ],
+          "hasHand": false,
+          "hasGripSpace": true,
+          "gamepadMapping": "xr-standard"
+        }
+      ]
     },
     "geometry": {
       "panelMm": [
-        180,
-        142
+        192,
+        158
       ],
       "viewportMm": [
-        164,
-        96
+        176,
+        108
       ],
-      "rowMm": 18,
-      "handThresholdMm": 8,
-      "controllerThresholdMm": 12
+      "rowMm": 20,
+      "handThresholdMm": 9,
+      "controllerThresholdMm": 13
     },
     "presentation": {
-      "profile": "A",
+      "profile": "B",
       "scrollOffset": 0,
-      "maxScroll": 0.24200000000000002,
+      "maxScroll": 0.27300000000000013,
       "anchor": {
         "itemId": "spawn-cube",
         "intraItemOffset": 0
@@ -530,11 +560,83 @@
       "p50": 0,
       "p95": 0.10000000149011612,
       "p99": 0.10000000149011612,
-      "samples": 14
+      "samples": 28
     },
     "recentEvents": [
       {
-        "frame": 11,
+        "frame": 22,
+        "type": "xr-session-started",
+        "frameRate": 72,
+        "visibilityState": "visible",
+        "inputSources": []
+      },
+      {
+        "frame": 22,
+        "type": "xr-input-sources-changed",
+        "added": [
+          {
+            "handedness": "left",
+            "targetRayMode": "tracked-pointer",
+            "profiles": [
+              "oculus-touch-v3",
+              "oculus-touch",
+              "generic-trigger-squeeze-thumbstick"
+            ],
+            "hasHand": false,
+            "hasGripSpace": true,
+            "gamepadMapping": "xr-standard"
+          },
+          {
+            "handedness": "right",
+            "targetRayMode": "tracked-pointer",
+            "profiles": [
+              "oculus-touch-v3",
+              "oculus-touch",
+              "generic-trigger-squeeze-thumbstick"
+            ],
+            "hasHand": false,
+            "hasGripSpace": true,
+            "gamepadMapping": "xr-standard"
+          }
+        ],
+        "removed": []
+      },
+      {
+        "frame": 22,
+        "type": "xr-controller-connected",
+        "index": 0,
+        "source": {
+          "handedness": "left",
+          "targetRayMode": "tracked-pointer",
+          "profiles": [
+            "oculus-touch-v3",
+            "oculus-touch",
+            "generic-trigger-squeeze-thumbstick"
+          ],
+          "hasHand": false,
+          "hasGripSpace": true,
+          "gamepadMapping": "xr-standard"
+        }
+      },
+      {
+        "frame": 22,
+        "type": "xr-controller-connected",
+        "index": 1,
+        "source": {
+          "handedness": "right",
+          "targetRayMode": "tracked-pointer",
+          "profiles": [
+            "oculus-touch-v3",
+            "oculus-touch",
+            "generic-trigger-squeeze-thumbstick"
+          ],
+          "hasHand": false,
+          "hasGripSpace": true,
+          "gamepadMapping": "xr-standard"
+        }
+      },
+      {
+        "frame": 23,
         "type": "xr-review-slab-staged",
         "distance": 0.5,
         "verticalOffset": -0.15
@@ -542,30 +644,31 @@
     ]
   },
   "finalSnapshot": {
-    "capturedAt": "2026-07-18T21:28:07.669Z",
+    "capturedAt": "2026-07-19T11:13:05.087Z",
     "userAgent": "Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/33.0.0.x.x.x Chrome/126.0.6478.122 VR Safari/537.36",
     "xr": {
       "presenting": false,
       "frameRate": null,
-      "visibilityState": null
+      "visibilityState": null,
+      "inputSources": []
     },
     "geometry": {
       "panelMm": [
-        180,
-        142
+        192,
+        158
       ],
       "viewportMm": [
-        164,
-        96
+        176,
+        108
       ],
-      "rowMm": 18,
-      "handThresholdMm": 8,
-      "controllerThresholdMm": 12
+      "rowMm": 20,
+      "handThresholdMm": 9,
+      "controllerThresholdMm": 13
     },
     "presentation": {
-      "profile": "A",
+      "profile": "B",
       "scrollOffset": 0,
-      "maxScroll": 0.24200000000000002,
+      "maxScroll": 0.27300000000000013,
       "anchor": {
         "itemId": "spawn-cube",
         "intraItemOffset": 0
@@ -594,14 +697,238 @@
       "p50": 0,
       "p95": 0.10000000149011612,
       "p99": 0.10000000149011612,
-      "samples": 18
+      "samples": 32
     },
     "recentEvents": [
       {
-        "frame": 11,
+        "frame": 22,
+        "type": "xr-session-started",
+        "frameRate": 72,
+        "visibilityState": "visible",
+        "inputSources": []
+      },
+      {
+        "frame": 22,
+        "type": "xr-input-sources-changed",
+        "added": [
+          {
+            "handedness": "left",
+            "targetRayMode": "tracked-pointer",
+            "profiles": [
+              "oculus-touch-v3",
+              "oculus-touch",
+              "generic-trigger-squeeze-thumbstick"
+            ],
+            "hasHand": false,
+            "hasGripSpace": true,
+            "gamepadMapping": "xr-standard"
+          },
+          {
+            "handedness": "right",
+            "targetRayMode": "tracked-pointer",
+            "profiles": [
+              "oculus-touch-v3",
+              "oculus-touch",
+              "generic-trigger-squeeze-thumbstick"
+            ],
+            "hasHand": false,
+            "hasGripSpace": true,
+            "gamepadMapping": "xr-standard"
+          }
+        ],
+        "removed": []
+      },
+      {
+        "frame": 22,
+        "type": "xr-controller-connected",
+        "index": 0,
+        "source": {
+          "handedness": "left",
+          "targetRayMode": "tracked-pointer",
+          "profiles": [
+            "oculus-touch-v3",
+            "oculus-touch",
+            "generic-trigger-squeeze-thumbstick"
+          ],
+          "hasHand": false,
+          "hasGripSpace": true,
+          "gamepadMapping": "xr-standard"
+        }
+      },
+      {
+        "frame": 22,
+        "type": "xr-controller-connected",
+        "index": 1,
+        "source": {
+          "handedness": "right",
+          "targetRayMode": "tracked-pointer",
+          "profiles": [
+            "oculus-touch-v3",
+            "oculus-touch",
+            "generic-trigger-squeeze-thumbstick"
+          ],
+          "hasHand": false,
+          "hasGripSpace": true,
+          "gamepadMapping": "xr-standard"
+        }
+      },
+      {
+        "frame": 23,
         "type": "xr-review-slab-staged",
         "distance": 0.5,
         "verticalOffset": -0.15
+      },
+      {
+        "frame": 29,
+        "type": "xr-session-ended",
+        "reason": "end-event",
+        "telemetry": {
+          "capturedAt": "2026-07-19T11:13:05.075Z",
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/33.0.0.x.x.x Chrome/126.0.6478.122 VR Safari/537.36",
+          "xr": {
+            "presenting": false,
+            "frameRate": 72,
+            "visibilityState": "visible",
+            "inputSources": []
+          },
+          "geometry": {
+            "panelMm": [
+              192,
+              158
+            ],
+            "viewportMm": [
+              176,
+              108
+            ],
+            "rowMm": 20,
+            "handThresholdMm": 9,
+            "controllerThresholdMm": 13
+          },
+          "presentation": {
+            "profile": "B",
+            "scrollOffset": 0,
+            "maxScroll": 0.27300000000000013,
+            "anchor": {
+              "itemId": "spawn-cube",
+              "intraItemOffset": 0
+            },
+            "activePoolSlots": 6,
+            "activeHitRegions": 4,
+            "targetable": true,
+            "atlasUploads": 1
+          },
+          "resourceEstimate": {
+            "atlasTextures": 1,
+            "atlasBytes": 8388608,
+            "poolCapacity": 12,
+            "explicitHitRegionCapacity": 12,
+            "presentationBatches": 3
+          },
+          "renderer": {
+            "calls": 20,
+            "triangles": 1080,
+            "lines": 450,
+            "geometries": 12,
+            "textures": 1,
+            "programs": 7
+          },
+          "updateMs": {
+            "p50": 0,
+            "p95": 0.10000000149011612,
+            "p99": 0.10000000149011612,
+            "samples": 29
+          },
+          "recentEvents": [
+            {
+              "frame": 22,
+              "type": "xr-session-started",
+              "frameRate": 72,
+              "visibilityState": "visible",
+              "inputSources": []
+            },
+            {
+              "frame": 22,
+              "type": "xr-input-sources-changed",
+              "added": [
+                {
+                  "handedness": "left",
+                  "targetRayMode": "tracked-pointer",
+                  "profiles": [
+                    "oculus-touch-v3",
+                    "oculus-touch",
+                    "generic-trigger-squeeze-thumbstick"
+                  ],
+                  "hasHand": false,
+                  "hasGripSpace": true,
+                  "gamepadMapping": "xr-standard"
+                },
+                {
+                  "handedness": "right",
+                  "targetRayMode": "tracked-pointer",
+                  "profiles": [
+                    "oculus-touch-v3",
+                    "oculus-touch",
+                    "generic-trigger-squeeze-thumbstick"
+                  ],
+                  "hasHand": false,
+                  "hasGripSpace": true,
+                  "gamepadMapping": "xr-standard"
+                }
+              ],
+              "removed": []
+            },
+            {
+              "frame": 22,
+              "type": "xr-controller-connected",
+              "index": 0,
+              "source": {
+                "handedness": "left",
+                "targetRayMode": "tracked-pointer",
+                "profiles": [
+                  "oculus-touch-v3",
+                  "oculus-touch",
+                  "generic-trigger-squeeze-thumbstick"
+                ],
+                "hasHand": false,
+                "hasGripSpace": true,
+                "gamepadMapping": "xr-standard"
+              }
+            },
+            {
+              "frame": 22,
+              "type": "xr-controller-connected",
+              "index": 1,
+              "source": {
+                "handedness": "right",
+                "targetRayMode": "tracked-pointer",
+                "profiles": [
+                  "oculus-touch-v3",
+                  "oculus-touch",
+                  "generic-trigger-squeeze-thumbstick"
+                ],
+                "hasHand": false,
+                "hasGripSpace": true,
+                "gamepadMapping": "xr-standard"
+              }
+            },
+            {
+              "frame": 23,
+              "type": "xr-review-slab-staged",
+              "distance": 0.5,
+              "verticalOffset": -0.15
+            }
+          ]
+        }
+      },
+      {
+        "frame": 29,
+        "type": "xr-controller-disconnected",
+        "index": 0
+      },
+      {
+        "frame": 29,
+        "type": "xr-controller-disconnected",
+        "index": 1
       }
     ]
   },
@@ -609,19 +936,32 @@
     "http://127.0.0.1:4173/@vite/client",
     "http://127.0.0.1:4173/prototype-three-presentation/src/main.js",
     "http://127.0.0.1:4173/node_modules/vite/dist/client/env.mjs",
-    "http://127.0.0.1:4173/node_modules/.vite/deps/three.js?v=5ed6a880",
+    "http://127.0.0.1:4173/node_modules/.vite/deps/three.js?v=0ddbcdf5",
     "http://127.0.0.1:4173/prototype-three-presentation/src/styles.css",
     "http://127.0.0.1:4173/prototype-three-presentation/src/config.js",
     "http://127.0.0.1:4173/prototype-three-presentation/src/fixtures/menu-definition.js",
     "http://127.0.0.1:4173/prototype-three-presentation/src/model/drag-session.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/model/xr-session.js",
     "http://127.0.0.1:4173/prototype-three-presentation/src/performance-sampler.js",
     "http://127.0.0.1:4173/prototype-three-presentation/src/presentation/bundled-font.js",
     "http://127.0.0.1:4173/prototype-three-presentation/src/presentation/command-slab.js",
+    "http://127.0.0.1:4173/prototype-three-presentation/src/vr-test-logger.js",
     "http://127.0.0.1:4173/prototype-three-presentation/scripts/trace-scenarios.mjs",
     "http://127.0.0.1:4173/prototype-three-presentation/src/generated/bundled-font-data.js",
     "http://127.0.0.1:4173/prototype-three-presentation/src/model/virtualized-layout.js",
     "http://127.0.0.1:4173/prototype-three-presentation/src/presentation/atlas.js",
-    "http://127.0.0.1:4173/prototype-three-presentation/src/presentation/quad-batch.js"
+    "http://127.0.0.1:4173/prototype-three-presentation/src/presentation/quad-batch.js",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log",
+    "http://127.0.0.1:4173/__vr-test-log"
   ],
   "consoleMessages": [
     {

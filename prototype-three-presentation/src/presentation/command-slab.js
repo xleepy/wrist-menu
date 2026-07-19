@@ -158,8 +158,14 @@ export class CommandSlabPresentation {
     const footerCenter = (footerTop + footerBottom) / 2;
 
     if (redrawAtlas) {
-      this.atlas.drawHeader(this.profile, this.viewport.anchor());
-      this.atlas.drawFooter(this.profile);
+      this.atlas.drawHeader(this.profile, this.viewport.anchor(), {
+        width: this.profile.viewportWidth,
+        height: headerHeight,
+      });
+      this.atlas.drawFooter(this.profile, {
+        width: this.profile.viewportWidth,
+        height: footerHeight,
+      });
     }
     this.headerBatch.begin();
     this.headerBatch.push({ x: 0, y: headerCenter, width: this.profile.viewportWidth, height: headerHeight, z: .003, uv: this.atlas.headerUv() });
@@ -176,7 +182,12 @@ export class CommandSlabPresentation {
       const item = entry.item;
       const centerY = this.viewportTop - (entry.top - viewportStart) - entry.height / 2;
       const hovered = item.id === this.hoveredItemId;
-      if (redrawAtlas) this.atlas.drawRow(slot, item, { hovered });
+      if (redrawAtlas) {
+        this.atlas.drawRow(slot, item, this.profile, { hovered }, {
+          width: this.profile.viewportWidth,
+          height: entry.height,
+        });
+      }
 
       if (item.type !== "separator") {
         this.rowBackgroundBatch.push({
