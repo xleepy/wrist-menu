@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Deterministic evidence replay, not a production test suite.
 
+import assert from 'node:assert/strict'
+
 import {
   PROFILE_PRESETS,
   advanceAnchorState,
@@ -95,8 +97,35 @@ for (const handedness of ['left', 'right']) {
 }
 
 printHeading('configurable profile preset resolution')
+const observedQuest2Profiles = [
+  'oculus-touch-v3',
+  'oculus-touch-v2',
+  'oculus-touch',
+  'generic-trigger-squeeze-thumbstick',
+]
+
+assert.equal(
+  resolvePreset({
+    deviceTarget: 'quest-2',
+    sourceKind: 'controller',
+    profiles: observedQuest2Profiles,
+  }).id,
+  'quest-2-touch-candidate-a',
+  'Quest 2 uses controller candidate A as its provisional default',
+)
+assert.equal(
+  resolvePreset({
+    deviceTarget: 'quest-3',
+    sourceKind: 'controller',
+    profiles: observedQuest2Profiles,
+  }).id,
+  'controller-neutral-grip-proxy',
+  'overlapping Touch profile aliases do not promote candidate A on other devices',
+)
+
 for (const fixture of [
-  { sourceKind: 'controller', profiles: ['oculus-touch-v2'] },
+  { deviceTarget: 'quest-2', sourceKind: 'controller', profiles: observedQuest2Profiles },
+  { deviceTarget: 'quest-3', sourceKind: 'controller', profiles: observedQuest2Profiles },
   { sourceKind: 'controller', profiles: ['oculus-touch-v3'] },
   { sourceKind: 'hand', profiles: ['generic-hand-select'] },
   { sourceKind: 'controller', profiles: ['unknown-controller'], requestedPresetId: 'quest-2-touch-candidate-a' },

@@ -6,8 +6,10 @@ import {
   PROVISIONAL_REVEAL_TUNING,
   advanceAnchorState,
   createAnchorState,
+  isPresetDefaultForDevice,
   materializeOffset,
   presetsForSourceKind,
+  resolvePreset,
   snapshotState,
 } from './anchor-model.mjs'
 import { captureBrowserErrors, createVrTestLogger } from './vr-test-logger.mjs'
@@ -141,6 +143,11 @@ logEvent('prototype-ready', {
 })
 
 function wireControls() {
+  elements['device-target'].addEventListener('change', () => {
+    populatePresetOptions({ preservePrevious: false })
+    applySelectedPreset('device-target-changed')
+    resetForConfigurationChange('device-target-changed')
+  })
   elements['source-kind'].addEventListener('change', () => {
     populatePresetOptions()
     applySelectedPreset('anchor-source-changed')
@@ -174,7 +181,7 @@ function wireControls() {
   elements['clear-run'].addEventListener('click', clearRun)
 }
 
-function populatePresetOptions() {
+function populatePresetOptions({ preservePrevious = true } = {}) {
   const sourceKind = elements['source-kind'].value
   const previousValue = elements['profile-preset'].value
   elements['profile-preset'].replaceChildren()
@@ -182,7 +189,13 @@ function populatePresetOptions() {
     elements['profile-preset'].append(new Option(preset.label, preset.id))
   }
   const stillAvailable = presetsForSourceKind(sourceKind).some((preset) => preset.id === previousValue)
-  if (stillAvailable) elements['profile-preset'].value = previousValue
+  const defaultPreset = resolvePreset({
+    deviceTarget: elements['device-target'].value,
+    sourceKind,
+  })
+  elements['profile-preset'].value = preservePrevious && stillAvailable
+    ? previousValue
+    : defaultPreset.id
 }
 
 function applySelectedPreset(reason) {
@@ -197,8 +210,15 @@ function applySelectedPreset(reason) {
   elements['rotation-x'].value = rx
   elements['rotation-y'].value = ry
   elements['rotation-z'].value = rz
-  elements['preset-hypothesis'].textContent = `${preset.hypothesis} Actual XRInputSource.profiles are captured in evidence; this candidate is not a default.`
-  elements['preset-status'].textContent = preset.autoMatch ? 'neutral baseline · unvalidated' : 'manual candidate · unvalidated'
+  const isDeviceDefault = isPresetDefaultForDevice(preset, elements['device-target'].value)
+  elements['preset-hypothesis'].textContent = isDeviceDefault
+    ? `${preset.hypothesis} Provisional for the explicit Quest 2 target and still Host Application-overridable.`
+    : `${preset.hypothesis} Actual XRInputSource.profiles are captured in evidence; this remains a calibration option.`
+  elements['preset-status'].textContent = isDeviceDefault
+    ? 'provisional device default · overrideable'
+    : preset.autoMatch
+      ? 'neutral fallback · unvalidated'
+      : 'manual candidate · unvalidated'
   logConfigurationChange(reason)
 }
 

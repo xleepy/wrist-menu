@@ -1,9 +1,10 @@
 // THROWAWAY PROTOTYPE LOGIC. Do not ship this module as package code.
 //
 // Question: which per-device/per-profile wrist offsets and fail-closed tracking rules
-// remain comfortable on physical Quest 3/3S hardware? The values below are calibration
-// hypotheses, never package defaults. The pure state transition boundary is deliberately
-// production-shaped so deterministic traces and the WebXR harness exercise the same rules.
+// remain comfortable on physical Quest hardware? Candidate A is the provisional Quest 2
+// default; the remaining values are calibration hypotheses. The pure state transition
+// boundary is deliberately production-shaped so deterministic traces and the WebXR harness
+// exercise the same rules.
 
 export const PROVISIONAL_REVEAL_TUNING = Object.freeze({
   enterAngleDeg: 35,
@@ -21,8 +22,8 @@ export const DEVICE_TARGETS = Object.freeze([
 ])
 
 // Candidate geometry is intentionally small and explicit. `mirrorX` and `mirrorRoll`
-// turn one hypothesis into handedness-specific concrete offsets. None is auto-promoted
-// into a package default without the physical HITL checklist.
+// turn one hypothesis into handedness-specific concrete offsets. Device defaults require
+// an explicit device target because Meta's compatibility profile aliases overlap devices.
 export const PROFILE_PRESETS = deepFreeze([
   {
     id: 'tracked-hand-raw-wrist',
@@ -74,10 +75,11 @@ export const PROFILE_PRESETS = deepFreeze([
   },
   {
     id: 'quest-2-touch-candidate-a',
-    label: 'Quest 2 Touch candidate A: inward / 96 mm',
+    label: 'Quest 2 Touch candidate A: inward / 96 mm (provisional default)',
     sourceKind: 'controller',
     profilePatterns: ['oculus-touch-v2'],
     autoMatch: false,
+    defaultDeviceTargets: ['quest-2'],
     hypothesis: 'Mirror 20 mm of lateral bias and 8 degrees of roll around a 96 mm arm offset.',
     offset: {
       translationMeters: [0.02, 0.096, 0.008],
@@ -120,11 +122,27 @@ export function presetsForSourceKind(sourceKind) {
   return PROFILE_PRESETS.filter((preset) => preset.sourceKind === sourceKind)
 }
 
-export function resolvePreset({ sourceKind, profiles = [], requestedPresetId = null }) {
+export function isPresetDefaultForDevice(preset, deviceTarget) {
+  return preset.defaultDeviceTargets?.includes(deviceTarget) ?? false
+}
+
+export function resolvePreset({
+  deviceTarget = null,
+  sourceKind,
+  profiles = [],
+  requestedPresetId = null,
+}) {
   const requested = PROFILE_PRESETS.find(
     (preset) => preset.id === requestedPresetId && preset.sourceKind === sourceKind,
   )
   if (requested) return requested
+
+  const deviceDefault = PROFILE_PRESETS.find(
+    (preset) =>
+      preset.sourceKind === sourceKind &&
+      isPresetDefaultForDevice(preset, deviceTarget),
+  )
+  if (deviceDefault) return deviceDefault
 
   const matched = PROFILE_PRESETS.find(
     (preset) =>
@@ -244,6 +262,7 @@ export function advanceAnchorState(previous, frame, configuration) {
 
   const offset = configuration.offset ?? materializeOffset(
     resolvePreset({
+      deviceTarget: configuration.deviceTarget,
       sourceKind: source.kind,
       profiles: source.profiles,
       requestedPresetId: configuration.presetId,

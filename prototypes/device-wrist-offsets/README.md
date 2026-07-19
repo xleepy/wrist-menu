@@ -2,7 +2,7 @@
 
 This production-shaped evidence harness asks which controller grip-to-wrist and tracked-hand wrist offsets, confidence rules, visual-grace behavior, source-replacement rules, and optional haptic capabilities are comfortable enough to ship. It is the primary-source artifact for [Prototype device-specific wrist offsets and tracking degradation](https://github.com/xleepy/wrist-menu/issues/12), not Wrist Menu Package implementation code.
 
-Every offset in the lab is a **calibration hypothesis, not a package default**. Deterministic traces can reject unsafe state transitions; only a physical user can judge reach, clipping, comfort, tracking quality, and felt haptics.
+Quest 2 Touch candidate A is the **provisional Quest 2 Controller Wrist Proxy default**. It is selected only for the explicit Quest 2 device target and remains Host Application-overridable. Every other offset remains a calibration hypothesis. Deterministic traces can reject unsafe state transitions; physical use is still needed to debug reach, clipping, comfort, tracking quality, and felt haptics.
 
 ## Run it
 
@@ -68,7 +68,7 @@ The visual panel turns amber during grace. Its `SAFE / BLOCKED` label means no p
 
 ## Preset policy
 
-`oculus-touch-v2`, `oculus-touch-v3`, and any other actual profile strings are captured from the session. The neutral Controller Wrist Proxy and named Quest candidates exist to make comparisons repeatable; none is selected by user-agent sniffing or claimed as anatomically correct. A Host Application override remains necessary until the physical evidence matrix finds a defensible default for a particular device/profile combination.
+`oculus-touch-v2`, `oculus-touch-v3`, and other actual profile strings are captured from the session. Quest 2 exposes overlapping Touch compatibility aliases, so profile strings alone do not identify the headset. Candidate A is therefore selected through the explicit Quest 2 target, never user-agent sniffing, and is not claimed to be anatomically exact. Unknown and non-Quest-2 devices keep the neutral Controller Wrist Proxy fallback; every Host Application can override the concrete transform.
 
 Quest 2 is an immediate, useful **provisional evidence lane** because hardware is available. Passing it does not establish a Quest 2 support guarantee and does not replace the unresolved Quest 3 and Quest 3S release-device lanes.
 
