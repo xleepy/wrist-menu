@@ -67,6 +67,33 @@ short second Quest 2 pass still needs to confirm the resulting physical
 legibility and direct-hand behavior. Quest 3/3S remain later release-validation
 lanes.
 
+## Accepted prototype decision
+
+Accepted 2026-07-28: use the implemented Reach profile as the version-1
+presentation direction and treat later physical problems as tuning and
+validation evidence rather than leaving this prototype decision open.
+
+- Use the embedded Inter Latin 400/600 `CanvasTexture` atlas and procedural
+  Canvas2D icons as the self-contained default text/icon technique.
+- Use the 192 × 158 mm panel, 176 × 108 mm Menu Viewport, 20 mm rows, 2.5 mm
+  row gaps, and 9 mm separators from profile B.
+- Preserve 6.5 mm primary type and 4.75 mm secondary, trailing, separator,
+  header-meta, and footer type targets.
+- Use a fixed 12-slot visual pool with one entry of overscan on each side and
+  restore scrolling by stable Menu Item id plus intra-item offset.
+- Use inclusive 9 mm direct-hand and 13 mm controller thresholds. Crossing a
+  threshold cancels pending Selection Ownership, acquires Scroll Ownership,
+  and rearms Hit Regions on the frame after release.
+- Preserve the package-owned attachment root, presentation-owned oriented-box
+  Hit Regions, two-plane clipping, and the one-frame targetability barrier
+  demonstrated by the prototype.
+
+This acceptance does not claim that the corrected structural text, direct-hand
+behavior, comfort, or frame performance passed a second physical Quest 2 run.
+Those unknowns remain explicit release-validation inputs for issue 8. The
+automated and desktop/IWER measurements above are a prototype resource baseline,
+not a Wrist Menu Package performance budget or a broad Quest support claim.
+
 ## Screenshots
 
 - `screenshots/variant-a-balanced.png`
