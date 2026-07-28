@@ -147,3 +147,31 @@ _Avoid_: Click event, automatic state update
 **Wrist Menu Event**:
 A source-independent notification emitted by a Wrist Menu Instance for a Selection Intent, visibility change, Selection Cancellation, or runtime status.
 _Avoid_: DOM event, renderer event, raw input event
+
+**Compatibility Claim**:
+An exact configuration that the project publicly represents as supported because its applicable Release Gates have current Evidence Records.
+_Avoid_: General compatibility, best effort
+
+**Tested Lane**:
+An exact dependency and Renderer Integration configuration exercised by release automation for one candidate build.
+_Avoid_: Peer range, supported matrix
+
+**Validation Combination**:
+One exact physical device, operating system, browser, Example Variant, Selection Source type, menu wrist, and refresh-rate combination.
+_Avoid_: Device support, Quest test
+
+**Release Gate**:
+A measurable condition a candidate build must satisfy before a stable release or Compatibility Claim may proceed.
+_Avoid_: Recommendation, checklist note
+
+**Evidence Record**:
+An immutable result and its identifying metadata that show how one candidate build, Tested Lane, or Validation Combination performed against a Release Gate.
+_Avoid_: Test log, anecdote
+
+**Performance Baseline**:
+A fixed-fixture measurement of package-attributable hidden and active behavior used to detect resource or frame regressions.
+_Avoid_: Prototype benchmark, whole-application budget
+
+**Evidence Freshness**:
+Whether an Evidence Record still applies after relevant code, dependency, device-software, fixture, or instrumentation changes.
+_Avoid_: Evidence age, latest result
