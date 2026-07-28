@@ -4,16 +4,15 @@ GitHub's native sub-issue and dependency relationships on [Chart the reusable We
 
 ## Active
 
-- [Prototype the default Three.js presentation and continuous scrolling](https://github.com/xleepy/wrist-menu/issues/13) — active isolated prototype session covering the production-shaped Command slab, physical geometry, text, clipping, virtualization, and drag interaction.
+- None.
 
 ## Ready
 
-- None.
+- [Choose the implementation sequence and close remaining gaps](https://github.com/xleepy/wrist-menu/issues/11) — ready to reconcile the completed Wayfinder decisions into an implementation sequence.
 
 ## Blocked
 
-- [Set compatibility, performance, and validation gates](https://github.com/xleepy/wrist-menu/issues/8) — waiting for **Prototype the default Three.js presentation and continuous scrolling**.
-- [Choose the implementation sequence and close remaining gaps](https://github.com/xleepy/wrist-menu/issues/11) — waiting for **Set compatibility, performance, and validation gates**.
+- None.
 
 ## Production boundary
 
