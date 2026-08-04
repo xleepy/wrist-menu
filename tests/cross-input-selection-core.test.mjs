@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createWristMenuRuntime } from '../dist/core/index.js'
+import {
+  createWristMenuRuntimeState,
+  stepWristMenuRuntime,
+  syncWristMenuRuntime,
+  wristMenuRuntimeBlocksSceneInput,
+} from '../dist/core/index.js'
 import {
   controllerSample,
   controllerTarget,
@@ -12,7 +17,7 @@ import {
 } from '../fixtures/cross-input-selection.mjs'
 
 function createRuntime(onEvent) {
-  return createWristMenuRuntime({ snapshot: crossInputSnapshot, onEvent })
+  return createWristMenuRuntimeState({ snapshot: crossInputSnapshot, onEvent })
 }
 
 function semanticEvents(events) {
@@ -25,24 +30,25 @@ function semanticEvents(events) {
 test('hand press-plane crossing and controller release commit the same semantic intent', () => {
   const controllerEvents = []
   const controller = createRuntime((event) => controllerEvents.push(event))
-  controller.step(selectionFrame(1, [controllerSample()]), [])
-  controller.step(selectionFrame(2, [controllerSample()]), [
+  stepWristMenuRuntime(controller, selectionFrame(1, [controllerSample()]), [])
+  stepWristMenuRuntime(controller, selectionFrame(2, [controllerSample()]), [
     controllerTarget('first'),
   ])
-  controller.step(selectionFrame(3, [controllerSample({ pressed: true })]), [
+  stepWristMenuRuntime(controller, selectionFrame(3, [controllerSample({ pressed: true })]), [
     controllerTarget('first'),
   ])
-  controller.step(
+  stepWristMenuRuntime(
+    controller,
     selectionFrame(4, [controllerSample({ completed: true })]),
     [controllerTarget('first')],
   )
 
   const handEvents = []
   const hand = createRuntime((event) => handEvents.push(event))
-  hand.step(selectionFrame(1, [handSample()]), [])
-  hand.step(selectionFrame(2, [handSample()]), [handTarget('first', 'hover')])
-  assert.equal(hand.blocksSceneInput('right-hand'), true)
-  hand.step(selectionFrame(3, [handSample()]), [handTarget('first', 'pressed')])
+  stepWristMenuRuntime(hand, selectionFrame(1, [handSample()]), [])
+  stepWristMenuRuntime(hand, selectionFrame(2, [handSample()]), [handTarget('first', 'hover')])
+  assert.equal(wristMenuRuntimeBlocksSceneInput(hand, 'right-hand'), true)
+  stepWristMenuRuntime(hand, selectionFrame(3, [handSample()]), [handTarget('first', 'pressed')])
 
   const controllerCommit = semanticEvents(controllerEvents)[0]
   const handCommit = semanticEvents(handEvents)[0]
@@ -58,30 +64,31 @@ test('hand press-plane crossing and controller release commit the same semantic 
     kind: 'hand',
     handedness: 'right',
   })
-  assert.equal(hand.blocksSceneInput('right-hand'), true)
-  hand.step(selectionFrame(4, [handSample()]), [])
-  assert.equal(hand.blocksSceneInput('right-hand'), false)
+  assert.equal(wristMenuRuntimeBlocksSceneInput(hand, 'right-hand'), true)
+  stepWristMenuRuntime(hand, selectionFrame(4, [handSample()]), [])
+  assert.equal(wristMenuRuntimeBlocksSceneInput(hand, 'right-hand'), false)
 })
 
 test('an owned source never transfers between Menu Items and must neutralize before rearming', () => {
   const events = []
   const runtime = createRuntime((event) => events.push(event))
-  runtime.step(selectionFrame(1, [controllerSample()]), [])
-  runtime.step(selectionFrame(2, [controllerSample()]), [
+  stepWristMenuRuntime(runtime, selectionFrame(1, [controllerSample()]), [])
+  stepWristMenuRuntime(runtime, selectionFrame(2, [controllerSample()]), [
     controllerTarget('first'),
   ])
-  runtime.step(selectionFrame(3, [controllerSample({ pressed: true })]), [
+  stepWristMenuRuntime(runtime, selectionFrame(3, [controllerSample({ pressed: true })]), [
     controllerTarget('first'),
   ])
 
-  runtime.step(selectionFrame(4, [controllerSample({ pressed: true })]), [
+  stepWristMenuRuntime(runtime, selectionFrame(4, [controllerSample({ pressed: true })]), [
     controllerTarget('second'),
   ])
-  runtime.step(
+  stepWristMenuRuntime(
+    runtime,
     selectionFrame(5, [controllerSample({ pressed: true, completed: true })]),
     [controllerTarget('second')],
   )
-  assert.equal(runtime.blocksSceneInput('right-controller'), true)
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-controller'), true)
   assert.deepEqual(semanticEvents(events), [
     {
       type: 'selection-cancellation',
@@ -92,14 +99,15 @@ test('an owned source never transfers between Menu Items and must neutralize bef
     },
   ])
 
-  runtime.step(selectionFrame(6, [controllerSample()]), [
+  stepWristMenuRuntime(runtime, selectionFrame(6, [controllerSample()]), [
     controllerTarget('second'),
   ])
-  assert.equal(runtime.blocksSceneInput('right-controller'), false)
-  runtime.step(selectionFrame(7, [controllerSample({ pressed: true })]), [
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-controller'), false)
+  stepWristMenuRuntime(runtime, selectionFrame(7, [controllerSample({ pressed: true })]), [
     controllerTarget('second'),
   ])
-  runtime.step(
+  stepWristMenuRuntime(
+    runtime,
     selectionFrame(8, [controllerSample({ completed: true })]),
     [controllerTarget('second')],
   )
@@ -113,10 +121,10 @@ test('an owned source never transfers between Menu Items and must neutralize bef
 test('a direct hand moving between items cancels and cannot transfer before withdrawal', () => {
   const events = []
   const runtime = createRuntime((event) => events.push(event))
-  runtime.step(selectionFrame(1, [handSample()]), [])
-  runtime.step(selectionFrame(2, [handSample()]), [handTarget('first', 'hover')])
-  runtime.step(selectionFrame(3, [handSample()]), [handTarget('second', 'pressed')])
-  runtime.step(selectionFrame(4, [handSample()]), [handTarget('second', 'pressed')])
+  stepWristMenuRuntime(runtime, selectionFrame(1, [handSample()]), [])
+  stepWristMenuRuntime(runtime, selectionFrame(2, [handSample()]), [handTarget('first', 'hover')])
+  stepWristMenuRuntime(runtime, selectionFrame(3, [handSample()]), [handTarget('second', 'pressed')])
+  stepWristMenuRuntime(runtime, selectionFrame(4, [handSample()]), [handTarget('second', 'pressed')])
 
   assert.deepEqual(semanticEvents(events), [
     {
@@ -128,9 +136,9 @@ test('a direct hand moving between items cancels and cannot transfer before with
     },
   ])
 
-  runtime.step(selectionFrame(5, [handSample()]), [])
-  runtime.step(selectionFrame(6, [handSample()]), [handTarget('second', 'hover')])
-  runtime.step(selectionFrame(7, [handSample()]), [handTarget('second', 'pressed')])
+  stepWristMenuRuntime(runtime, selectionFrame(5, [handSample()]), [])
+  stepWristMenuRuntime(runtime, selectionFrame(6, [handSample()]), [handTarget('second', 'hover')])
+  stepWristMenuRuntime(runtime, selectionFrame(7, [handSample()]), [handTarget('second', 'pressed')])
   assert.equal(
     semanticEvents(events).filter(({ type }) => type === 'selection-intent')
       .length,
@@ -141,15 +149,15 @@ test('a direct hand moving between items cancels and cannot transfer before with
 test('tracking loss and source replacement cancel without rearming inside the Hit Region', () => {
   const events = []
   const runtime = createRuntime((event) => events.push(event))
-  runtime.step(selectionFrame(1, [handSample()]), [])
-  runtime.step(selectionFrame(2, [handSample()]), [handTarget('first', 'hover')])
-  runtime.step(selectionFrame(3, []), [])
+  stepWristMenuRuntime(runtime, selectionFrame(1, [handSample()]), [])
+  stepWristMenuRuntime(runtime, selectionFrame(2, [handSample()]), [handTarget('first', 'hover')])
+  stepWristMenuRuntime(runtime, selectionFrame(3, []), [])
 
   const replacement = handSample('replacement-hand')
-  runtime.step(selectionFrame(4, [replacement]), [
+  stepWristMenuRuntime(runtime, selectionFrame(4, [replacement]), [
     handTarget('second', 'pressed', replacement.id),
   ])
-  runtime.step(selectionFrame(5, [replacement]), [
+  stepWristMenuRuntime(runtime, selectionFrame(5, [replacement]), [
     handTarget('second', 'pressed', replacement.id),
   ])
   assert.deepEqual(semanticEvents(events), [
@@ -162,8 +170,8 @@ test('tracking loss and source replacement cancel without rearming inside the Hi
     },
   ])
 
-  runtime.step(selectionFrame(6, [replacement]), [])
-  runtime.step(selectionFrame(7, [replacement]), [
+  stepWristMenuRuntime(runtime, selectionFrame(6, [replacement]), [])
+  stepWristMenuRuntime(runtime, selectionFrame(7, [replacement]), [
     handTarget('second', 'pressed', replacement.id),
   ])
   assert.equal(
@@ -193,19 +201,19 @@ for (const [label, nextSnapshot] of [
   test(`${label} cancels ownership and a held controller cannot rearm`, () => {
     const events = []
     const runtime = createRuntime((event) => events.push(event))
-    runtime.step(selectionFrame(1, [controllerSample()]), [])
-    runtime.step(selectionFrame(2, [controllerSample()]), [
+    stepWristMenuRuntime(runtime, selectionFrame(1, [controllerSample()]), [])
+    stepWristMenuRuntime(runtime, selectionFrame(2, [controllerSample()]), [
       controllerTarget('first'),
     ])
-    runtime.step(selectionFrame(3, [controllerSample({ pressed: true })]), [
+    stepWristMenuRuntime(runtime, selectionFrame(3, [controllerSample({ pressed: true })]), [
       controllerTarget('first'),
     ])
-    runtime.sync(nextSnapshot)
-    runtime.step(selectionFrame(4, [controllerSample({ pressed: true })]), [
+    syncWristMenuRuntime(runtime, nextSnapshot)
+    stepWristMenuRuntime(runtime, selectionFrame(4, [controllerSample({ pressed: true })]), [
       controllerTarget('second'),
     ])
 
-    assert.equal(runtime.blocksSceneInput('right-controller'), false)
+    assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-controller'), false)
     assert.equal(
       semanticEvents(events).filter(({ type }) => type === 'selection-intent')
         .length,
@@ -238,15 +246,16 @@ test('disabled items may hover but neither source can commit or claim them', () 
   ]) {
     const events = []
     const runtime = createRuntime((event) => events.push(event))
-    runtime.step(
+    stepWristMenuRuntime(
+      runtime,
       selectionFrame(1, [observations[0][0]]),
       [],
     )
     for (let index = 0; index < observations.length; index += 1) {
       const [sample, observation] = observations[index]
-      const model = runtime.step(selectionFrame(index + 2, [sample]), [observation])
+      const model = stepWristMenuRuntime(runtime, selectionFrame(index + 2, [sample]), [observation])
       assert.equal(model.items[2].interaction, 'hovered')
-      assert.equal(runtime.blocksSceneInput(source), false)
+      assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, source), false)
     }
     assert.deepEqual(semanticEvents(events), [])
   }
@@ -260,18 +269,18 @@ test('a throwing commit callback leaves a hand neutral and never retries the int
       throw new Error('Host callback failed')
     }
   })
-  runtime.step(selectionFrame(1, [handSample()]), [])
-  runtime.step(selectionFrame(2, [handSample()]), [handTarget('first', 'hover')])
+  stepWristMenuRuntime(runtime, selectionFrame(1, [handSample()]), [])
+  stepWristMenuRuntime(runtime, selectionFrame(2, [handSample()]), [handTarget('first', 'hover')])
   assert.throws(
     () =>
-      runtime.step(selectionFrame(3, [handSample()]), [
+      stepWristMenuRuntime(runtime, selectionFrame(3, [handSample()]), [
         handTarget('first', 'pressed'),
       ]),
     /Host callback failed/,
   )
-  assert.equal(runtime.blocksSceneInput('right-hand'), true)
-  runtime.step(selectionFrame(4, [handSample()]), [handTarget('first', 'pressed')])
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-hand'), true)
+  stepWristMenuRuntime(runtime, selectionFrame(4, [handSample()]), [handTarget('first', 'pressed')])
   assert.equal(commits, 1)
-  runtime.step(selectionFrame(5, [handSample()]), [])
-  assert.equal(runtime.blocksSceneInput('right-hand'), false)
+  stepWristMenuRuntime(runtime, selectionFrame(5, [handSample()]), [])
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-hand'), false)
 })

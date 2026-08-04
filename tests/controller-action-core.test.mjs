@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createWristMenuRuntime } from '../dist/core/index.js'
+import {
+  createWristMenuRuntimeState,
+  stepWristMenuRuntime,
+  wristMenuRuntimeBlocksSceneInput,
+} from '../dist/core/index.js'
 import {
   controllerActionSnapshot,
   frameSample,
@@ -10,27 +14,27 @@ import {
 
 test('controller commits one Action Item only after release over the owned target', () => {
   const events = []
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: controllerActionSnapshot,
     onEvent: (event) => events.push(event),
   })
 
-  const revealed = runtime.step(frameSample(1, false), [targetObservation])
+  const revealed = stepWristMenuRuntime(runtime, frameSample(1, false), [targetObservation])
   assert.equal(revealed.visible, true)
   assert.equal(revealed.targetable, false)
   assert.equal(revealed.items[0]?.interaction, 'idle')
 
-  const hovered = runtime.step(frameSample(2, false), [targetObservation])
+  const hovered = stepWristMenuRuntime(runtime, frameSample(2, false), [targetObservation])
   assert.equal(hovered.targetable, true)
   assert.equal(hovered.items[0]?.interaction, 'hovered')
 
-  const armed = runtime.step(frameSample(3, true), [targetObservation])
+  const armed = stepWristMenuRuntime(runtime, frameSample(3, true), [targetObservation])
   assert.equal(armed.items[0]?.interaction, 'armed')
-  assert.equal(runtime.blocksSceneInput('right-controller'), true)
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-controller'), true)
 
-  const committed = runtime.step(frameSample(4, false, true), [targetObservation])
+  const committed = stepWristMenuRuntime(runtime, frameSample(4, false, true), [targetObservation])
   assert.equal(committed.items[0]?.interaction, 'hovered')
-  assert.equal(runtime.blocksSceneInput('right-controller'), false)
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-controller'), false)
   assert.deepEqual(events.filter(({ type }) => type === 'selection-intent'), [
     {
       type: 'selection-intent',
@@ -48,21 +52,21 @@ test('controller commits one Action Item only after release over the owned targe
     },
   ])
 
-  runtime.step(frameSample(5, false), [targetObservation])
+  stepWristMenuRuntime(runtime, frameSample(5, false), [targetObservation])
   assert.equal(events.filter(({ type }) => type === 'selection-intent').length, 1)
 })
 
 test('controller release away from the owned Action Item cancels without an intent', () => {
   const events = []
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: controllerActionSnapshot,
     onEvent: (event) => events.push(event),
   })
 
-  runtime.step(frameSample(1, false), [])
-  runtime.step(frameSample(2, false), [targetObservation])
-  runtime.step(frameSample(3, true), [targetObservation])
-  runtime.step(frameSample(4, false, true), [])
+  stepWristMenuRuntime(runtime, frameSample(1, false), [])
+  stepWristMenuRuntime(runtime, frameSample(2, false), [targetObservation])
+  stepWristMenuRuntime(runtime, frameSample(3, true), [targetObservation])
+  stepWristMenuRuntime(runtime, frameSample(4, false, true), [])
 
   assert.deepEqual(events.filter(({ type }) => type === 'selection-cancellation'), [
     {
@@ -77,21 +81,22 @@ test('controller release away from the owned Action Item cancels without an inte
 
 test('controller loss cancels ownership and a held replacement cannot rearm', () => {
   const events = []
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: controllerActionSnapshot,
     onEvent: (event) => events.push(event),
   })
 
-  runtime.step(frameSample(1, false), [])
-  runtime.step(frameSample(2, false), [targetObservation])
-  runtime.step(frameSample(3, true), [targetObservation])
-  assert.equal(runtime.blocksSceneInput('right-controller'), true)
+  stepWristMenuRuntime(runtime, frameSample(1, false), [])
+  stepWristMenuRuntime(runtime, frameSample(2, false), [targetObservation])
+  stepWristMenuRuntime(runtime, frameSample(3, true), [targetObservation])
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-controller'), true)
 
-  runtime.step(
+  stepWristMenuRuntime(
+    runtime,
     { ...frameSample(4, true), selectionSources: [] },
     [],
   )
-  assert.equal(runtime.blocksSceneInput('right-controller'), false)
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-controller'), false)
   const cancellation = events.find(({ type }) => type === 'selection-cancellation')
   assert.equal(cancellation?.reason, 'lifecycle-interrupted')
 
@@ -107,10 +112,10 @@ test('controller loss cancels ownership and a held replacement cannot rearm', ()
       },
     ],
   }
-  runtime.step(replacement, [
+  stepWristMenuRuntime(runtime, replacement, [
     { ...targetObservation, sourceId: 'replacement-controller' },
   ])
-  assert.equal(runtime.blocksSceneInput('replacement-controller'), false)
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'replacement-controller'), false)
   assert.equal(
     events.filter(({ type }) => type === 'selection-cancellation').length,
     1,
@@ -119,15 +124,15 @@ test('controller loss cancels ownership and a held replacement cannot rearm', ()
 
 test('selectend without a successful select cancels instead of committing', () => {
   const events = []
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: controllerActionSnapshot,
     onEvent: (event) => events.push(event),
   })
 
-  runtime.step(frameSample(1, false), [])
-  runtime.step(frameSample(2, false), [targetObservation])
-  runtime.step(frameSample(3, true), [targetObservation])
-  runtime.step(frameSample(4, false, false), [targetObservation])
+  stepWristMenuRuntime(runtime, frameSample(1, false), [])
+  stepWristMenuRuntime(runtime, frameSample(2, false), [targetObservation])
+  stepWristMenuRuntime(runtime, frameSample(3, true), [targetObservation])
+  stepWristMenuRuntime(runtime, frameSample(4, false, false), [targetObservation])
 
   assert.deepEqual(events.filter(({ type }) => type === 'selection-cancellation'), [
     {

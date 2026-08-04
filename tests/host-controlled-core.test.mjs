@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createWristMenuRuntime } from '../dist/core/index.js'
+import {
+  createWristMenuRuntimeState,
+  disposeWristMenuRuntime,
+  stepWristMenuRuntime,
+  syncWristMenuRuntime,
+  wristMenuRuntimeBlocksSceneInput,
+} from '../dist/core/index.js'
 import {
   controlledFrame,
   hostControlledSnapshot,
@@ -28,12 +34,12 @@ function automaticFrame(sequence, selectPressed = false, selectCompleted = false
 }
 
 test('Presentation Model preserves the complete Host-owned Menu Definition order', () => {
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: hostControlledSnapshot,
     onEvent: () => undefined,
   })
 
-  const model = runtime.step(controlledFrame(1), [])
+  const model = stepWristMenuRuntime(runtime, controlledFrame(1), [])
 
   assert.deepEqual(
     model.items.map(({ type, id }) => [type, id]),
@@ -95,19 +101,19 @@ test('Presentation Model preserves the complete Host-owned Menu Definition order
 })
 
 test('sync copies a complete valid snapshot and applies it at one Frame Sample boundary', () => {
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: hostControlledSnapshot,
     onEvent: () => undefined,
   })
-  runtime.step(controlledFrame(1), [])
+  stepWristMenuRuntime(runtime, controlledFrame(1), [])
 
   const mutable = structuredClone(hostControlledSnapshot)
   mutable.menuDefinition[2].value = false
-  runtime.sync(mutable)
+  syncWristMenuRuntime(runtime, mutable)
   mutable.menuDefinition[2].value = true
   mutable.menuDefinition[2].label = 'Mutated after sync'
 
-  const applied = runtime.step(controlledFrame(2), [])
+  const applied = stepWristMenuRuntime(runtime, controlledFrame(2), [])
   assert.equal(applied.revision, 2)
   assert.equal(applied.items[2].label, 'Show grid')
   assert.equal(applied.items[2].value, false)
@@ -115,38 +121,38 @@ test('sync copies a complete valid snapshot and applies it at one Frame Sample b
 })
 
 test('invalid snapshots fail without replacing either live or pending Host state', () => {
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: hostControlledSnapshot,
     onEvent: () => undefined,
   })
-  runtime.step(controlledFrame(1), [])
+  stepWristMenuRuntime(runtime, controlledFrame(1), [])
 
   const valid = structuredClone(hostControlledSnapshot)
   valid.menuDefinition[2].value = false
-  runtime.sync(valid)
+  syncWristMenuRuntime(runtime, valid)
 
   const invalid = structuredClone(hostControlledSnapshot)
   invalid.menuDefinition[3].selectedValue = 'cylinder'
   assert.throws(
-    () => runtime.sync(invalid),
+    () => syncWristMenuRuntime(runtime, invalid),
     /Choice Group primitive-shape selectedValue must match exactly one option/,
   )
 
   const invalidComfort = structuredClone(hostControlledSnapshot)
   invalidComfort.comfort.enterAngleDegrees = 60
   assert.throws(
-    () => runtime.sync(invalidComfort),
+    () => syncWristMenuRuntime(runtime, invalidComfort),
     /exitAngleDegrees must be greater than or equal to enterAngleDegrees/,
   )
 
-  const applied = runtime.step(controlledFrame(2), [])
+  const applied = stepWristMenuRuntime(runtime, controlledFrame(2), [])
   assert.equal(applied.items[2].value, false)
   assert.equal(applied.items[3].selectedValue, 'cube')
 })
 
 test('content validation rejects unstable, non-portable, and ambiguous definitions', () => {
   const create = (snapshot) =>
-    createWristMenuRuntime({ snapshot, onEvent: () => undefined })
+    createWristMenuRuntimeState({ snapshot, onEvent: () => undefined })
   const duplicateId = structuredClone(hostControlledSnapshot)
   duplicateId.menuDefinition[3].options[0].id = 'show-grid'
   assert.throws(() => create(duplicateId), /Menu item id must be unique/)
@@ -243,29 +249,29 @@ test('content validation rejects unstable, non-portable, and ambiguous definitio
     wrist: 'left',
     menuDefinition: [],
   })
-  assert.equal(empty.step(controlledFrame(1), []).visible, false)
+  assert.equal(stepWristMenuRuntime(empty, controlledFrame(1), []).visible, false)
 })
 
 test('rich automatic sync copies content and configuration atomically without reacquisition', () => {
   const initial = automaticSnapshot()
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: initial,
     onEvent: () => undefined,
   })
-  runtime.step(automaticFrame(1), [])
-  assert.equal(runtime.step(automaticFrame(2), []).targetable, true)
+  stepWristMenuRuntime(runtime, automaticFrame(1), [])
+  assert.equal(stepWristMenuRuntime(runtime, automaticFrame(2), []).targetable, true)
 
   const updated = structuredClone(initial)
   updated.menuDefinition[2].value = false
   updated.menuDefinition[3].selectedValue = 'sphere'
-  runtime.sync(updated)
+  syncWristMenuRuntime(runtime, updated)
 
   updated.menuDefinition[2].value = true
   updated.menuDefinition[3].selectedValue = 'cube'
   updated.comfort.enterAngleDegrees = 5
   updated.controllerWrist.offsets.left.translationMeters[0] = 1
 
-  const applied = runtime.step(automaticFrame(3), [])
+  const applied = stepWristMenuRuntime(runtime, automaticFrame(3), [])
   assert.equal(applied.revision, 2)
   assert.equal(applied.visible, true)
   assert.equal(applied.revealPhase, 'visible')
@@ -273,7 +279,7 @@ test('rich automatic sync copies content and configuration atomically without re
   assert.equal(applied.items[2].value, false)
   assert.equal(applied.items[3].selectedValue, 'sphere')
   assert.deepEqual(applied.anchorPose.position, [0, 0, 0])
-  assert.equal(runtime.step(automaticFrame(4), []).targetable, true)
+  assert.equal(stepWristMenuRuntime(runtime, automaticFrame(4), []).targetable, true)
 })
 
 test('anchoring sync cancels ownership, reacquires, and preserves callback-queued state', () => {
@@ -284,30 +290,30 @@ test('anchoring sync cancels ownership, reacquires, and preserves callback-queue
   const callbackUpdate = structuredClone(firstUpdate)
   callbackUpdate.menuDefinition[2].label = 'Grid from callback'
   let runtime
-  runtime = createWristMenuRuntime({
+  runtime = createWristMenuRuntimeState({
     snapshot: initial,
     onEvent: (event) => {
       if (
         event.type === 'selection-cancellation' &&
         event.reason === 'host-snapshot-changed'
       ) {
-        runtime.sync(callbackUpdate)
+        syncWristMenuRuntime(runtime, callbackUpdate)
       }
     },
   })
-  runtime.step(automaticFrame(1), [])
-  runtime.step(automaticFrame(2), [observe('show-grid')])
-  runtime.step(automaticFrame(3, true), [observe('show-grid')])
-  runtime.sync(firstUpdate)
+  stepWristMenuRuntime(runtime, automaticFrame(1), [])
+  stepWristMenuRuntime(runtime, automaticFrame(2), [observe('show-grid')])
+  stepWristMenuRuntime(runtime, automaticFrame(3, true), [observe('show-grid')])
+  syncWristMenuRuntime(runtime, firstUpdate)
 
-  const firstBoundary = runtime.step(automaticFrame(4, true), [])
+  const firstBoundary = stepWristMenuRuntime(runtime, automaticFrame(4, true), [])
   assert.equal(firstBoundary.revision, 2)
   assert.equal(firstBoundary.visible, false)
   assert.equal(firstBoundary.revealPhase, 'reacquire-dwell')
   assert.equal(firstBoundary.items[2].value, false)
   assert.equal(firstBoundary.items[2].label, 'Show grid')
 
-  const secondBoundary = runtime.step(automaticFrame(5), [])
+  const secondBoundary = stepWristMenuRuntime(runtime, automaticFrame(5), [])
   assert.equal(secondBoundary.revision, 3)
   assert.equal(secondBoundary.items[2].value, false)
   assert.equal(secondBoundary.items[2].label, 'Grid from callback')
@@ -315,16 +321,16 @@ test('anchoring sync cancels ownership, reacquires, and preserves callback-queue
 
 test('automatic reveal supports nested Choice Option ownership and intent', () => {
   const events = []
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: automaticSnapshot(),
     onEvent: (event) => events.push(event),
   })
-  runtime.step(automaticFrame(1), [])
-  runtime.step(automaticFrame(2), [observe('shape-sphere')])
-  runtime.step(automaticFrame(3, true), [observe('shape-sphere')])
-  runtime.step(automaticFrame(4, false, true), [observe('shape-sphere')])
+  stepWristMenuRuntime(runtime, automaticFrame(1), [])
+  stepWristMenuRuntime(runtime, automaticFrame(2), [observe('shape-sphere')])
+  stepWristMenuRuntime(runtime, automaticFrame(3, true), [observe('shape-sphere')])
+  stepWristMenuRuntime(runtime, automaticFrame(4, false, true), [observe('shape-sphere')])
 
-  assert.equal(runtime.blocksSceneInput('right-controller'), false)
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-controller'), false)
   assert.deepEqual(
     events.find(({ type }) => type === 'selection-intent')?.intent,
     {
@@ -340,34 +346,34 @@ test('automatic reveal supports nested Choice Option ownership and intent', () =
 test('semantically neutral controller defaults do not reacquire automatic reveal', () => {
   const initial = automaticSnapshot()
   delete initial.controllerWrist
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: initial,
     onEvent: () => undefined,
   })
-  runtime.step(automaticFrame(1), [])
-  runtime.step(automaticFrame(2), [])
+  stepWristMenuRuntime(runtime, automaticFrame(1), [])
+  stepWristMenuRuntime(runtime, automaticFrame(2), [])
 
-  runtime.sync({ ...initial, controllerWrist: { preset: 'neutral' } })
-  const synchronized = runtime.step(automaticFrame(3), [])
+  syncWristMenuRuntime(runtime, { ...initial, controllerWrist: { preset: 'neutral' } })
+  const synchronized = stepWristMenuRuntime(runtime, automaticFrame(3), [])
   assert.equal(synchronized.visible, true)
   assert.equal(synchronized.revealPhase, 'visible')
 })
 
 test('toggle and choice Selection Intents propose values without mutating displayed state', () => {
   const events = []
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: hostControlledSnapshot,
     onEvent: (event) => events.push(event),
   })
-  runtime.step(controlledFrame(1), [])
-  runtime.step(controlledFrame(2), [])
+  stepWristMenuRuntime(runtime, controlledFrame(1), [])
+  stepWristMenuRuntime(runtime, controlledFrame(2), [])
 
-  runtime.step(controlledFrame(3, true), [observe('show-grid')])
-  const afterToggle = runtime.step(controlledFrame(4, false, true), [
+  stepWristMenuRuntime(runtime, controlledFrame(3, true), [observe('show-grid')])
+  const afterToggle = stepWristMenuRuntime(runtime, controlledFrame(4, false, true), [
     observe('show-grid'),
   ])
-  runtime.step(controlledFrame(5, true), [observe('shape-sphere')])
-  const afterChoice = runtime.step(controlledFrame(6, false, true), [
+  stepWristMenuRuntime(runtime, controlledFrame(5, true), [observe('shape-sphere')])
+  const afterChoice = stepWristMenuRuntime(runtime, controlledFrame(6, false, true), [
     observe('shape-sphere'),
   ])
 
@@ -399,23 +405,23 @@ test('a Host sync from an event callback waits for the next Frame Sample', () =>
   const updated = structuredClone(hostControlledSnapshot)
   updated.menuDefinition[2].value = false
   let runtime
-  runtime = createWristMenuRuntime({
+  runtime = createWristMenuRuntimeState({
     snapshot: hostControlledSnapshot,
     onEvent: (event) => {
-      if (event.type === 'selection-intent') runtime.sync(updated)
+      if (event.type === 'selection-intent') syncWristMenuRuntime(runtime, updated)
     },
   })
-  runtime.step(controlledFrame(1), [])
-  runtime.step(controlledFrame(2), [])
-  runtime.step(controlledFrame(3, true), [observe('show-grid')])
+  stepWristMenuRuntime(runtime, controlledFrame(1), [])
+  stepWristMenuRuntime(runtime, controlledFrame(2), [])
+  stepWristMenuRuntime(runtime, controlledFrame(3, true), [observe('show-grid')])
 
-  const committingFrame = runtime.step(controlledFrame(4, false, true), [
+  const committingFrame = stepWristMenuRuntime(runtime, controlledFrame(4, false, true), [
     observe('show-grid'),
   ])
   assert.equal(committingFrame.items[2].value, true)
   assert.equal(committingFrame.revision, 1)
 
-  const followingFrame = runtime.step(controlledFrame(5), [])
+  const followingFrame = stepWristMenuRuntime(runtime, controlledFrame(5), [])
   assert.equal(followingFrame.items[2].value, false)
   assert.equal(followingFrame.revision, 2)
 })
@@ -426,35 +432,35 @@ test('a Host sync from a snapshot-cancellation callback waits another Frame Samp
   const callbackUpdate = structuredClone(hostControlledSnapshot)
   callbackUpdate.menuDefinition[2].label = 'Grid from callback'
   let runtime
-  runtime = createWristMenuRuntime({
+  runtime = createWristMenuRuntimeState({
     snapshot: hostControlledSnapshot,
     onEvent: (event) => {
       if (
         event.type === 'selection-cancellation' &&
         event.reason === 'host-snapshot-changed'
       ) {
-        runtime.sync(callbackUpdate)
+        syncWristMenuRuntime(runtime, callbackUpdate)
       }
     },
   })
-  runtime.step(controlledFrame(1), [])
-  runtime.step(controlledFrame(2), [observe('show-grid')])
-  runtime.step(controlledFrame(3, true), [observe('show-grid')])
-  runtime.sync(firstUpdate)
+  stepWristMenuRuntime(runtime, controlledFrame(1), [])
+  stepWristMenuRuntime(runtime, controlledFrame(2), [observe('show-grid')])
+  stepWristMenuRuntime(runtime, controlledFrame(3, true), [observe('show-grid')])
+  syncWristMenuRuntime(runtime, firstUpdate)
 
-  const firstBoundary = runtime.step(controlledFrame(4, true), [])
+  const firstBoundary = stepWristMenuRuntime(runtime, controlledFrame(4, true), [])
   assert.equal(firstBoundary.items[2].value, false)
   assert.equal(firstBoundary.items[2].label, 'Show grid')
   assert.equal(firstBoundary.revision, 2)
 
-  const secondBoundary = runtime.step(controlledFrame(5), [])
+  const secondBoundary = stepWristMenuRuntime(runtime, controlledFrame(5), [])
   assert.equal(secondBoundary.items[2].value, true)
   assert.equal(secondBoundary.items[2].label, 'Grid from callback')
   assert.equal(secondBoundary.revision, 3)
 })
 
 test('a throwing disposal callback still leaves the Wrist Menu Instance disposed', () => {
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: hostControlledSnapshot,
     onEvent: (event) => {
       if (event.type === 'selection-cancellation' && event.reason === 'disposed') {
@@ -462,36 +468,36 @@ test('a throwing disposal callback still leaves the Wrist Menu Instance disposed
       }
     },
   })
-  runtime.step(controlledFrame(1), [])
-  runtime.step(controlledFrame(2), [observe('show-grid')])
-  runtime.step(controlledFrame(3, true), [observe('show-grid')])
+  stepWristMenuRuntime(runtime, controlledFrame(1), [])
+  stepWristMenuRuntime(runtime, controlledFrame(2), [observe('show-grid')])
+  stepWristMenuRuntime(runtime, controlledFrame(3, true), [observe('show-grid')])
 
-  assert.throws(() => runtime.dispose(), /Host disposal callback failed/)
-  assert.throws(() => runtime.step(controlledFrame(4), []), /disposed/)
-  assert.doesNotThrow(() => runtime.dispose())
+  assert.throws(() => disposeWristMenuRuntime(runtime), /Host disposal callback failed/)
+  assert.throws(() => stepWristMenuRuntime(runtime, controlledFrame(4), []), /disposed/)
+  assert.doesNotThrow(() => disposeWristMenuRuntime(runtime))
 })
 
 test('disabled items can be observed but never arm, claim, or emit an intent', () => {
   const events = []
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: hostControlledSnapshot,
     onEvent: (event) => events.push(event),
   })
-  runtime.step(controlledFrame(1), [])
+  stepWristMenuRuntime(runtime, controlledFrame(1), [])
 
-  const hovered = runtime.step(controlledFrame(2), [
+  const hovered = stepWristMenuRuntime(runtime, controlledFrame(2), [
     observe('remove-selection'),
   ])
-  const pressed = runtime.step(controlledFrame(3, true), [
+  const pressed = stepWristMenuRuntime(runtime, controlledFrame(3, true), [
     observe('remove-selection'),
   ])
-  runtime.step(controlledFrame(4, false, true), [
+  stepWristMenuRuntime(runtime, controlledFrame(4, false, true), [
     observe('remove-selection'),
   ])
 
   assert.equal(hovered.items[4].interaction, 'hovered')
   assert.equal(pressed.items[4].interaction, 'hovered')
-  assert.equal(runtime.blocksSceneInput('right-controller'), false)
+  assert.equal(wristMenuRuntimeBlocksSceneInput(runtime, 'right-controller'), false)
   assert.deepEqual(
     events.filter(({ type }) => type !== 'visibility-change'),
     [],

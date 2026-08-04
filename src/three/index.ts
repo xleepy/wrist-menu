@@ -10,9 +10,13 @@ import { Group } from 'three/src/objects/Group.js'
 import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js'
 
 import {
-  createWristMenuRuntime,
+  createWristMenuRuntimeState,
+  disposeWristMenuRuntime,
   resolveControllerWristOffset,
   resolveWristAnchor,
+  stepWristMenuRuntime,
+  syncWristMenuRuntime,
+  wristMenuRuntimeBlocksSceneInput,
   type ActivationMode,
   type ControllerWristConfiguration,
   type SelectionSourceSample,
@@ -23,6 +27,7 @@ import {
   type ScrollSourceSample,
   type TargetObservation,
   type Vector3Tuple,
+  type WristMenuRuntimeState,
   type WristSourceSample,
   type WristMenuEvent,
 } from '../core/index.js'
@@ -45,14 +50,6 @@ export type CreateThreeWristMenuOptions = Readonly<{
   onEvent: (event: WristMenuEvent) => void
 }>
 
-export type ThreeWristMenu = Readonly<{
-  group: Group
-  sync(nextSnapshot: HostSnapshot): void
-  update(update: ThreeWristMenuUpdate): void
-  blocksSceneInput(inputSource: XRInputSource): boolean
-  dispose(): void
-}>
-
 type SelectEvent = Readonly<{ inputSource: XRInputSource }>
 
 type AnchorSettings = Readonly<{
@@ -60,6 +57,55 @@ type AnchorSettings = Readonly<{
   wrist: Handedness
   controllerWrist: ControllerWristConfiguration
 }>
+
+type BoundSessionHandlers = {
+  selectstart: (e: SelectEvent) => void
+  select: (e: SelectEvent) => void
+  selectend: (e: SelectEvent) => void
+  inputsourceschange: () => void
+  visibilitychange: () => void
+  end: () => void
+}
+
+type BoundReferenceSpaceHandler = () => void
+
+export type ThreeWristMenuState = {
+  renderer: ThreeWristMenuRenderer
+  onEvent: (event: WristMenuEvent) => void
+  runtime: WristMenuRuntimeState
+  presentation: WristMenuPresentation
+  raycaster: Raycaster
+  rayMatrix: Matrix4
+  rayOrigin: Vector3
+  rayDirection: Vector3
+  anchorMatrix: Matrix4
+  parentInverse: Matrix4
+  anchorPosition: Vector3
+  anchorOrientation: Quaternion
+  anchorScale: Vector3
+  sourceIds: WeakMap<XRInputSource, string>
+  inputSourceById: Map<string, XRInputSource>
+  anchorSettings: AnchorSettings
+  pendingAnchorSettings: AnchorSettings | undefined
+  sourcePressed: WeakMap<XRInputSource, boolean>
+  sourceCompleted: WeakSet<XRInputSource>
+  lastTargetBySource: WeakMap<XRInputSource, string>
+  provisionalClaims: WeakSet<XRInputSource>
+  inputSourceSequence: number
+  frameSequence: number
+  geometryBarrierThrough: number
+  presentationRevision: number
+  session: XRSession | null
+  referenceSpace: XRReferenceSpace | null
+  sessionHandlers: BoundSessionHandlers | null
+  referenceSpaceHandler: BoundReferenceSpaceHandler | null
+  lifecycleRevision: number
+  observedSession: boolean
+  observedParent: boolean
+  lastParent: Object3D<Object3DEventMap> | null
+  lastUpdateTime: number
+  disposed: boolean
+}
 
 function materializeAnchorSettings(snapshot: HostSnapshot): AnchorSettings {
   const copyOffset = (handedness: Handedness) => {
@@ -84,42 +130,229 @@ function materializeAnchorSettings(snapshot: HostSnapshot): AnchorSettings {
   })
 }
 
-/** Create the vanilla Three.js Renderer Integration. */
-export function createThreeWristMenu(
-  options: CreateThreeWristMenuOptions,
-): ThreeWristMenu {
-  const initialSnapshot = copyHostSnapshot(options.snapshot)
-  const inputSourceById = new Map<string, XRInputSource>()
-  const requestCommitHaptic = (inputSource: XRInputSource | undefined) => {
-    const gamepad = inputSource?.gamepad as
-      | (Gamepad & {
-          hapticActuators?: ReadonlyArray<{
-            pulse?(intensity: number, duration: number): unknown
-          }>
-          vibrationActuator?: {
-            playEffect?(effect: string, parameters: object): unknown
-          }
-        })
-      | undefined
-    const actuator = gamepad?.hapticActuators?.[0]
-    try {
-      const request =
-        typeof actuator?.pulse === 'function'
-          ? actuator.pulse(0.35, 20)
-          : gamepad?.vibrationActuator?.playEffect?.('dual-rumble', {
-              duration: 20,
-              startDelay: 0,
-              strongMagnitude: 0.35,
-              weakMagnitude: 0.35,
-            })
-      if (request !== undefined) {
-        void Promise.resolve(request).catch(() => undefined)
-      }
-    } catch {
-      // Haptics are optional feedback and never alter semantic delivery.
+function requestCommitHaptic(
+  inputSource: XRInputSource | undefined,
+): void {
+  const gamepad = inputSource?.gamepad as
+    | (Gamepad & {
+        hapticActuators?: ReadonlyArray<{
+          pulse?(intensity: number, duration: number): unknown
+        }>
+        vibrationActuator?: {
+          playEffect?(effect: string, parameters: object): unknown
+        }
+      })
+    | undefined
+  const actuator = gamepad?.hapticActuators?.[0]
+  try {
+    const request =
+      typeof actuator?.pulse === 'function'
+        ? actuator.pulse(0.35, 20)
+        : gamepad?.vibrationActuator?.playEffect?.('dual-rumble', {
+            duration: 20,
+            startDelay: 0,
+            strongMagnitude: 0.35,
+            weakMagnitude: 0.35,
+          })
+    if (request !== undefined) {
+      void Promise.resolve(request).catch(() => undefined)
     }
+  } catch {
   }
-  const runtime = createWristMenuRuntime({
+}
+
+function sourceId(state: ThreeWristMenuState, inputSource: XRInputSource): string {
+  const existing = state.sourceIds.get(inputSource)
+  if (existing !== undefined) return existing
+  state.inputSourceSequence += 1
+  const created = `input-source-${state.inputSourceSequence}`
+  state.sourceIds.set(inputSource, created)
+  return created
+}
+
+function poseSample(pose: XRPose | XRJointPose): PoseSample {
+  return Object.freeze({
+    position: Object.freeze([
+      pose.transform.position.x,
+      pose.transform.position.y,
+      pose.transform.position.z,
+    ]) as Vector3Tuple,
+    orientation: Object.freeze([
+      pose.transform.orientation.x,
+      pose.transform.orientation.y,
+      pose.transform.orientation.z,
+      pose.transform.orientation.w,
+    ]),
+    emulatedPosition: pose.emulatedPosition,
+  })
+}
+
+function applyAnchorPose(
+  state: ThreeWristMenuState,
+  pose: PresentationModel['anchorPose'],
+): void {
+  if (pose === null) return
+  state.anchorPosition.fromArray(pose.position)
+  state.anchorOrientation.fromArray(pose.orientation)
+  state.anchorMatrix.compose(
+    state.anchorPosition,
+    state.anchorOrientation,
+    state.anchorScale,
+  )
+  const parent = state.presentation.group.parent
+  if (parent !== null) {
+    parent.updateWorldMatrix(true, false)
+    state.parentInverse.copy(parent.matrixWorld).invert()
+    state.anchorMatrix.premultiply(state.parentInverse)
+  }
+  state.anchorMatrix.decompose(
+    state.presentation.group.position,
+    state.presentation.group.quaternion,
+    state.presentation.group.scale,
+  )
+}
+
+function clearTransientInput(state: ThreeWristMenuState): void {
+  state.sourcePressed = new WeakMap()
+  state.sourceCompleted = new WeakSet()
+  state.lastTargetBySource = new WeakMap()
+  state.provisionalClaims = new WeakSet()
+}
+
+function interruptLifecycle(state: ThreeWristMenuState): void {
+  state.lifecycleRevision += 1
+  clearTransientInput(state)
+}
+
+function applyLifecycleSample(
+  state: ThreeWristMenuState,
+  visibility: 'visible-blurred' | 'hidden',
+): void {
+  state.presentation.setTargetable(false)
+  if (visibility === 'hidden') state.presentation.group.visible = false
+  state.frameSequence += 1
+  const model = stepWristMenuRuntime(
+    state.runtime,
+    {
+      sequence: state.frameSequence,
+      time: state.lastUpdateTime,
+      visibility,
+      viewerPosition: null,
+      wristSources: [],
+      lifecycleRevision: state.lifecycleRevision,
+      selectionSources: [],
+    },
+    [],
+  )
+  state.presentation.setModel(model, false)
+}
+
+function onSelectStart(state: ThreeWristMenuState, event: SelectEvent): void {
+  state.sourcePressed.set(event.inputSource, true)
+  if (state.lastTargetBySource.has(event.inputSource)) {
+    state.provisionalClaims.add(event.inputSource)
+  }
+}
+
+function onSelectEnd(state: ThreeWristMenuState, event: SelectEvent): void {
+  state.sourcePressed.set(event.inputSource, false)
+}
+
+function onSelect(state: ThreeWristMenuState, event: SelectEvent): void {
+  state.sourceCompleted.add(event.inputSource)
+}
+
+function onSessionEnd(state: ThreeWristMenuState): void {
+  attachSession(state, null)
+  applyLifecycleSample(state, 'hidden')
+}
+
+function onSessionVisibilityChange(state: ThreeWristMenuState): void {
+  interruptLifecycle(state)
+  if (state.session?.visibilityState === 'visible-blurred') {
+    applyLifecycleSample(state, 'visible-blurred')
+  } else if (state.session?.visibilityState === 'hidden') {
+    applyLifecycleSample(state, 'hidden')
+  }
+}
+
+function onInputSourcesChange(state: ThreeWristMenuState): void {
+  interruptLifecycle(state)
+  applyLifecycleSample(state, 'hidden')
+}
+
+function onReferenceSpaceReset(state: ThreeWristMenuState): void {
+  interruptLifecycle(state)
+  applyLifecycleSample(state, 'hidden')
+}
+
+function attachSession(
+  state: ThreeWristMenuState,
+  nextSession: XRSession | null,
+): void {
+  if (state.session === nextSession) return
+  if (state.session !== null && state.sessionHandlers !== null) {
+    state.session.removeEventListener('selectstart', state.sessionHandlers.selectstart)
+    state.session.removeEventListener('select', state.sessionHandlers.select)
+    state.session.removeEventListener('selectend', state.sessionHandlers.selectend)
+    state.session.removeEventListener('inputsourceschange', state.sessionHandlers.inputsourceschange)
+    state.session.removeEventListener('visibilitychange', state.sessionHandlers.visibilitychange)
+    state.session.removeEventListener('end', state.sessionHandlers.end)
+  }
+  if (state.observedSession) interruptLifecycle(state)
+  state.session = nextSession
+  state.observedSession = true
+  if (state.session !== null) {
+    const handlers: BoundSessionHandlers = {
+      selectstart: (e) => onSelectStart(state, e),
+      select: (e) => onSelect(state, e),
+      selectend: (e) => onSelectEnd(state, e),
+      inputsourceschange: () => onInputSourcesChange(state),
+      visibilitychange: () => onSessionVisibilityChange(state),
+      end: () => onSessionEnd(state),
+    }
+    state.sessionHandlers = handlers
+    state.session.addEventListener('selectstart', handlers.selectstart)
+    state.session.addEventListener('select', handlers.select)
+    state.session.addEventListener('selectend', handlers.selectend)
+    state.session.addEventListener('inputsourceschange', handlers.inputsourceschange)
+    state.session.addEventListener('visibilitychange', handlers.visibilitychange)
+    state.session.addEventListener('end', handlers.end)
+  } else {
+    state.sessionHandlers = null
+  }
+}
+
+function attachReferenceSpace(
+  state: ThreeWristMenuState,
+  nextReferenceSpace: XRReferenceSpace | null,
+): void {
+  if (state.referenceSpace === nextReferenceSpace) return
+  if (state.referenceSpace !== null && state.referenceSpaceHandler !== null) {
+    state.referenceSpace.removeEventListener('reset', state.referenceSpaceHandler)
+  }
+  if (state.referenceSpace !== null) interruptLifecycle(state)
+  state.referenceSpace = nextReferenceSpace
+  if (state.referenceSpace !== null) {
+    const handler = () => onReferenceSpaceReset(state)
+    state.referenceSpaceHandler = handler
+    state.referenceSpace.addEventListener('reset', handler)
+  } else {
+    state.referenceSpaceHandler = null
+  }
+}
+
+function assertActive(state: ThreeWristMenuState): void {
+  if (state.disposed) throw new Error('Wrist Menu Instance is disposed')
+}
+
+export function createThreeWristMenuState(
+  options: CreateThreeWristMenuOptions,
+): ThreeWristMenuState {
+  const initialSnapshot = copyHostSnapshot(options.snapshot)
+  const presentation = new WristMenuPresentation()
+  const inputSourceById = new Map<string, XRInputSource>()
+  const runtime = createWristMenuRuntimeState({
     snapshot: initialSnapshot,
     onEvent: (event) => {
       try {
@@ -134,459 +367,332 @@ export function createThreeWristMenu(
       }
     },
   })
-  const presentation = new WristMenuPresentation()
-  const raycaster = new Raycaster()
-  const rayMatrix = new Matrix4()
-  const rayOrigin = new Vector3()
-  const rayDirection = new Vector3()
-  const anchorMatrix = new Matrix4()
-  const parentInverse = new Matrix4()
-  const anchorPosition = new Vector3()
-  const anchorOrientation = new Quaternion()
-  const anchorScale = new Vector3(1, 1, 1)
-  const sourceIds = new WeakMap<XRInputSource, string>()
-  let anchorSettings = materializeAnchorSettings(initialSnapshot)
-  let pendingAnchorSettings: AnchorSettings | undefined
-  let sourcePressed = new WeakMap<XRInputSource, boolean>()
-  let sourceCompleted = new WeakSet<XRInputSource>()
-  let lastTargetBySource = new WeakMap<XRInputSource, string>()
-  let provisionalClaims = new WeakSet<XRInputSource>()
-  let inputSourceSequence = 0
-  let frameSequence = 0
-  let geometryBarrierThrough = 1
-  let presentationRevision = 0
-  let session: XRSession | null = null
-  let referenceSpace: XRReferenceSpace | null = null
-  let lifecycleRevision = 0
-  let observedSession = false
-  let observedParent = false
-  let lastParent: Object3D<Object3DEventMap> | null = null
-  let lastUpdateTime = 0
-  let disposed = false
-
-  const clearTransientInput = () => {
-    sourcePressed = new WeakMap()
-    sourceCompleted = new WeakSet()
-    lastTargetBySource = new WeakMap()
-    provisionalClaims = new WeakSet()
+  return {
+    renderer: options.renderer,
+    onEvent: options.onEvent,
+    runtime,
+    presentation,
+    raycaster: new Raycaster(),
+    rayMatrix: new Matrix4(),
+    rayOrigin: new Vector3(),
+    rayDirection: new Vector3(),
+    anchorMatrix: new Matrix4(),
+    parentInverse: new Matrix4(),
+    anchorPosition: new Vector3(),
+    anchorOrientation: new Quaternion(),
+    anchorScale: new Vector3(1, 1, 1),
+    sourceIds: new WeakMap(),
+    inputSourceById,
+    anchorSettings: materializeAnchorSettings(initialSnapshot),
+    pendingAnchorSettings: undefined,
+    sourcePressed: new WeakMap(),
+    sourceCompleted: new WeakSet(),
+    lastTargetBySource: new WeakMap(),
+    provisionalClaims: new WeakSet(),
+    inputSourceSequence: 0,
+    frameSequence: 0,
+    geometryBarrierThrough: 1,
+    presentationRevision: 0,
+    session: null,
+    referenceSpace: null,
+    sessionHandlers: null,
+    referenceSpaceHandler: null,
+    lifecycleRevision: 0,
+    observedSession: false,
+    observedParent: false,
+    lastParent: null,
+    lastUpdateTime: 0,
+    disposed: false,
   }
+}
 
-  const interruptLifecycle = () => {
-    lifecycleRevision += 1
-    clearTransientInput()
+export function syncThreeWristMenu(
+  state: ThreeWristMenuState,
+  nextSnapshot: HostSnapshot,
+): void {
+  assertActive(state)
+  const copiedSnapshot = copyHostSnapshot(nextSnapshot)
+  syncWristMenuRuntime(state.runtime, copiedSnapshot)
+  state.pendingAnchorSettings = materializeAnchorSettings(copiedSnapshot)
+}
+
+export function updateThreeWristMenu(
+  state: ThreeWristMenuState,
+  update: ThreeWristMenuUpdate,
+): void {
+  assertActive(state)
+  state.lastUpdateTime = update.time
+  state.frameSequence += 1
+  if (state.pendingAnchorSettings !== undefined) {
+    state.anchorSettings = state.pendingAnchorSettings
+    state.pendingAnchorSettings = undefined
   }
+  const nextSession = state.renderer.xr.getSession()
+  attachSession(state, nextSession)
+  state.inputSourceById.clear()
 
-  const sourceId = (inputSource: XRInputSource) => {
-    const existing = sourceIds.get(inputSource)
-    if (existing !== undefined) return existing
-    inputSourceSequence += 1
-    const created = `input-source-${inputSourceSequence}`
-    sourceIds.set(inputSource, created)
-    return created
-  }
+  const parent = state.presentation.group.parent
+  if (state.observedParent && parent !== state.lastParent) interruptLifecycle(state)
+  state.lastParent = parent
+  state.observedParent = true
 
-  const onSelectStart = (event: SelectEvent) => {
-    sourcePressed.set(event.inputSource, true)
-    if (lastTargetBySource.has(event.inputSource)) {
-      provisionalClaims.add(event.inputSource)
+  const isGeometryTargetable = state.frameSequence > state.geometryBarrierThrough
+  state.presentation.group.updateMatrixWorld(true)
+
+  const selectionSources: SelectionSourceSample[] = []
+  const wristSources: WristSourceSample[] = []
+  const controllerSources: Array<
+    Readonly<{ id: string; handedness: Handedness; inputSource: XRInputSource }>
+  > = []
+  const handSources: Array<
+    Readonly<{
+      id: string
+      handedness: Handedness
+      fingertipPose: XRJointPose
+    }>
+  > = []
+  const targetObservations: TargetObservation[] = []
+  const scrollSources: ScrollSourceSample[] = []
+  const nextReferenceSpace = state.renderer.xr.getReferenceSpace()
+  attachReferenceSpace(state, nextReferenceSpace)
+  let viewerPosition: Vector3Tuple | null = null
+
+  if (update.frame !== null && nextSession !== null && nextReferenceSpace !== null) {
+    const viewerPose = update.frame.getViewerPose(nextReferenceSpace)
+    if (viewerPose != null) {
+      viewerPosition = Object.freeze([
+        viewerPose.transform.position.x,
+        viewerPose.transform.position.y,
+        viewerPose.transform.position.z,
+      ]) as Vector3Tuple
     }
-  }
-  const onSelectEnd = (event: SelectEvent) => {
-    sourcePressed.set(event.inputSource, false)
-  }
-  const onSelect = (event: SelectEvent) => {
-    sourceCompleted.add(event.inputSource)
-  }
-  const applyLifecycleSample = (
-    visibility: 'visible-blurred' | 'hidden',
-  ) => {
-    presentation.setTargetable(false)
-    if (visibility === 'hidden') presentation.group.visible = false
-    frameSequence += 1
-    const model = runtime.step(
-      {
-        sequence: frameSequence,
-        time: lastUpdateTime,
-        visibility,
-        viewerPosition: null,
-        wristSources: [],
-        lifecycleRevision,
-        selectionSources: [],
-      },
-      [],
-    )
-    presentation.setModel(model, false)
-  }
-  const onSessionEnd = () => {
-    attachSession(null)
-    applyLifecycleSample('hidden')
-  }
-  const onSessionVisibilityChange = () => {
-    interruptLifecycle()
-    if (session?.visibilityState === 'visible-blurred') {
-      applyLifecycleSample('visible-blurred')
-    } else if (session?.visibilityState === 'hidden') {
-      applyLifecycleSample('hidden')
-    }
-  }
-  const onInputSourcesChange = () => {
-    interruptLifecycle()
-    applyLifecycleSample('hidden')
-  }
-  const onReferenceSpaceReset = () => {
-    interruptLifecycle()
-    applyLifecycleSample('hidden')
-  }
-
-  const attachSession = (nextSession: XRSession | null) => {
-    if (session === nextSession) return
-    if (session !== null) {
-      session.removeEventListener('selectstart', onSelectStart)
-      session.removeEventListener('select', onSelect)
-      session.removeEventListener('selectend', onSelectEnd)
-      session.removeEventListener('inputsourceschange', onInputSourcesChange)
-      session.removeEventListener('visibilitychange', onSessionVisibilityChange)
-      session.removeEventListener('end', onSessionEnd)
-    }
-    if (observedSession) interruptLifecycle()
-    session = nextSession
-    observedSession = true
-    if (session !== null) {
-      session.addEventListener('selectstart', onSelectStart)
-      session.addEventListener('select', onSelect)
-      session.addEventListener('selectend', onSelectEnd)
-      session.addEventListener('inputsourceschange', onInputSourcesChange)
-      session.addEventListener('visibilitychange', onSessionVisibilityChange)
-      session.addEventListener('end', onSessionEnd)
-    }
-  }
-
-  const attachReferenceSpace = (nextReferenceSpace: XRReferenceSpace | null) => {
-    if (referenceSpace === nextReferenceSpace) return
-    referenceSpace?.removeEventListener('reset', onReferenceSpaceReset)
-    if (referenceSpace !== null) interruptLifecycle()
-    referenceSpace = nextReferenceSpace
-    referenceSpace?.addEventListener('reset', onReferenceSpaceReset)
-  }
-
-  const poseSample = (pose: XRPose | XRJointPose): PoseSample =>
-    Object.freeze({
-      position: Object.freeze([
-        pose.transform.position.x,
-        pose.transform.position.y,
-        pose.transform.position.z,
-      ]) as Vector3Tuple,
-      orientation: Object.freeze([
-        pose.transform.orientation.x,
-        pose.transform.orientation.y,
-        pose.transform.orientation.z,
-        pose.transform.orientation.w,
-      ]),
-      emulatedPosition: pose.emulatedPosition,
-    })
-
-  const applyAnchorPose = (pose: PresentationModel['anchorPose']) => {
-    if (pose === null) return
-    anchorPosition.fromArray(pose.position)
-    anchorOrientation.fromArray(pose.orientation)
-    anchorMatrix.compose(anchorPosition, anchorOrientation, anchorScale)
-    const parent = presentation.group.parent
-    if (parent !== null) {
-      parent.updateWorldMatrix(true, false)
-      parentInverse.copy(parent.matrixWorld).invert()
-      anchorMatrix.premultiply(parentInverse)
-    }
-    anchorMatrix.decompose(
-      presentation.group.position,
-      presentation.group.quaternion,
-      presentation.group.scale,
-    )
-  }
-
-  const assertActive = () => {
-    if (disposed) throw new Error('Wrist Menu Instance is disposed')
-  }
-
-  return Object.freeze({
-    group: presentation.group,
-
-    sync(nextSnapshot) {
-      assertActive()
-      const copiedSnapshot = copyHostSnapshot(nextSnapshot)
-      runtime.sync(copiedSnapshot)
-      pendingAnchorSettings = materializeAnchorSettings(copiedSnapshot)
-    },
-
-    update({ time, frame }) {
-      assertActive()
-      lastUpdateTime = time
-      frameSequence += 1
-      if (pendingAnchorSettings !== undefined) {
-        anchorSettings = pendingAnchorSettings
-        pendingAnchorSettings = undefined
+    for (const inputSource of nextSession.inputSources) {
+      if (
+        inputSource.handedness !== 'left' &&
+        inputSource.handedness !== 'right'
+      ) {
+        continue
       }
-      const nextSession = options.renderer.xr.getSession()
-      attachSession(nextSession)
-      inputSourceById.clear()
 
-      const parent = presentation.group.parent
-      if (observedParent && parent !== lastParent) interruptLifecycle()
-      lastParent = parent
-      observedParent = true
-
-      const isGeometryTargetable = frameSequence > geometryBarrierThrough
-      presentation.group.updateMatrixWorld(true)
-
-      const selectionSources: SelectionSourceSample[] = []
-      const wristSources: WristSourceSample[] = []
-      const controllerSources: Array<
-        Readonly<{ id: string; handedness: Handedness; inputSource: XRInputSource }>
-      > = []
-      const handSources: Array<
-        Readonly<{
-          id: string
-          handedness: Handedness
-          fingertipPose: XRJointPose
-        }>
-      > = []
-      const targetObservations: TargetObservation[] = []
-      const scrollSources: ScrollSourceSample[] = []
-      const nextReferenceSpace = options.renderer.xr.getReferenceSpace()
-      attachReferenceSpace(nextReferenceSpace)
-      let viewerPosition: Vector3Tuple | null = null
-
-      if (frame !== null && nextSession !== null && nextReferenceSpace !== null) {
-        const viewerPose = frame.getViewerPose(nextReferenceSpace)
-        if (viewerPose != null) {
-          viewerPosition = Object.freeze([
-            viewerPose.transform.position.x,
-            viewerPose.transform.position.y,
-            viewerPose.transform.position.z,
-          ]) as Vector3Tuple
-        }
-        for (const inputSource of nextSession.inputSources) {
-          if (
-            inputSource.handedness !== 'left' &&
-            inputSource.handedness !== 'right'
-          ) {
-            continue
-          }
-
-          const id = sourceId(inputSource)
-          inputSourceById.set(id, inputSource)
-          if (inputSource.hand != null) {
-            const wristSpace = inputSource.hand.get('wrist')
-            const wristPose =
-              wristSpace === undefined
-                ? null
-                : (frame.getJointPose?.(wristSpace, nextReferenceSpace) ?? null)
-            wristSources.push({
-              id,
-              kind: 'hand',
-              handedness: inputSource.handedness,
-              pose: wristPose === null ? null : poseSample(wristPose),
-            })
-            const fingertipSpace = inputSource.hand.get('index-finger-tip')
-            const fingertipPose =
-              fingertipSpace === undefined
-                ? null
-                : (frame.getJointPose?.(fingertipSpace, nextReferenceSpace) ??
-                  null)
-            if (
-              fingertipPose !== null &&
-              Number.isFinite(fingertipPose.radius) &&
-              (fingertipPose.radius ?? 0) > 0
-            ) {
-              selectionSources.push({
-                id,
-                kind: 'hand',
-                handedness: inputSource.handedness,
-              })
-              handSources.push({ id, handedness: inputSource.handedness, fingertipPose })
-            }
-            continue
-          }
-
-          const gripPose =
-            inputSource.gripSpace == null
-              ? null
-              : frame.getPose(inputSource.gripSpace, nextReferenceSpace)
-          wristSources.push({
-            id,
-            kind: 'controller',
-            handedness: inputSource.handedness,
-            pose: gripPose == null ? null : poseSample(gripPose),
-          })
+      const id = sourceId(state, inputSource)
+      state.inputSourceById.set(id, inputSource)
+      if (inputSource.hand != null) {
+        const wristSpace = inputSource.hand.get('wrist')
+        const wristPose =
+          wristSpace === undefined
+            ? null
+            : (update.frame.getJointPose?.(wristSpace, nextReferenceSpace) ?? null)
+        wristSources.push({
+          id,
+          kind: 'hand',
+          handedness: inputSource.handedness,
+          pose: wristPose === null ? null : poseSample(wristPose),
+        })
+        const fingertipSpace = inputSource.hand.get('index-finger-tip')
+        const fingertipPose =
+          fingertipSpace === undefined
+            ? null
+            : (update.frame.getJointPose?.(fingertipSpace, nextReferenceSpace) ??
+              null)
+        if (
+          fingertipPose !== null &&
+          Number.isFinite(fingertipPose.radius) &&
+          (fingertipPose.radius ?? 0) > 0
+        ) {
           selectionSources.push({
             id,
-            kind: 'controller',
+            kind: 'hand',
             handedness: inputSource.handedness,
-            selectPressed: sourcePressed.get(inputSource) ?? false,
-            selectCompleted: sourceCompleted.has(inputSource),
           })
-          controllerSources.push({ id, handedness: inputSource.handedness, inputSource })
+          handSources.push({ id, handedness: inputSource.handedness, fingertipPose })
         }
+        continue
+      }
 
-        const wristSource = selectWristSource(
-          wristSources,
-          anchorSettings.wrist,
+      const gripPose =
+        inputSource.gripSpace == null
+          ? null
+          : update.frame.getPose(inputSource.gripSpace, nextReferenceSpace)
+      wristSources.push({
+        id,
+        kind: 'controller',
+        handedness: inputSource.handedness,
+        pose: gripPose == null ? null : poseSample(gripPose),
+      })
+      selectionSources.push({
+        id,
+        kind: 'controller',
+        handedness: inputSource.handedness,
+        selectPressed: state.sourcePressed.get(inputSource) ?? false,
+        selectCompleted: state.sourceCompleted.has(inputSource),
+      })
+      controllerSources.push({ id, handedness: inputSource.handedness, inputSource })
+    }
+
+    const wristSource = selectWristSource(
+      wristSources,
+      state.anchorSettings.wrist,
+    )
+    const currentAnchor =
+      wristSource === undefined
+        ? undefined
+        : resolveWristAnchor(
+            wristSource,
+            viewerPosition,
+            state.anchorSettings.controllerWrist,
+          )
+    if (
+      currentAnchor !== undefined &&
+      (state.anchorSettings.activationMode !== 'automatic' ||
+        currentAnchor.automaticEligible)
+    ) {
+      applyAnchorPose(state, currentAnchor.anchorPose)
+    }
+    state.presentation.group.updateMatrixWorld(true)
+
+    for (const { id, handedness, inputSource } of controllerSources) {
+      const pose = update.frame.getPose(inputSource.targetRaySpace, nextReferenceSpace)
+      if (pose == null || !isGeometryTargetable) {
+        state.lastTargetBySource.delete(inputSource)
+        continue
+      }
+
+      state.rayMatrix.fromArray(pose.transform.matrix)
+      state.rayOrigin.setFromMatrixPosition(state.rayMatrix)
+      state.rayDirection.set(0, 0, -1).transformDirection(state.rayMatrix)
+      state.raycaster.set(state.rayOrigin, state.rayDirection)
+      const intersection = state.raycaster.intersectObjects(
+        state.presentation.hitRegions,
+        false,
+      )[0]
+      const itemId = state.presentation.itemIdForIntersection(intersection)
+      if (itemId !== undefined) {
+        state.lastTargetBySource.set(inputSource, itemId)
+        targetObservations.push({
+          sourceId: id,
+          kind: 'controller-target-ray',
+          itemId,
+        })
+      } else {
+        state.lastTargetBySource.delete(inputSource)
+        const panelIntersections = state.raycaster.intersectObject(
+          state.presentation.panelMesh,
+          false,
         )
-        const currentAnchor =
-          wristSource === undefined
-            ? undefined
-            : resolveWristAnchor(
-                wristSource,
-                viewerPosition,
-                anchorSettings.controllerWrist,
-              )
-        if (
-          currentAnchor !== undefined &&
-          (anchorSettings.activationMode !== 'automatic' ||
-            currentAnchor.automaticEligible)
-        ) {
-          applyAnchorPose(currentAnchor.anchorPose)
-        }
-        presentation.group.updateMatrixWorld(true)
-
-        for (const { id, handedness, inputSource } of controllerSources) {
-          const pose = frame.getPose(inputSource.targetRaySpace, nextReferenceSpace)
-          if (pose == null || !isGeometryTargetable) {
-            lastTargetBySource.delete(inputSource)
-            continue
-          }
-
-          rayMatrix.fromArray(pose.transform.matrix)
-          rayOrigin.setFromMatrixPosition(rayMatrix)
-          rayDirection.set(0, 0, -1).transformDirection(rayMatrix)
-          raycaster.set(rayOrigin, rayDirection)
-          const intersection = raycaster.intersectObjects(
-            presentation.hitRegions,
-            false,
-          )[0]
-          const itemId = presentation.itemIdForIntersection(intersection)
-          if (itemId !== undefined) {
-            lastTargetBySource.set(inputSource, itemId)
-            targetObservations.push({
-              sourceId: id,
-              kind: 'controller-target-ray',
-              itemId,
+        if (panelIntersections.length > 0) {
+          const point = panelIntersections[0]!.point
+          const localY = state.presentation.panelLocalY(point)
+          if (localY !== null) {
+            scrollSources.push({
+              id,
+              kind: 'controller',
+              handedness,
+              positionY: localY,
+              targetingPanel: true,
             })
-          } else {
-            lastTargetBySource.delete(inputSource)
-            const panelIntersections = raycaster.intersectObject(
-              presentation.panelMesh,
-              false,
-            )
-            if (panelIntersections.length > 0) {
-              const point = panelIntersections[0]!.point
-              const localY = presentation.panelLocalY(point)
-              if (localY !== null) {
-                scrollSources.push({
-                  id,
-                  kind: 'controller',
-                  handedness,
-                  positionY: localY,
-                  targetingPanel: true,
-                })
-              }
-            }
-          }
-        }
-
-        for (const { id, handedness, fingertipPose } of handSources) {
-          if (!isGeometryTargetable) continue
-          const fingertipWorld = new Vector3(
-            fingertipPose.transform.position.x,
-            fingertipPose.transform.position.y,
-            fingertipPose.transform.position.z,
-          )
-          const observation = presentation.fingertipObservation(
-            fingertipWorld,
-            fingertipPose.radius!,
-          )
-          if (observation !== undefined) {
-            targetObservations.push({ sourceId: id, ...observation })
-          } else {
-            const localY = presentation.panelLocalY(fingertipWorld)
-            if (localY !== null) {
-              scrollSources.push({
-                id,
-                kind: 'hand',
-                handedness,
-                positionY: localY,
-                targetingPanel: true,
-              })
-            }
           }
         }
       }
+    }
 
-      const model = runtime.step(
-        {
-          sequence: frameSequence,
-          time,
-          visibility:
-            nextSession === null || nextSession.visibilityState === 'hidden'
-              ? 'hidden'
-              : nextSession?.visibilityState === 'visible-blurred'
-                ? 'visible-blurred'
-                : 'visible',
-          viewerPosition,
-          wristSources,
-          lifecycleRevision,
-          selectionSources,
-          scrollSources,
-        },
-        targetObservations,
+    for (const { id, handedness, fingertipPose } of handSources) {
+      if (!isGeometryTargetable) continue
+      const fingertipWorld = new Vector3(
+        fingertipPose.transform.position.x,
+        fingertipPose.transform.position.y,
+        fingertipPose.transform.position.z,
       )
-
-      if (model.revision !== presentationRevision) {
-        presentationRevision = model.revision
-        presentation.renderItems(model.items)
-        geometryBarrierThrough = frameSequence
-      }
-
-      applyAnchorPose(model.anchorPose)
-      presentation.setModel(
-        model,
-        model.targetable && frameSequence > geometryBarrierThrough,
+      const observation = state.presentation.fingertipObservation(
+        fingertipWorld,
+        fingertipPose.radius!,
       )
-
-      for (const inputSource of nextSession?.inputSources ?? []) {
-        if (!(sourcePressed.get(inputSource) ?? false)) {
-          sourceCompleted.delete(inputSource)
-        }
-        if (!runtime.blocksSceneInput(sourceId(inputSource))) {
-          provisionalClaims.delete(inputSource)
+      if (observation !== undefined) {
+        targetObservations.push({ sourceId: id, ...observation })
+      } else {
+        const localY = state.presentation.panelLocalY(fingertipWorld)
+        if (localY !== null) {
+          scrollSources.push({
+            id,
+            kind: 'hand',
+            handedness,
+            positionY: localY,
+            targetingPanel: true,
+          })
         }
       }
-    },
+    }
+  }
 
-    blocksSceneInput(inputSource) {
-      assertActive()
-      return (
-        provisionalClaims.has(inputSource) ||
-        runtime.blocksSceneInput(sourceId(inputSource))
-      )
+  const model = stepWristMenuRuntime(
+    state.runtime,
+    {
+      sequence: state.frameSequence,
+      time: update.time,
+      visibility:
+        nextSession === null || nextSession.visibilityState === 'hidden'
+          ? 'hidden'
+          : nextSession?.visibilityState === 'visible-blurred'
+            ? 'visible-blurred'
+            : 'visible',
+      viewerPosition,
+      wristSources,
+      lifecycleRevision: state.lifecycleRevision,
+      selectionSources,
+      scrollSources,
     },
+    targetObservations,
+  )
 
-    dispose() {
-      if (disposed) return
-      disposed = true
+  if (model.revision !== state.presentationRevision) {
+    state.presentationRevision = model.revision
+    state.presentation.renderItems(model.items)
+    state.geometryBarrierThrough = state.frameSequence
+  }
+
+  applyAnchorPose(state, model.anchorPose)
+  state.presentation.setModel(
+    model,
+    model.targetable && state.frameSequence > state.geometryBarrierThrough,
+  )
+
+  for (const inputSource of nextSession?.inputSources ?? []) {
+    if (!(state.sourcePressed.get(inputSource) ?? false)) {
+      state.sourceCompleted.delete(inputSource)
+    }
+    if (!wristMenuRuntimeBlocksSceneInput(state.runtime, sourceId(state, inputSource))) {
+      state.provisionalClaims.delete(inputSource)
+    }
+  }
+}
+
+export function threeWristMenuBlocksSceneInput(
+  state: ThreeWristMenuState,
+  inputSource: XRInputSource,
+): boolean {
+  assertActive(state)
+  return (
+    state.provisionalClaims.has(inputSource) ||
+    wristMenuRuntimeBlocksSceneInput(state.runtime, sourceId(state, inputSource))
+  )
+}
+
+export function disposeThreeWristMenu(
+  state: ThreeWristMenuState,
+): void {
+  if (state.disposed) return
+  state.disposed = true
+  try {
+    attachSession(state, null)
+  } finally {
+    try {
+      attachReferenceSpace(state, null)
+    } finally {
       try {
-        attachSession(null)
+        disposeWristMenuRuntime(state.runtime)
       } finally {
-        try {
-          attachReferenceSpace(null)
-        } finally {
-          try {
-            runtime.dispose()
-          } finally {
-            inputSourceById.clear()
-            presentation.dispose()
-          }
-        }
+        state.inputSourceById.clear()
+        state.presentation.dispose()
       }
-    },
-  })
+    }
+  }
 }

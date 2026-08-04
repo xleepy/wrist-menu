@@ -9,7 +9,11 @@ import {
   resetScrollState,
   setScrollBarrier,
 } from '../dist/core/scroll-state.js'
-import { createWristMenuRuntime } from '../dist/core/index.js'
+import {
+  createWristMenuRuntimeState,
+  disposeWristMenuRuntime,
+  stepWristMenuRuntime,
+} from '../dist/core/index.js'
 import {
   reachScrollSnapshot,
   scrollSource,
@@ -18,7 +22,7 @@ import {
 } from '../fixtures/reach-scroll.mjs'
 
 function createRuntime(onEvent = () => undefined) {
-  return createWristMenuRuntime({
+  return createWristMenuRuntimeState({
     snapshot: reachScrollSnapshot,
     onEvent,
   })
@@ -169,7 +173,8 @@ test('resetScrollState restores the neutral initial state', () => {
 
 test('the runtime exposes scrollOffset and barrier flags on the Presentation Model', () => {
   const runtime = createRuntime()
-  const model = runtime.step(
+  const model = stepWristMenuRuntime(
+    runtime,
     scrollFrame(1, [scrollSource({ id: 'right-hand', positionY: 0 })]),
     [],
   )
@@ -178,7 +183,8 @@ test('the runtime exposes scrollOffset and barrier flags on the Presentation Mod
   assert.equal(model.totalRows, reachScrollSnapshot.menuDefinition.length)
   assert.equal(model.scrollBarrierActive, false)
 
-  const scrolled = runtime.step(
+  const scrolled = stepWristMenuRuntime(
+    runtime,
     scrollFrame(2, [scrollSource({ id: 'right-hand', positionY: -ROW_SPACING })]),
     [],
   )
@@ -187,16 +193,18 @@ test('the runtime exposes scrollOffset and barrier flags on the Presentation Mod
 
 test('runtime scroll ownership releases and rearms across the barrier without dropouts', () => {
   const runtime = createRuntime()
-  runtime.step(
+  stepWristMenuRuntime(
+    runtime,
     scrollFrame(1, [scrollSource({ id: 'right-hand', positionY: 0 })]),
     [],
   )
-  runtime.step(scrollFrame(2, []), [])
-  const after = runtime.step(
+  stepWristMenuRuntime(runtime, scrollFrame(2, []), [])
+  const after = stepWristMenuRuntime(
+    runtime,
     scrollFrame(3, [scrollSource({ id: 'right-hand', positionY: 0 })]),
     [],
   )
   assert.equal(after.scrollOffset, 0)
   assert.equal(after.scrollBarrierActive, false)
-  runtime.dispose()
+  disposeWristMenuRuntime(runtime)
 })

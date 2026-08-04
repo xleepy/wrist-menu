@@ -160,7 +160,10 @@ async function createIwerHandFixture(iwer) {
 }
 
 export async function runPackedThreeControllerJourney({
-  createThreeWristMenu,
+  createThreeWristMenuState,
+  disposeThreeWristMenu,
+  threeWristMenuBlocksSceneInput,
+  updateThreeWristMenu,
   iwer,
   three,
 }) {
@@ -173,44 +176,44 @@ export async function runPackedThreeControllerJourney({
       getReferenceSpace: () => fixture.referenceSpace,
     },
   }
-  const menu = createThreeWristMenu({
+  const menu = createThreeWristMenuState({
     renderer,
     snapshot: controllerActionSnapshot,
     onEvent: (event) => wristMenuEvents.push(event),
   })
   const scene = new three.Scene()
-  scene.add(menu.group)
+  scene.add(menu.presentation.group)
   const ray = new three.Raycaster(
     new three.Vector3(0, 0, 1),
     new three.Vector3(0, 0, -1),
   )
 
   try {
-    menu.update({ time: 16, frame: fixture.nextFrame(16) })
-    assert.equal(ray.intersectObject(menu.group, true).length, 0)
+    updateThreeWristMenu(menu, { time: 16, frame: fixture.nextFrame(16) })
+    assert.equal(ray.intersectObject(menu.presentation.group, true).length, 0)
     fixture.controller.position.set(
-      menu.group.position.x,
-      menu.group.position.y,
-      menu.group.position.z + 1,
+      menu.presentation.group.position.x,
+      menu.presentation.group.position.y,
+      menu.presentation.group.position.z + 1,
     )
     ray.set(
       new three.Vector3(
-        menu.group.position.x,
-        menu.group.position.y,
-        menu.group.position.z + 1,
+        menu.presentation.group.position.x,
+        menu.presentation.group.position.y,
+        menu.presentation.group.position.z + 1,
       ),
       new three.Vector3(0, 0, -1),
     )
-    menu.update({ time: 32, frame: fixture.nextFrame(32) })
-    assert.ok(ray.intersectObject(menu.group, true).length > 0)
+    updateThreeWristMenu(menu, { time: 32, frame: fixture.nextFrame(32) })
+    assert.ok(ray.intersectObject(menu.presentation.group, true).length > 0)
 
     fixture.session.addEventListener('selectend', ({ inputSource }) => {
-      if (!menu.blocksSceneInput(inputSource)) sceneActions += 1
+      if (!threeWristMenuBlocksSceneInput(menu, inputSource)) sceneActions += 1
     })
 
-    menu.update({ time: 48, frame: fixture.press(48) })
-    assert.equal(menu.blocksSceneInput(fixture.inputSource), true)
-    menu.update({ time: 64, frame: fixture.release(64) })
+    updateThreeWristMenu(menu, { time: 48, frame: fixture.press(48) })
+    assert.equal(threeWristMenuBlocksSceneInput(menu, fixture.inputSource), true)
+    updateThreeWristMenu(menu, { time: 64, frame: fixture.release(64) })
 
     assert.equal(sceneActions, 0)
     assert.equal(
@@ -218,20 +221,23 @@ export async function runPackedThreeControllerJourney({
       1,
     )
   } finally {
-    menu.dispose()
+    disposeThreeWristMenu(menu)
     fixture.restoreGlobals()
   }
 }
 
 export async function runPackedThreeHandJourney({
-  createThreeWristMenu,
+  createThreeWristMenuState,
+  disposeThreeWristMenu,
+  threeWristMenuBlocksSceneInput,
+  updateThreeWristMenu,
   iwer,
   three,
 }) {
   const fixture = await createIwerHandFixture(iwer)
   const wristMenuEvents = []
   let sceneActions = 0
-  const menu = createThreeWristMenu({
+  const menu = createThreeWristMenuState({
     renderer: {
       xr: {
         getSession: () => fixture.session,
@@ -242,26 +248,26 @@ export async function runPackedThreeHandJourney({
     onEvent: (event) => wristMenuEvents.push(event),
   })
   const scene = new three.Scene()
-  scene.add(menu.group)
+  scene.add(menu.presentation.group)
 
   try {
     const initialFrame = fixture.nextFrame(16)
-    menu.update({ time: 16, frame: initialFrame })
+    updateThreeWristMenu(menu, { time: 16, frame: initialFrame })
 
-    const hoverTarget = menu.group.localToWorld(
+    const hoverTarget = menu.presentation.group.localToWorld(
       new three.Vector3(0, 0.0225, 0.03),
     )
     fixture.moveFingertipTo(initialFrame, hoverTarget)
     const hoverFrame = fixture.nextFrame(32)
-    menu.update({ time: 32, frame: hoverFrame })
-    assert.equal(menu.blocksSceneInput(fixture.inputSource), true)
+    updateThreeWristMenu(menu, { time: 32, frame: hoverFrame })
+    assert.equal(threeWristMenuBlocksSceneInput(menu, fixture.inputSource), true)
 
-    const pressTarget = menu.group.localToWorld(
+    const pressTarget = menu.presentation.group.localToWorld(
       new three.Vector3(0, 0.0225, 0.008),
     )
     fixture.moveFingertipTo(hoverFrame, pressTarget)
-    menu.update({ time: 48, frame: fixture.nextFrame(48) })
-    if (!menu.blocksSceneInput(fixture.inputSource)) sceneActions += 1
+    updateThreeWristMenu(menu, { time: 48, frame: fixture.nextFrame(48) })
+    if (!threeWristMenuBlocksSceneInput(menu, fixture.inputSource)) sceneActions += 1
 
     assert.equal(sceneActions, 0)
     assert.deepEqual(
@@ -271,7 +277,7 @@ export async function runPackedThreeHandJourney({
       [['first', 'hand']],
     )
   } finally {
-    menu.dispose()
+    disposeThreeWristMenu(menu)
     fixture.restoreGlobals()
   }
 }

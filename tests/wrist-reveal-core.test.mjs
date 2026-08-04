@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  createWristMenuRuntime,
+  createWristMenuRuntimeState,
   defaultRevealConfiguration,
+  disposeWristMenuRuntime,
   resolveWristAnchor,
+  stepWristMenuRuntime,
+  syncWristMenuRuntime,
 } from '../dist/core/index.js'
 import {
   automaticHandSnapshot,
@@ -14,7 +17,7 @@ import {
 
 function createRuntime(snapshot = automaticHandSnapshot) {
   const events = []
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot,
     onEvent: (event) => events.push(event),
   })
@@ -33,28 +36,28 @@ test('automatic reveal applies dwell, hysteresis, and ordinary transitions by XR
     transitionMs: 150,
   })
 
-  assert.equal(runtime.step(wristFrame({ sequence: 1, time: 0 }), []).revealPhase, 'dwelling')
-  assert.equal(runtime.step(wristFrame({ sequence: 2, time: 299 }), []).visible, false)
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 1, time: 0 }), []).revealPhase, 'dwelling')
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 2, time: 299 }), []).visible, false)
 
-  const showing = runtime.step(wristFrame({ sequence: 3, time: 300 }), [])
+  const showing = stepWristMenuRuntime(runtime,wristFrame({ sequence: 3, time: 300 }), [])
   assert.equal(showing.revealPhase, 'showing')
   assert.equal(showing.opacity, 0)
 
-  assert.equal(runtime.step(wristFrame({ sequence: 4, time: 375 }), []).opacity, 0.5)
-  const revealed = runtime.step(wristFrame({ sequence: 5, time: 450 }), [])
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 4, time: 375 }), []).opacity, 0.5)
+  const revealed = stepWristMenuRuntime(runtime,wristFrame({ sequence: 5, time: 450 }), [])
   assert.equal(revealed.opacity, 1)
   assert.equal(revealed.targetable, false)
-  assert.equal(runtime.step(wristFrame({ sequence: 6, time: 451 }), []).targetable, true)
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 6, time: 451 }), []).targetable, true)
 
   const withinHysteresis = wristFrame({ sequence: 7, time: 500 })
   withinHysteresis.viewerPosition = [0, -Math.cos(Math.PI / 4), Math.sin(Math.PI / 4)]
-  assert.equal(runtime.step(withinHysteresis, []).revealPhase, 'visible')
+  assert.equal(stepWristMenuRuntime(runtime,withinHysteresis, []).revealPhase, 'visible')
 
   const outsideExit = wristFrame({ sequence: 8, time: 510 })
   outsideExit.viewerPosition = [0, -Math.cos((51 * Math.PI) / 180), Math.sin((51 * Math.PI) / 180)]
-  assert.equal(runtime.step(outsideExit, []).revealPhase, 'hiding')
-  assert.equal(runtime.step({ ...outsideExit, sequence: 9, time: 585 }, []).opacity, 0.5)
-  assert.equal(runtime.step({ ...outsideExit, sequence: 10, time: 660 }, []).visible, false)
+  assert.equal(stepWristMenuRuntime(runtime,outsideExit, []).revealPhase, 'hiding')
+  assert.equal(stepWristMenuRuntime(runtime,{ ...outsideExit, sequence: 9, time: 585 }, []).opacity, 0.5)
+  assert.equal(stepWristMenuRuntime(runtime,{ ...outsideExit, sequence: 10, time: 660 }, []).visible, false)
 })
 
 test('fixed and irregular frame traces converge at the same absolute times', () => {
@@ -62,7 +65,7 @@ test('fixed and irregular frame traces converge at the same absolute times', () 
     const { runtime } = createRuntime()
     let model
     for (const [index, time] of times.entries()) {
-      model = runtime.step(wristFrame({ sequence: index + 1, time }), [])
+      model = stepWristMenuRuntime(runtime,wristFrame({ sequence: index + 1, time }), [])
     }
     return {
       opacity: model.opacity,
@@ -79,13 +82,13 @@ test('fixed and irregular frame traces converge at the same absolute times', () 
 
 test('visibility events report automatic reveal and hide transitions', () => {
   const { events, runtime } = createRuntime()
-  runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
-  runtime.step(wristFrame({ sequence: 2, time: 450 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 1, time: 0 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 2, time: 450 }), [])
 
   const outsideExit = wristFrame({ sequence: 3, time: 500 })
   outsideExit.viewerPosition = [0, 0, 1]
-  runtime.step(outsideExit, [])
-  runtime.step({ ...outsideExit, sequence: 4, time: 650 }, [])
+  stepWristMenuRuntime(runtime,outsideExit, [])
+  stepWristMenuRuntime(runtime,{ ...outsideExit, sequence: 4, time: 650 }, [])
 
   assert.deepEqual(
     events.filter(({ type }) => type === 'visibility-change'),
@@ -109,20 +112,20 @@ test('visibility events report automatic reveal and hide transitions', () => {
 test('tracking loss is visual-only for 250 ms and reacquisition needs a fresh 200 ms dwell', () => {
   const { runtime } = createRuntime()
   for (const [sequence, time] of [0, 300, 450, 451].map((time, index) => [index + 1, time])) {
-    runtime.step(wristFrame({ sequence, time }), [])
+    stepWristMenuRuntime(runtime,wristFrame({ sequence, time }), [])
   }
 
-  const lost = runtime.step(wristFrame({ sequence: 5, time: 500, pose: null }), [])
+  const lost = stepWristMenuRuntime(runtime,wristFrame({ sequence: 5, time: 500, pose: null }), [])
   assert.equal(lost.visible, true)
   assert.equal(lost.targetable, false)
   assert.equal(lost.revealPhase, 'tracking-grace')
-  assert.equal(runtime.step(wristFrame({ sequence: 6, time: 749, pose: null }), []).visible, true)
-  assert.equal(runtime.step(wristFrame({ sequence: 7, time: 750, pose: null }), []).visible, false)
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 6, time: 749, pose: null }), []).visible, true)
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 7, time: 750, pose: null }), []).visible, false)
 
-  assert.equal(runtime.step(wristFrame({ sequence: 8, time: 800 }), []).revealPhase, 'reacquire-dwell')
-  assert.equal(runtime.step(wristFrame({ sequence: 9, time: 999 }), []).visible, false)
-  assert.equal(runtime.step(wristFrame({ sequence: 10, time: 1000 }), []).revealPhase, 'showing')
-  assert.equal(runtime.step(wristFrame({ sequence: 11, time: 1150 }), []).opacity, 1)
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 8, time: 800 }), []).revealPhase, 'reacquire-dwell')
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 9, time: 999 }), []).visible, false)
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 10, time: 1000 }), []).revealPhase, 'showing')
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 11, time: 1150 }), []).opacity, 1)
 })
 
 for (const [label, frameOverrides] of [
@@ -134,11 +137,11 @@ for (const [label, frameOverrides] of [
 ]) {
   test(`${label} enters the same 250 ms non-interactive tracking grace`, () => {
     const { runtime } = createRuntime()
-    runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
-    runtime.step(wristFrame({ sequence: 2, time: 450 }), [])
-    runtime.step(wristFrame({ sequence: 3, time: 451 }), [])
+    stepWristMenuRuntime(runtime,wristFrame({ sequence: 1, time: 0 }), [])
+    stepWristMenuRuntime(runtime,wristFrame({ sequence: 2, time: 450 }), [])
+    stepWristMenuRuntime(runtime,wristFrame({ sequence: 3, time: 451 }), [])
 
-    const confidenceLost = runtime.step(
+    const confidenceLost = stepWristMenuRuntime(runtime,
       wristFrame({ sequence: 4, time: 500, ...frameOverrides }),
       [],
     )
@@ -146,14 +149,14 @@ for (const [label, frameOverrides] of [
     assert.equal(confidenceLost.visible, true)
     assert.equal(confidenceLost.targetable, false)
     assert.equal(
-      runtime.step(
+      stepWristMenuRuntime(runtime,
         wristFrame({ sequence: 5, time: 749, ...frameOverrides }),
         [],
       ).visible,
       true,
     )
     assert.equal(
-      runtime.step(
+      stepWristMenuRuntime(runtime,
         wristFrame({ sequence: 6, time: 750, ...frameOverrides }),
         [],
       ).visible,
@@ -164,12 +167,12 @@ for (const [label, frameOverrides] of [
 
 test('source replacement and lifecycle reset cancel and require fresh acquisition', () => {
   const { events, runtime } = createRuntime()
-  runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
-  runtime.step(wristFrame({ sequence: 2, time: 300 }), [])
-  runtime.step(wristFrame({ sequence: 3, time: 450 }), [])
-  runtime.step(wristFrame({ sequence: 4, time: 451 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 1, time: 0 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 2, time: 300 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 3, time: 450 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 4, time: 451 }), [])
 
-  const replaced = runtime.step(
+  const replaced = stepWristMenuRuntime(runtime,
     wristFrame({ sequence: 5, time: 500, sourceId: 'left-hand-replacement' }),
     [],
   )
@@ -183,9 +186,9 @@ test('source replacement and lifecycle reset cancel and require fresh acquisitio
     'source-replaced',
   )
 
-  runtime.step(wristFrame({ sequence: 6, time: 700, sourceId: 'left-hand-replacement' }), [])
-  runtime.step(wristFrame({ sequence: 7, time: 850, sourceId: 'left-hand-replacement' }), [])
-  const reset = runtime.step(
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 6, time: 700, sourceId: 'left-hand-replacement' }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 7, time: 850, sourceId: 'left-hand-replacement' }), [])
+  const reset = stepWristMenuRuntime(runtime,
     wristFrame({
       sequence: 8,
       time: 900,
@@ -200,15 +203,15 @@ test('source replacement and lifecycle reset cancel and require fresh acquisitio
 
 test('explicit default comfort values do not trigger semantic reacquisition', () => {
   const { runtime } = createRuntime()
-  runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
-  runtime.step(wristFrame({ sequence: 2, time: 450 }), [])
-  runtime.step(wristFrame({ sequence: 3, time: 451 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 1, time: 0 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 2, time: 450 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 3, time: 451 }), [])
 
-  runtime.sync({
+  syncWristMenuRuntime(runtime,{
     ...automaticHandSnapshot,
     comfort: { ...defaultRevealConfiguration },
   })
-  const synchronized = runtime.step(wristFrame({ sequence: 4, time: 452 }), [])
+  const synchronized = stepWristMenuRuntime(runtime,wristFrame({ sequence: 4, time: 452 }), [])
 
   assert.equal(synchronized.visible, true)
   assert.equal(synchronized.revealPhase, 'visible')
@@ -222,7 +225,7 @@ test('Controller Wrist Proxy presets mirror Quest 2 candidate A and leave unknow
       wrist,
       controllerWrist,
     })
-    runtime.step(
+    stepWristMenuRuntime(runtime,
       wristFrame({
         sequence: 1,
         time: 0,
@@ -233,7 +236,7 @@ test('Controller Wrist Proxy presets mirror Quest 2 candidate A and leave unknow
       }),
       [],
     )
-    return runtime.step(
+    return stepWristMenuRuntime(runtime,
       wristFrame({
         sequence: 2,
         time: 150,
@@ -293,12 +296,12 @@ test('forced modes bypass facing confidence but never XR lifecycle safety', () =
   })
   const lowConfidencePose = { ...identityPose, emulatedPosition: true }
 
-  runtime.step(wristFrame({ sequence: 1, time: 0, kind: 'controller', pose: lowConfidencePose, viewerPosition: null }), [])
-  assert.equal(runtime.step(wristFrame({ sequence: 2, time: 150, kind: 'controller', pose: lowConfidencePose, viewerPosition: null }), []).visible, true)
-  assert.equal(runtime.step(wristFrame({ sequence: 3, time: 151, kind: 'controller', pose: lowConfidencePose, viewerPosition: null, visibility: 'hidden' }), []).visible, false)
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 1, time: 0, kind: 'controller', pose: lowConfidencePose, viewerPosition: null }), [])
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 2, time: 150, kind: 'controller', pose: lowConfidencePose, viewerPosition: null }), []).visible, true)
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 3, time: 151, kind: 'controller', pose: lowConfidencePose, viewerPosition: null, visibility: 'hidden' }), []).visible, false)
 
-  runtime.sync({ ...automaticHandSnapshot, activationMode: 'disabled' })
-  const disabled = runtime.step(wristFrame({ sequence: 4, time: 200 }), [])
+  syncWristMenuRuntime(runtime,{ ...automaticHandSnapshot, activationMode: 'disabled' })
+  const disabled = stepWristMenuRuntime(runtime,wristFrame({ sequence: 4, time: 200 }), [])
   assert.equal(disabled.visible, false)
   assert.equal(disabled.targetable, false)
 })
@@ -308,19 +311,19 @@ test('forced closed uses the ordinary hide transition', () => {
     ...automaticHandSnapshot,
     activationMode: 'forced-open',
   })
-  runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
-  runtime.step(wristFrame({ sequence: 2, time: 150 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 1, time: 0 }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 2, time: 150 }), [])
 
-  runtime.sync({ ...automaticHandSnapshot, activationMode: 'forced-closed' })
-  const hiding = runtime.step(wristFrame({ sequence: 3, time: 200 }), [])
+  syncWristMenuRuntime(runtime,{ ...automaticHandSnapshot, activationMode: 'forced-closed' })
+  const hiding = stepWristMenuRuntime(runtime,wristFrame({ sequence: 3, time: 200 }), [])
   assert.equal(hiding.revealPhase, 'hiding')
   assert.equal(hiding.opacity, 1)
-  assert.equal(runtime.step(wristFrame({ sequence: 4, time: 275 }), []).opacity, 0.5)
-  assert.equal(runtime.step(wristFrame({ sequence: 5, time: 350 }), []).visible, false)
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 4, time: 275 }), []).opacity, 0.5)
+  assert.equal(stepWristMenuRuntime(runtime,wristFrame({ sequence: 5, time: 350 }), []).visible, false)
 })
 
 test('disposal remains terminal when a cancellation callback throws', () => {
-  const runtime = createWristMenuRuntime({
+  const runtime = createWristMenuRuntimeState({
     snapshot: {
       ...automaticHandSnapshot,
       activationMode: 'forced-open',
@@ -352,9 +355,9 @@ test('disposal remains terminal when a cancellation callback throws', () => {
     kind: 'controller-target-ray',
     itemId: 'spawn-cube',
   }
-  runtime.step(wristFrame({ sequence: 1, time: 0, kind: 'controller', selectionSources }), [])
-  runtime.step(wristFrame({ sequence: 2, time: 1, kind: 'controller', selectionSources }), [observation])
-  runtime.step(
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 1, time: 0, kind: 'controller', selectionSources }), [])
+  stepWristMenuRuntime(runtime,wristFrame({ sequence: 2, time: 1, kind: 'controller', selectionSources }), [observation])
+  stepWristMenuRuntime(runtime,
     wristFrame({
       sequence: 3,
       time: 2,
@@ -364,9 +367,9 @@ test('disposal remains terminal when a cancellation callback throws', () => {
     [observation],
   )
 
-  assert.throws(() => runtime.dispose(), /host failure/)
+  assert.throws(() => disposeWristMenuRuntime(runtime), /host failure/)
   assert.throws(
-    () => runtime.step(wristFrame({ sequence: 4, time: 3 }), []),
+    () => stepWristMenuRuntime(runtime,wristFrame({ sequence: 4, time: 3 }), []),
     /disposed/,
   )
 })
