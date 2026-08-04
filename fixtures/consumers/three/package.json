@@ -1,0 +1,13 @@
+{
+  "name": "wrist-menu-three-consumer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@xleepy/wrist-menu": "file:../../../artifacts/xleepy-wrist-menu-0.0.0.tgz",
+    "three": "0.185.1"
+  },
+  "scripts": {
+    "test": "node smoke.mjs"
+  }
+}

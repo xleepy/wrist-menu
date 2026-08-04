@@ -1,0 +1,23 @@
+{
+  "name": "wrist-menu-react-19-consumer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@react-three/fiber": "9.6.1",
+    "@react-three/xr": "6.6.30",
+    "@xleepy/wrist-menu": "file:../../../artifacts/xleepy-wrist-menu-0.0.0.tgz",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/offscreencanvas": "2019.7.3",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "test": "node smoke.mjs && tsc -p tsconfig.json"
+  }
+}
