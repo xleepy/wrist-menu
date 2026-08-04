@@ -5,6 +5,7 @@ import {
   findInteractiveItem,
   type Handedness,
   type HostSnapshot,
+  type MenuDefinitionEntry,
   type PresentationItem,
 } from './host-snapshot.js'
 
@@ -53,6 +54,17 @@ import {
   type TargetObservation,
 } from './selection-state.js'
 import {
+  advanceScrollState,
+  createScrollState,
+  releaseScrollOwnership,
+  resetScrollState,
+  setScrollBarrier,
+  VISIBLE_SLOTS,
+  type ScrollFrameResult,
+  type ScrollSourceSample,
+  type ScrollState,
+} from './scroll-state.js'
+import {
   resolveWristAnchor,
   selectWristSource,
   type PoseSample,
@@ -91,6 +103,11 @@ export type {
   SelectionSourceSample,
   TargetObservation,
 } from './selection-state.js'
+export type {
+  ScrollFrameResult,
+  ScrollSourceSample,
+} from './scroll-state.js'
+export { VISIBLE_SLOTS } from './scroll-state.js'
 
 /** One renderer-neutral sample of poses and input for the current XR frame. */
 export type FrameSample = Readonly<{
@@ -102,6 +119,7 @@ export type FrameSample = Readonly<{
   /** Changes after session, reference-space, recenter, or attachment resets. */
   lifecycleRevision: number
   selectionSources: readonly SelectionSourceSample[]
+  scrollSources?: readonly ScrollSourceSample[]
 }>
 
 export type SelectionIntent =
@@ -158,6 +176,10 @@ export type PresentationModel = Readonly<{
   anchorPose: WristAnchorPose | null
   revision: number
   items: readonly PresentationItem[]
+  scrollOffset: number
+  totalRows: number
+  visibleSlots: number
+  scrollBarrierActive: boolean
 }>
 
 export type WristMenuRuntime = Readonly<{
@@ -174,6 +196,20 @@ export type CreateWristMenuRuntimeOptions = Readonly<{
   snapshot: HostSnapshot
   onEvent: (event: WristMenuEvent) => void
 }>
+
+function countMenuRows(
+  menuDefinition: readonly MenuDefinitionEntry[],
+): number {
+  let count = 0
+  for (const entry of menuDefinition) {
+    if (entry.type === 'choice-group') {
+      count += 1 + entry.options.length
+    } else {
+      count += 1
+    }
+  }
+  return count
+}
 
 function selectionIntentFor(
   snapshot: HostSnapshot,
@@ -226,6 +262,7 @@ export function createWristMenuRuntime(
   let lastReportedVisible = false
   let lastLifecycleRevision: number | undefined
   const selection = createSelectionStateMachine()
+  const scrollState = createScrollState()
 
   const assertActive = () => {
     if (disposed) throw new Error('Wrist Menu Instance is disposed')
@@ -281,6 +318,7 @@ export function createWristMenuRuntime(
         revision += 1
         targetableAfterSequence = frameSample.sequence
         cancelSelection('host-snapshot-changed', frameSample.time)
+        resetScrollState(scrollState)
       }
 
       if (!Array.isArray(frameSample.wristSources)) {
@@ -353,6 +391,24 @@ export function createWristMenuRuntime(
         }
         return located !== undefined
       })
+
+      const totalRows = countMenuRows(snapshot.menuDefinition)
+      const scrollSources = frameSample.scrollSources ?? []
+      const scrollResult = advanceScrollState(
+        scrollState,
+        frameSample.sequence,
+        totalRows,
+        scrollSources,
+      )
+
+      if (scrollResult.scrollingSourceIds.size > 0) {
+        for (const sourceId of scrollResult.scrollingSourceIds) {
+          for (const cancellation of selection.cancelForSource(sourceId, 'lifecycle-interrupted')) {
+            emitCancellation(cancellation, frameSample.time)
+          }
+        }
+      }
+
       const selectionResult = selection.step({
         targetable,
         menuWrist: snapshot.wrist,
@@ -392,6 +448,10 @@ export function createWristMenuRuntime(
               ? 'hovered'
               : 'idle',
         ),
+        scrollOffset: scrollResult.offset,
+        totalRows: scrollResult.totalRows,
+        visibleSlots: scrollResult.visibleSlots,
+        scrollBarrierActive: scrollResult.barrierActive,
       })
     },
 
@@ -407,6 +467,7 @@ export function createWristMenuRuntime(
         cancelSelection('disposed', lastTime)
       } finally {
         selection.clear()
+        resetScrollState(scrollState)
       }
     },
   })

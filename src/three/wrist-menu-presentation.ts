@@ -17,6 +17,7 @@ import type {
   PresentationToggleItem,
   HandTargetObservation,
 } from '../core/index.js'
+import { VISIBLE_SLOTS } from '../core/scroll-state.js'
 
 const decorativeRaycast: Mesh['raycast'] = () => undefined
 const interactiveRaycast = Mesh.prototype.raycast
@@ -71,18 +72,42 @@ function baseColor(item: InteractivePresentationItem): number {
   return 0x102020
 }
 
+const POOL_SIZE = VISIBLE_SLOTS + 1
+const ROW_HEIGHT = 0.02
+const SEPARATOR_HEIGHT = 0.009
+const ROW_SPACING = 0.0225
+const PANEL_WIDTH = 0.192
+const PANEL_HEIGHT = 0.27
+const PANEL_DEPTH = 0.004
+const ROW_WIDTH = 0.176
+const ROW_DEPTH = 0.003
+const HIT_DEPTH = 0.008
+const HIT_Z = 0.008
+
+type PoolSlot = {
+  rowMesh: Mesh
+  hitMesh: Mesh
+  rowMaterial: MeshBasicMaterial
+  hitMaterial: MeshBasicMaterial
+  boundRow: PresentationRow | null
+  boundItemId: string | null
+}
+
 export class WristMenuPresentation {
   readonly group = new Group()
   readonly hitRegions: Mesh[] = []
+  readonly panelMesh: Mesh
   private readonly resources: Array<{ dispose(): void }> = []
-  private readonly rowMeshes: Mesh[] = []
+  private readonly slots: PoolSlot[] = []
   private readonly visualMaterials: MeshBasicMaterial[] = []
   private readonly fingertipLocalPosition = new Vector3()
+  private allRows: readonly PresentationRow[] = []
+  private scrollOffset = 0
 
   constructor() {
     this.group.name = 'wrist-menu-attachment-root'
 
-    const panelGeometry = new BoxGeometry(0.192, 0.158, 0.004)
+    const panelGeometry = new BoxGeometry(PANEL_WIDTH, PANEL_HEIGHT, PANEL_DEPTH)
     const panelMaterial = new MeshBasicMaterial({
       color: 0x081415,
       transparent: true,
@@ -91,94 +116,149 @@ export class WristMenuPresentation {
     panel.name = 'wrist-menu-command-slab'
     panel.position.z = -0.004
     panel.raycast = decorativeRaycast
+    this.panelMesh = panel
     this.group.add(panel)
     this.resources.push(panelGeometry, panelMaterial)
     this.visualMaterials.push(panelMaterial)
+
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const rowGeometry = new BoxGeometry(ROW_WIDTH, ROW_HEIGHT, ROW_DEPTH)
+      const rowMaterial = new MeshBasicMaterial({ transparent: true })
+      const rowMesh = new Mesh(rowGeometry, rowMaterial)
+      rowMesh.raycast = decorativeRaycast
+      rowMesh.visible = false
+      this.group.add(rowMesh)
+      this.resources.push(rowGeometry, rowMaterial)
+      this.visualMaterials.push(rowMaterial)
+
+      const hitGeometry = new BoxGeometry(ROW_WIDTH, ROW_HEIGHT, HIT_DEPTH)
+      const hitMaterial = new MeshBasicMaterial({ visible: false })
+      const hitMesh = new Mesh(hitGeometry, hitMaterial)
+      hitMesh.raycast = decorativeRaycast
+      hitMesh.visible = false
+      this.group.add(hitMesh)
+      this.resources.push(hitGeometry, hitMaterial)
+      this.hitRegions.push(hitMesh)
+
+      this.slots.push({
+        rowMesh,
+        hitMesh,
+        rowMaterial,
+        hitMaterial,
+        boundRow: null,
+        boundItemId: null,
+      })
+    }
   }
 
   renderItems(items: readonly PresentationItem[]) {
-    for (const mesh of [...this.rowMeshes, ...this.hitRegions]) {
-      mesh.removeFromParent()
-    }
-    for (const resource of this.resources.splice(2)) resource.dispose()
-    this.rowMeshes.length = 0
-    this.hitRegions.length = 0
-    this.visualMaterials.length = 1
+    this.allRows = rowsFor(items)
+    this.rebindPool()
+  }
 
-    const rows = rowsFor(items)
-    rows.forEach((item, index) => {
-      const isSeparator = item.type === 'separator'
-      const rowHeight = isSeparator ? 0.009 : 0.02
-      const y = (rows.length - 1) * 0.01125 - index * 0.0225
-      const rowGeometry = new BoxGeometry(0.176, rowHeight, 0.003)
-      const rowMaterial = new MeshBasicMaterial({
-        color:
-          item.type === 'separator'
-            ? 0x355153
-            : item.type === 'choice-group'
-              ? 0x183132
-              : baseColor(item),
-        transparent: true,
-      })
-      const row = new Mesh(rowGeometry, rowMaterial)
-      row.name = `wrist-menu-${item.type}-visual:${item.id}`
-      row.position.set(0, y, 0.001)
-      row.raycast = decorativeRaycast
-      row.userData['wristMenuItemType'] = item.type
-      row.userData['wristMenuLabel'] = item.label
-      row.userData['wristMenuIconKey'] =
-        'iconKey' in item ? item.iconKey : undefined
-      row.userData['wristMenuValue'] =
-        item.type === 'toggle' || item.type === 'choice'
-          ? item.value
-          : item.type === 'choice-group'
-            ? item.selectedValue
+  setScrollOffset(offset: number) {
+    if (this.scrollOffset === offset) return
+    this.scrollOffset = offset
+    this.rebindPool()
+  }
+
+  private rebindPool() {
+    const rows = this.allRows
+    const startRow = Math.floor(this.scrollOffset)
+    const fractionalOffset = this.scrollOffset - startRow
+
+    for (let slotIndex = 0; slotIndex < POOL_SIZE; slotIndex++) {
+      const slot = this.slots[slotIndex]!
+      const rowIndex = startRow + slotIndex
+
+      if (rowIndex >= rows.length) {
+        slot.rowMesh.visible = false
+        slot.hitMesh.visible = false
+        slot.boundRow = null
+        slot.boundItemId = null
+        continue
+      }
+
+      const row = rows[rowIndex]!
+      const isSeparator = row.type === 'separator'
+      const rowHeight = isSeparator ? SEPARATOR_HEIGHT : ROW_HEIGHT
+      const visibleCount = Math.min(rows.length, VISIBLE_SLOTS)
+      const y = (visibleCount - 1) * (ROW_SPACING / 2) - slotIndex * ROW_SPACING + fractionalOffset * ROW_SPACING
+
+      slot.rowMesh.visible = true
+      slot.rowMesh.position.set(0, y, 0.001)
+      slot.rowMesh.name = `wrist-menu-${row.type}-visual:${row.id}`
+      slot.rowMesh.userData['wristMenuItemType'] = row.type
+      slot.rowMesh.userData['wristMenuLabel'] = row.label
+      slot.rowMesh.userData['wristMenuIconKey'] =
+        'iconKey' in row ? row.iconKey : undefined
+      slot.rowMesh.userData['wristMenuValue'] =
+        row.type === 'toggle' || row.type === 'choice'
+          ? row.value
+          : row.type === 'choice-group'
+            ? row.selectedValue
             : undefined
-      this.group.add(row)
-      this.rowMeshes.push(row)
-      this.visualMaterials.push(rowMaterial)
-      this.resources.push(rowGeometry, rowMaterial)
 
-      if (item.type === 'separator' || item.type === 'choice-group') return
+      if (row.type === 'separator') {
+        slot.rowMaterial.color.setHex(0x355153)
+      } else if (row.type === 'choice-group') {
+        slot.rowMaterial.color.setHex(0x183132)
+      } else {
+        slot.rowMaterial.color.setHex(baseColor(row))
+      }
 
-      row.userData['wristMenuSelected'] =
-        item.type === 'toggle' || item.type === 'choice' ? item.selected : false
-      row.userData['wristMenuDisabledReason'] = item.disabledReason
+      const scaleY = rowHeight / ROW_HEIGHT
+      slot.rowMesh.scale.set(1, scaleY, 1)
 
-      const hitGeometry = new BoxGeometry(0.176, 0.02, 0.008)
-      const hitMaterial = new MeshBasicMaterial({ visible: false })
-      const hitRegion = new Mesh(hitGeometry, hitMaterial)
-      hitRegion.name = `wrist-menu-hit-region:${item.id}`
-      hitRegion.position.set(0, y, 0.008)
-      hitRegion.userData['wristMenuItemId'] = item.id
-      hitRegion.userData['wristMenuDisabled'] = item.disabled
-      hitRegion.raycast = decorativeRaycast
+      slot.boundRow = row
+      slot.boundItemId = row.type !== 'separator' && row.type !== 'choice-group' ? row.id : null
 
-      this.group.add(hitRegion)
-      this.hitRegions.push(hitRegion)
-      this.resources.push(hitGeometry, hitMaterial)
-    })
+      if (row.type === 'separator' || row.type === 'choice-group') {
+        slot.hitMesh.visible = false
+        slot.hitMesh.raycast = decorativeRaycast
+        continue
+      }
+
+      const interactiveRow = row as InteractivePresentationItem
+      const fullyVisible = y >= -PANEL_HEIGHT / 2 + rowHeight / 2 - 0.001 &&
+                           y <= PANEL_HEIGHT / 2 - rowHeight / 2 + 0.001
+
+      if (fullyVisible) {
+        slot.hitMesh.visible = true
+        slot.hitMesh.position.set(0, y, HIT_Z)
+        slot.hitMesh.userData['wristMenuItemId'] = interactiveRow.id
+        slot.hitMesh.userData['wristMenuDisabled'] = interactiveRow.disabled
+        slot.hitMesh.userData['wristMenuSelected'] =
+          interactiveRow.type === 'toggle' || interactiveRow.type === 'choice' ? interactiveRow.selected : false
+        slot.hitMesh.userData['wristMenuDisabledReason'] = interactiveRow.disabledReason
+      } else {
+        slot.hitMesh.visible = false
+        slot.hitMesh.raycast = decorativeRaycast
+      }
+    }
   }
 
   setModel(model: PresentationModel, targetable: boolean) {
     this.group.visible = model.visible
-    this.setTargetable(targetable && model.visible)
+    this.setTargetable(targetable && model.visible && !model.scrollBarrierActive)
     for (const material of this.visualMaterials) {
       material.opacity = model.opacity
       material.depthWrite = model.opacity >= 1
     }
 
-    const interactiveItems = rowsFor(model.items).filter(
+    this.setScrollOffset(model.scrollOffset)
+
+    const interactiveItems = this.allRows.filter(
       (item): item is InteractivePresentationItem =>
         item.type === 'action' || item.type === 'toggle' || item.type === 'choice',
     )
     const itemById = new Map(interactiveItems.map((item) => [item.id, item]))
-    for (const row of this.rowMeshes) {
-      const itemId = row.name.slice(row.name.indexOf(':') + 1)
-      const item = itemById.get(itemId)
+
+    for (const slot of this.slots) {
+      if (slot.boundItemId === null) continue
+      const item = itemById.get(slot.boundItemId)
       if (item === undefined) continue
-      const material = row.material as MeshBasicMaterial
-      material.color.setHex(
+      slot.rowMaterial.color.setHex(
         item.interaction === 'armed'
           ? 0x2e7d61
           : item.interaction === 'hovered'
@@ -187,17 +267,19 @@ export class WristMenuPresentation {
               : 0x1d4438
             : baseColor(item),
       )
-      row.userData['wristMenuSelected'] =
+      slot.rowMesh.userData['wristMenuSelected'] =
         item.type === 'toggle' || item.type === 'choice' ? item.selected : false
-      row.userData['wristMenuValue'] =
+      slot.rowMesh.userData['wristMenuValue'] =
         item.type === 'toggle' || item.type === 'choice' ? item.value : undefined
-      row.userData['wristMenuDisabledReason'] = item.disabledReason
+      slot.rowMesh.userData['wristMenuDisabledReason'] = item.disabledReason
     }
   }
 
   setTargetable(targetable: boolean) {
     for (const hitRegion of this.hitRegions) {
-      hitRegion.raycast = targetable ? interactiveRaycast : decorativeRaycast
+      if (hitRegion.visible) {
+        hitRegion.raycast = targetable ? interactiveRaycast : decorativeRaycast
+      }
     }
   }
 
@@ -214,6 +296,7 @@ export class WristMenuPresentation {
   ): Omit<HandTargetObservation, 'sourceId'> | undefined {
     if (!Number.isFinite(radius) || radius <= 0) return undefined
     for (const hitRegion of this.hitRegions) {
+      if (!hitRegion.visible) continue
       hitRegion.updateWorldMatrix(true, false)
       this.fingertipLocalPosition.copy(worldPosition)
       hitRegion.worldToLocal(this.fingertipLocalPosition)
@@ -246,13 +329,29 @@ export class WristMenuPresentation {
     return undefined
   }
 
+  panelLocalY(worldPosition: Vector3): number | null {
+    this.panelMesh.updateWorldMatrix(true, false)
+    this.fingertipLocalPosition.copy(worldPosition)
+    this.panelMesh.worldToLocal(this.fingertipLocalPosition)
+    const halfWidth = PANEL_WIDTH / 2
+    const halfHeight = PANEL_HEIGHT / 2
+    if (
+      Math.abs(this.fingertipLocalPosition.x) > halfWidth + 0.02 ||
+      Math.abs(this.fingertipLocalPosition.y) > halfHeight + 0.02
+    ) {
+      return null
+    }
+    return this.fingertipLocalPosition.y
+  }
+
   dispose() {
     this.group.removeFromParent()
     for (const resource of this.resources) resource.dispose()
     this.resources.length = 0
-    this.rowMeshes.length = 0
+    this.slots.length = 0
     this.hitRegions.length = 0
     this.visualMaterials.length = 0
+    this.allRows = []
     this.group.clear()
   }
 }

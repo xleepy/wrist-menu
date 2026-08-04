@@ -20,6 +20,7 @@ import {
   type HostSnapshot,
   type PoseSample,
   type PresentationModel,
+  type ScrollSourceSample,
   type TargetObservation,
   type Vector3Tuple,
   type WristSourceSample,
@@ -339,15 +340,17 @@ export function createThreeWristMenu(
       const selectionSources: SelectionSourceSample[] = []
       const wristSources: WristSourceSample[] = []
       const controllerSources: Array<
-        Readonly<{ id: string; inputSource: XRInputSource }>
+        Readonly<{ id: string; handedness: Handedness; inputSource: XRInputSource }>
       > = []
       const handSources: Array<
         Readonly<{
           id: string
+          handedness: Handedness
           fingertipPose: XRJointPose
         }>
       > = []
       const targetObservations: TargetObservation[] = []
+      const scrollSources: ScrollSourceSample[] = []
       const nextReferenceSpace = options.renderer.xr.getReferenceSpace()
       attachReferenceSpace(nextReferenceSpace)
       let viewerPosition: Vector3Tuple | null = null
@@ -399,7 +402,7 @@ export function createThreeWristMenu(
                 kind: 'hand',
                 handedness: inputSource.handedness,
               })
-              handSources.push({ id, fingertipPose })
+              handSources.push({ id, handedness: inputSource.handedness, fingertipPose })
             }
             continue
           }
@@ -421,7 +424,7 @@ export function createThreeWristMenu(
             selectPressed: sourcePressed.get(inputSource) ?? false,
             selectCompleted: sourceCompleted.has(inputSource),
           })
-          controllerSources.push({ id, inputSource })
+          controllerSources.push({ id, handedness: inputSource.handedness, inputSource })
         }
 
         const wristSource = selectWristSource(
@@ -445,7 +448,7 @@ export function createThreeWristMenu(
         }
         presentation.group.updateMatrixWorld(true)
 
-        for (const { id, inputSource } of controllerSources) {
+        for (const { id, handedness, inputSource } of controllerSources) {
           const pose = frame.getPose(inputSource.targetRaySpace, nextReferenceSpace)
           if (pose == null || !isGeometryTargetable) {
             lastTargetBySource.delete(inputSource)
@@ -470,21 +473,50 @@ export function createThreeWristMenu(
             })
           } else {
             lastTargetBySource.delete(inputSource)
+            const panelIntersections = raycaster.intersectObject(
+              presentation.panelMesh,
+              false,
+            )
+            if (panelIntersections.length > 0) {
+              const point = panelIntersections[0]!.point
+              const localY = presentation.panelLocalY(point)
+              if (localY !== null) {
+                scrollSources.push({
+                  id,
+                  kind: 'controller',
+                  handedness,
+                  positionY: localY,
+                  targetingPanel: true,
+                })
+              }
+            }
           }
         }
 
-        for (const { id, fingertipPose } of handSources) {
+        for (const { id, handedness, fingertipPose } of handSources) {
           if (!isGeometryTargetable) continue
+          const fingertipWorld = new Vector3(
+            fingertipPose.transform.position.x,
+            fingertipPose.transform.position.y,
+            fingertipPose.transform.position.z,
+          )
           const observation = presentation.fingertipObservation(
-            new Vector3(
-              fingertipPose.transform.position.x,
-              fingertipPose.transform.position.y,
-              fingertipPose.transform.position.z,
-            ),
+            fingertipWorld,
             fingertipPose.radius!,
           )
           if (observation !== undefined) {
             targetObservations.push({ sourceId: id, ...observation })
+          } else {
+            const localY = presentation.panelLocalY(fingertipWorld)
+            if (localY !== null) {
+              scrollSources.push({
+                id,
+                kind: 'hand',
+                handedness,
+                positionY: localY,
+                targetingPanel: true,
+              })
+            }
           }
         }
       }
@@ -503,6 +535,7 @@ export function createThreeWristMenu(
           wristSources,
           lifecycleRevision,
           selectionSources,
+          scrollSources,
         },
         targetObservations,
       )
