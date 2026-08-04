@@ -1,13 +1,12 @@
-import { context, useFrame, useThree, type ThreeElements } from '@react-three/fiber'
+import type { ThreeElements } from '@react-three/fiber'
 import {
   createElement,
-  useContext,
   useEffect,
   useRef,
   useState,
   type ReactElement,
 } from 'react'
-import { Group } from 'three'
+import { Group } from 'three/src/objects/Group.js'
 
 import {
   createThreeWristMenu,
@@ -38,8 +37,17 @@ type SceneShieldEvent = Readonly<{
   stopPropagation(): void
 }>
 
-function MountedWristMenu({ snapshot, onEvent }: WristMenuProps): ReactElement {
-  const renderer = useThree((state) => state.gl)
+type FiberModule = typeof import('@react-three/fiber')
+
+type MountedWristMenuProps = WristMenuProps &
+  Readonly<{ fiber: FiberModule }>
+
+function MountedWristMenu({
+  snapshot,
+  onEvent,
+  fiber,
+}: MountedWristMenuProps): ReactElement {
+  const renderer = fiber.useThree((state) => state.gl)
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
   const initialSnapshotRef = useRef(snapshot)
@@ -67,7 +75,7 @@ function MountedWristMenu({ snapshot, onEvent }: WristMenuProps): ReactElement {
 
   useEffect(() => () => instance.dispose(), [instance])
 
-  useFrame((state, _delta, frame) => {
+  fiber.useFrame((state, _delta, frame) => {
     instance.update({
       time: state.clock.elapsedTime * 1000,
       frame: frame ?? null,
@@ -95,7 +103,18 @@ function MountedWristMenu({ snapshot, onEvent }: WristMenuProps): ReactElement {
  * integration. Rendering outside an R3F root is intentionally inert for SSR.
  */
 export function WristMenu(props: WristMenuProps): ReactElement | null {
-  const store = useContext(context)
-  if (store === null) return null
-  return createElement(MountedWristMenu, props)
+  const [fiber, setFiber] = useState<FiberModule>()
+
+  useEffect(() => {
+    let mounted = true
+    void import('@react-three/fiber').then((module) => {
+      if (mounted) setFiber(module)
+    })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  if (fiber === undefined) return null
+  return createElement(MountedWristMenu, { ...props, fiber })
 }

@@ -35,4 +35,5 @@ await runPackedReactControllerJourney({
   fiber,
   iwer,
   three,
+  xr,
 })

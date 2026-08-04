@@ -3,30 +3,10 @@ import test from 'node:test'
 import { Matrix4, Raycaster, Scene, Vector3 } from 'three'
 
 import { createThreeWristMenu } from '../dist/three/index.js'
-import { controllerActionSnapshot } from '../fixtures/controller-action.mjs'
-
-class FakeSession {
-  constructor(inputSource) {
-    this.inputSources = [inputSource]
-    this.visibilityState = 'visible'
-    this.listeners = new Map()
-  }
-
-  addEventListener(type, listener) {
-    const listeners = this.listeners.get(type) ?? new Set()
-    listeners.add(listener)
-    this.listeners.set(type, listeners)
-  }
-
-  removeEventListener(type, listener) {
-    this.listeners.get(type)?.delete(listener)
-  }
-
-  dispatch(type, inputSource) {
-    const event = { type, inputSource }
-    for (const listener of this.listeners.get(type) ?? []) listener(event)
-  }
-}
+import {
+  controllerActionSnapshot,
+  FakeXrSession,
+} from '../fixtures/controller-action.mjs'
 
 function createXrFixture() {
   const inputSource = {
@@ -34,8 +14,8 @@ function createXrFixture() {
     targetRayMode: 'tracked-pointer',
     targetRaySpace: {},
   }
-  const session = new FakeSession(inputSource)
-  const targetRayMatrix = new Matrix4().makeTranslation(0, 0, 1).toArray()
+  const session = new FakeXrSession(inputSource)
+  let targetRayMatrix = new Matrix4().makeTranslation(0, 0, 1).toArray()
   const referenceSpace = {}
   const frame = {
     session,
@@ -51,7 +31,17 @@ function createXrFixture() {
       getReferenceSpace: () => referenceSpace,
     },
   }
-  return { frame, inputSource, renderer, session }
+  return {
+    frame,
+    inputSource,
+    renderer,
+    session,
+    setTargetingMenu(targeting) {
+      targetRayMatrix = new Matrix4()
+        .makeTranslation(targeting ? 0 : 1, 0, 1)
+        .toArray()
+    },
+  }
 }
 
 test('vanilla integration enforces the geometry barrier and claims one controller action', () => {
@@ -100,4 +90,58 @@ test('vanilla integration enforces the geometry barrier and claims one controlle
   menu.dispose()
   assert.equal(menu.group.parent, null)
   assert.throws(() => menu.update({ time: 96, frame }), /disposed/)
+})
+
+test('vanilla integration cancels selectend without a successful select', () => {
+  const events = []
+  const { frame, inputSource, renderer, session } = createXrFixture()
+  const menu = createThreeWristMenu({
+    renderer,
+    snapshot: controllerActionSnapshot,
+    onEvent: (event) => events.push(event),
+  })
+
+  menu.update({ time: 16, frame })
+  menu.update({ time: 32, frame })
+  session.dispatch('selectstart', inputSource)
+  menu.update({ time: 48, frame })
+  session.dispatch('selectend', inputSource)
+  menu.update({ time: 64, frame })
+
+  assert.equal(events[0]?.type, 'selection-cancellation')
+  assert.equal(events[0]?.reason, 'action-cancelled')
+  menu.dispose()
+})
+
+test('vanilla integration does not claim a press that began away from the menu', () => {
+  const events = []
+  const {
+    frame,
+    inputSource,
+    renderer,
+    session,
+    setTargetingMenu,
+  } = createXrFixture()
+  const menu = createThreeWristMenu({
+    renderer,
+    snapshot: controllerActionSnapshot,
+    onEvent: (event) => events.push(event),
+  })
+
+  setTargetingMenu(false)
+  menu.update({ time: 16, frame })
+  menu.update({ time: 32, frame })
+  session.dispatch('selectstart', inputSource)
+  menu.update({ time: 48, frame })
+  assert.equal(menu.blocksSceneInput(inputSource), false)
+
+  setTargetingMenu(true)
+  menu.update({ time: 64, frame })
+  session.dispatch('select', inputSource)
+  assert.equal(menu.blocksSceneInput(inputSource), false)
+  session.dispatch('selectend', inputSource)
+  menu.update({ time: 80, frame })
+
+  assert.equal(events.length, 0)
+  menu.dispose()
 })

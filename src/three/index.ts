@@ -1,16 +1,15 @@
-import {
-  BoxGeometry,
-  Group,
-  Matrix4,
-  Mesh,
-  MeshBasicMaterial,
-  Raycaster,
-  Vector3,
-  type Intersection,
-  type Object3D,
-  type Object3DEventMap,
-  type WebGLRenderer,
-} from 'three'
+import { Raycaster, type Intersection } from 'three/src/core/Raycaster.js'
+import { BoxGeometry } from 'three/src/geometries/BoxGeometry.js'
+import { MeshBasicMaterial } from 'three/src/materials/MeshBasicMaterial.js'
+import { Matrix4 } from 'three/src/math/Matrix4.js'
+import { Vector3 } from 'three/src/math/Vector3.js'
+import { Group } from 'three/src/objects/Group.js'
+import { Mesh } from 'three/src/objects/Mesh.js'
+import type {
+  Object3D,
+  Object3DEventMap,
+} from 'three/src/core/Object3D.js'
+import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js'
 
 import {
   createWristMenuRuntime,
@@ -169,6 +168,7 @@ export function createThreeWristMenu(
   const rayDirection = new Vector3()
   const sourceIds = new WeakMap<XRInputSource, string>()
   const sourcePressed = new WeakMap<XRInputSource, boolean>()
+  const sourceCompleted = new WeakSet<XRInputSource>()
   const lastTargetBySource = new WeakMap<XRInputSource, string>()
   const provisionalClaims = new WeakSet<XRInputSource>()
   let sourceSequence = 0
@@ -197,9 +197,7 @@ export function createThreeWristMenu(
     sourcePressed.set(event.inputSource, false)
   }
   const onSelect = (event: SelectEvent) => {
-    if (lastTargetBySource.has(event.inputSource)) {
-      provisionalClaims.add(event.inputSource)
-    }
+    sourceCompleted.add(event.inputSource)
   }
   const onSessionEnd = () => attachSession(null)
 
@@ -261,6 +259,7 @@ export function createThreeWristMenu(
             kind: 'controller',
             handedness: inputSource.handedness,
             selectPressed: sourcePressed.get(inputSource) ?? false,
+            selectCompleted: sourceCompleted.has(inputSource),
           })
 
           const pose = frame.getPose(inputSource.targetRaySpace, referenceSpace)
@@ -320,6 +319,9 @@ export function createThreeWristMenu(
       )
 
       for (const inputSource of nextSession?.inputSources ?? []) {
+        if (!(sourcePressed.get(inputSource) ?? false)) {
+          sourceCompleted.delete(inputSource)
+        }
         if (!runtime.blocksSceneInput(sourceId(inputSource))) {
           provisionalClaims.delete(inputSource)
         }

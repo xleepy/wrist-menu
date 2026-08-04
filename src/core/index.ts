@@ -28,6 +28,8 @@ export type ControllerSelectionSourceSample = Readonly<{
   kind: 'controller'
   handedness: Handedness
   selectPressed: boolean
+  /** True only after this physical action emitted WebXR's successful `select`. */
+  selectCompleted: boolean
 }>
 
 /** One renderer-neutral sample of controller input for the current XR frame. */
@@ -67,6 +69,7 @@ export type WristMenuEvent =
       sourceId: string
       reason:
         | 'released-away'
+        | 'action-cancelled'
         | 'target-changed'
         | 'host-snapshot-changed'
         | 'lifecycle-interrupted'
@@ -214,12 +217,27 @@ export function createWristMenuRuntime(
         claims.clear()
       }
 
+      const selectionSourcesById = new Map(
+        frameSample.selectionSources
+          .filter((source) => source.kind === 'controller')
+          .map((source) => [source.id, source]),
+      )
+      if (
+        ownedSelection !== undefined &&
+        !selectionSourcesById.has(ownedSelection.sourceId)
+      ) {
+        cancelOwnership('lifecycle-interrupted', frameSample.time)
+      }
+
       const itemsById = new Map(snapshot.menuDefinition.map((item) => [item.id, item]))
       const observationsBySource = new Map<string, TargetObservation>()
       if (targetable) {
         for (const observation of targetObservations) {
+          const source = selectionSourcesById.get(observation.sourceId)
           if (
             observation.kind === 'controller-target-ray' &&
+            source !== undefined &&
+            source.handedness !== snapshot.wrist &&
             itemsById.has(observation.itemId) &&
             !observationsBySource.has(observation.sourceId)
           ) {
@@ -230,7 +248,7 @@ export function createWristMenuRuntime(
 
       for (const source of frameSample.selectionSources) {
         if (source.kind !== 'controller') continue
-        const wasPressed = previousPressed.get(source.id) ?? false
+        const wasPressed = previousPressed.get(source.id) ?? source.selectPressed
         const observation = observationsBySource.get(source.id)
         const eligible = source.handedness !== snapshot.wrist
 
@@ -261,7 +279,15 @@ export function createWristMenuRuntime(
           ownedSelection = undefined
           claims.delete(source.id)
 
-          if (observation?.itemId === committed.itemId) {
+          if (!source.selectCompleted) {
+            options.onEvent({
+              type: 'selection-cancellation',
+              itemId: committed.itemId,
+              sourceId: committed.sourceId,
+              reason: 'action-cancelled',
+              time: frameSample.time,
+            })
+          } else if (observation?.itemId === committed.itemId) {
             options.onEvent({
               type: 'selection-intent',
               intent: { type: 'action', itemId: committed.itemId },

@@ -17,32 +17,12 @@ import {
 } from 'three'
 
 import { WristMenu } from '../dist/react/index.js'
-import { controllerActionSnapshot } from '../fixtures/controller-action.mjs'
+import {
+  controllerActionSnapshot,
+  FakeXrSession,
+} from '../fixtures/controller-action.mjs'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
-
-class FakeSession {
-  constructor(inputSource) {
-    this.inputSources = [inputSource]
-    this.visibilityState = 'visible'
-    this.listeners = new Map()
-  }
-
-  addEventListener(type, listener) {
-    const listeners = this.listeners.get(type) ?? new Set()
-    listeners.add(listener)
-    this.listeners.set(type, listeners)
-  }
-
-  removeEventListener(type, listener) {
-    this.listeners.get(type)?.delete(listener)
-  }
-
-  dispatch(type, inputSource) {
-    const event = { type, inputSource }
-    for (const listener of this.listeners.get(type) ?? []) listener(event)
-  }
-}
 
 function createReactXrFixture() {
   const inputSource = {
@@ -50,7 +30,7 @@ function createReactXrFixture() {
     targetRayMode: 'tracked-pointer',
     targetRaySpace: {},
   }
-  const session = new FakeSession(inputSource)
+  const session = new FakeXrSession(inputSource)
   const referenceSpace = {}
   const frame = {
     session,
@@ -189,6 +169,7 @@ test('React integration mounts the Three instance and shields its active Hit Reg
   canvas.dispatch('contextmenu')
   assert.equal(behindSceneEvents, 0)
 
+  session.dispatch('select', inputSource)
   session.dispatch('selectend', inputSource)
   advance(64, true, state, frame)
   assert.equal(
