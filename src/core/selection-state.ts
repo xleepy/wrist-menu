@@ -91,6 +91,7 @@ export type SelectionStateMachine = Readonly<{
     disabledItemIds: ReadonlySet<string>
   }>): SelectionFrameResult
   cancel(reason: SelectionCancellationReason): readonly SelectionCancellation[]
+  cancelForSource(sourceId: string, reason: SelectionCancellationReason): readonly SelectionCancellation[]
   blocksSceneInput(sourceId: string): boolean
   clear(): void
 }>
@@ -356,6 +357,19 @@ export function createSelectionStateMachine(): SelectionStateMachine {
       cancelFocus(reason, transitions, false)
       focus = undefined
       claims.clear()
+      return Object.freeze(transitions) as readonly SelectionCancellation[]
+    },
+
+    cancelForSource(sourceId, reason) {
+      const transitions: SelectionTransition[] = []
+      if (ownership?.sourceId === sourceId) {
+        cancelOwnership(reason, transitions, false)
+      }
+      if (focus?.sourceId === sourceId) {
+        cancelFocus(reason, transitions, false)
+        focus = undefined
+      }
+      claims.delete(sourceId)
       return Object.freeze(transitions) as readonly SelectionCancellation[]
     },
 
