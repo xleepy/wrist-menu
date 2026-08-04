@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run clean
+      - run: npm run build
+      - run: npm run build:declarations
+      - run: npm run check:core-types
+      - run: npm test
+      - run: npm run pack:verify
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wrist-menu-package
+          path: artifacts/xleepy-wrist-menu-0.0.0.tgz
+
+  consumers:
+    needs: package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [three, react-18, react-19]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fixtures/consumers/${{ matrix.fixture }}/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: wrist-menu-package
+          path: artifacts
+      - run: npm ci --ignore-scripts --prefix fixtures/consumers/${{ matrix.fixture }}
+      - run: npm test --prefix fixtures/consumers/${{ matrix.fixture }}

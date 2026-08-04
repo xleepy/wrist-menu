@@ -1,1 +1,5 @@
 .worktrees/
+artifacts/
+dist/
+node_modules/
+fixtures/consumers/*/node_modules/

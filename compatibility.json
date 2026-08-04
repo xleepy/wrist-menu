@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "package": "@xleepy/wrist-menu",
+  "peerRanges": {
+    "three": ">=0.185.1 <0.186.0",
+    "react": ">=18 <19.3",
+    "@react-three/fiber": ">=8.18.0 <10"
+  },
+  "testedLanes": [
+    {
+      "id": "three",
+      "fixture": "fixtures/consumers/three",
+      "three": "0.185.1"
+    },
+    {
+      "id": "react-18",
+      "fixture": "fixtures/consumers/react-18",
+      "three": "0.185.1",
+      "react": "18.3.1",
+      "reactDom": "18.3.1",
+      "reactThreeFiber": "8.18.0",
+      "reactThreeXr": "6.6.30"
+    },
+    {
+      "id": "react-19",
+      "fixture": "fixtures/consumers/react-19",
+      "three": "0.185.1",
+      "react": "19.2.7",
+      "reactDom": "19.2.7",
+      "reactThreeFiber": "9.6.1",
+      "reactThreeXr": "6.6.30"
+    }
+  ]
+}

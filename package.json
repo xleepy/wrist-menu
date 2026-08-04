@@ -1,0 +1,78 @@
+{
+  "name": "@xleepy/wrist-menu",
+  "version": "0.0.0",
+  "description": "A renderer-neutral WebXR wrist menu with Three.js and React Three Fiber integrations.",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xleepy/wrist-menu.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xleepy/wrist-menu/issues"
+  },
+  "homepage": "https://github.com/xleepy/wrist-menu#readme",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "compatibility.json"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./three": {
+      "types": "./dist/three/index.d.ts",
+      "import": "./dist/three/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    }
+  },
+  "peerDependencies": {
+    "@react-three/fiber": ">=8.18.0 <10",
+    "react": ">=18 <19.3",
+    "three": ">=0.185.1 <0.186.0"
+  },
+  "peerDependenciesMeta": {
+    "@react-three/fiber": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@react-three/fiber": "9.6.1",
+    "@types/react": "19.2.7",
+    "@types/three": "0.185.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "three": "0.185.1",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "build:declarations": "tsc -p tsconfig.declarations.json",
+    "check:core-types": "tsc -p tsconfig.core.json",
+    "test": "node --test --test-isolation=none tests/package-contract.test.mjs tests/entrypoints.test.mjs tests/react-ssr.test.mjs",
+    "pack:verify": "node scripts/pack-and-verify.mjs",
+    "test:consumers": "node scripts/test-consumers.mjs",
+    "check": "npm run clean && npm run build && npm run build:declarations && npm run check:core-types && npm test && npm run pack:verify && npm run test:consumers"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "wrist-menu-react-18-consumer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@react-three/fiber": "8.18.0",
+    "@react-three/xr": "6.6.30",
+    "@xleepy/wrist-menu": "file:../../../artifacts/xleepy-wrist-menu-0.0.0.tgz",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "three": "0.185.1"
+  },
+  "scripts": {
+    "test": "node smoke.mjs"
+  }
+}
