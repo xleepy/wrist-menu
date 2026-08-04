@@ -7,7 +7,7 @@ declared dependency has merged to `main`, and base it on that updated `main`.
 
 ## Active
 
-- [#16 Bootstrap the packed public Wrist Menu Package](https://github.com/xleepy/wrist-menu/issues/16)
+- [#17 Controller Action Item tracer](https://github.com/xleepy/wrist-menu/issues/17)
 
 ## Dependency order
 
