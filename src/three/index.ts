@@ -97,8 +97,8 @@ export type ThreeWristMenuState = {
   presentationRevision: number
   session: XRSession | null
   referenceSpace: XRReferenceSpace | null
-  sessionHandlers: BoundSessionHandlers | null
-  referenceSpaceHandler: BoundReferenceSpaceHandler | null
+  readonly sessionHandlers: BoundSessionHandlers
+  readonly referenceSpaceHandler: BoundReferenceSpaceHandler
   lifecycleRevision: number
   observedSession: boolean
   observedParent: boolean
@@ -158,6 +158,23 @@ function requestCommitHaptic(
       void Promise.resolve(request).catch(() => undefined)
     }
   } catch {
+    // Haptics are optional feedback and never alter semantic delivery.
+  }
+}
+
+function deliverWristMenuEventWithFeedback(
+  state: ThreeWristMenuState,
+  event: WristMenuEvent,
+): void {
+  try {
+    state.onEvent(event)
+  } finally {
+    if (
+      event.type === 'selection-intent' &&
+      event.source.kind === 'controller'
+    ) {
+      requestCommitHaptic(state.inputSourceById.get(event.source.id))
+    }
   }
 }
 
@@ -291,35 +308,48 @@ function attachSession(
   nextSession: XRSession | null,
 ): void {
   if (state.session === nextSession) return
-  if (state.session !== null && state.sessionHandlers !== null) {
-    state.session.removeEventListener('selectstart', state.sessionHandlers.selectstart)
+  if (state.session !== null) {
+    state.session.removeEventListener(
+      'selectstart',
+      state.sessionHandlers.selectstart,
+    )
     state.session.removeEventListener('select', state.sessionHandlers.select)
-    state.session.removeEventListener('selectend', state.sessionHandlers.selectend)
-    state.session.removeEventListener('inputsourceschange', state.sessionHandlers.inputsourceschange)
-    state.session.removeEventListener('visibilitychange', state.sessionHandlers.visibilitychange)
+    state.session.removeEventListener(
+      'selectend',
+      state.sessionHandlers.selectend,
+    )
+    state.session.removeEventListener(
+      'inputsourceschange',
+      state.sessionHandlers.inputsourceschange,
+    )
+    state.session.removeEventListener(
+      'visibilitychange',
+      state.sessionHandlers.visibilitychange,
+    )
     state.session.removeEventListener('end', state.sessionHandlers.end)
   }
   if (state.observedSession) interruptLifecycle(state)
   state.session = nextSession
   state.observedSession = true
   if (state.session !== null) {
-    const handlers: BoundSessionHandlers = {
-      selectstart: (e) => onSelectStart(state, e),
-      select: (e) => onSelect(state, e),
-      selectend: (e) => onSelectEnd(state, e),
-      inputsourceschange: () => onInputSourcesChange(state),
-      visibilitychange: () => onSessionVisibilityChange(state),
-      end: () => onSessionEnd(state),
-    }
-    state.sessionHandlers = handlers
-    state.session.addEventListener('selectstart', handlers.selectstart)
-    state.session.addEventListener('select', handlers.select)
-    state.session.addEventListener('selectend', handlers.selectend)
-    state.session.addEventListener('inputsourceschange', handlers.inputsourceschange)
-    state.session.addEventListener('visibilitychange', handlers.visibilitychange)
-    state.session.addEventListener('end', handlers.end)
-  } else {
-    state.sessionHandlers = null
+    state.session.addEventListener(
+      'selectstart',
+      state.sessionHandlers.selectstart,
+    )
+    state.session.addEventListener('select', state.sessionHandlers.select)
+    state.session.addEventListener(
+      'selectend',
+      state.sessionHandlers.selectend,
+    )
+    state.session.addEventListener(
+      'inputsourceschange',
+      state.sessionHandlers.inputsourceschange,
+    )
+    state.session.addEventListener(
+      'visibilitychange',
+      state.sessionHandlers.visibilitychange,
+    )
+    state.session.addEventListener('end', state.sessionHandlers.end)
   }
 }
 
@@ -328,17 +358,13 @@ function attachReferenceSpace(
   nextReferenceSpace: XRReferenceSpace | null,
 ): void {
   if (state.referenceSpace === nextReferenceSpace) return
-  if (state.referenceSpace !== null && state.referenceSpaceHandler !== null) {
+  if (state.referenceSpace !== null) {
     state.referenceSpace.removeEventListener('reset', state.referenceSpaceHandler)
   }
   if (state.referenceSpace !== null) interruptLifecycle(state)
   state.referenceSpace = nextReferenceSpace
   if (state.referenceSpace !== null) {
-    const handler = () => onReferenceSpaceReset(state)
-    state.referenceSpaceHandler = handler
-    state.referenceSpace.addEventListener('reset', handler)
-  } else {
-    state.referenceSpaceHandler = null
+    state.referenceSpace.addEventListener('reset', state.referenceSpaceHandler)
   }
 }
 
@@ -346,28 +372,27 @@ function assertActive(state: ThreeWristMenuState): void {
   if (state.disposed) throw new Error('Wrist Menu Instance is disposed')
 }
 
+/** Create state for the vanilla Three.js Renderer Integration. */
 export function createThreeWristMenuState(
   options: CreateThreeWristMenuOptions,
 ): ThreeWristMenuState {
   const initialSnapshot = copyHostSnapshot(options.snapshot)
   const presentation = new WristMenuPresentation()
-  const inputSourceById = new Map<string, XRInputSource>()
+  let state: ThreeWristMenuState
+  const sessionHandlers: BoundSessionHandlers = {
+    selectstart: (event) => onSelectStart(state, event),
+    select: (event) => onSelect(state, event),
+    selectend: (event) => onSelectEnd(state, event),
+    inputsourceschange: () => onInputSourcesChange(state),
+    visibilitychange: () => onSessionVisibilityChange(state),
+    end: () => onSessionEnd(state),
+  }
+  const referenceSpaceHandler = () => onReferenceSpaceReset(state)
   const runtime = createWristMenuRuntimeState({
     snapshot: initialSnapshot,
-    onEvent: (event) => {
-      try {
-        options.onEvent(event)
-      } finally {
-        if (
-          event.type === 'selection-intent' &&
-          event.source.kind === 'controller'
-        ) {
-          requestCommitHaptic(inputSourceById.get(event.source.id))
-        }
-      }
-    },
+    onEvent: (event) => deliverWristMenuEventWithFeedback(state, event),
   })
-  return {
+  state = {
     renderer: options.renderer,
     onEvent: options.onEvent,
     runtime,
@@ -382,7 +407,7 @@ export function createThreeWristMenuState(
     anchorOrientation: new Quaternion(),
     anchorScale: new Vector3(1, 1, 1),
     sourceIds: new WeakMap(),
-    inputSourceById,
+    inputSourceById: new Map(),
     anchorSettings: materializeAnchorSettings(initialSnapshot),
     pendingAnchorSettings: undefined,
     sourcePressed: new WeakMap(),
@@ -395,8 +420,8 @@ export function createThreeWristMenuState(
     presentationRevision: 0,
     session: null,
     referenceSpace: null,
-    sessionHandlers: null,
-    referenceSpaceHandler: null,
+    sessionHandlers,
+    referenceSpaceHandler,
     lifecycleRevision: 0,
     observedSession: false,
     observedParent: false,
@@ -404,6 +429,7 @@ export function createThreeWristMenuState(
     lastUpdateTime: 0,
     disposed: false,
   }
+  return state
 }
 
 export function syncThreeWristMenu(

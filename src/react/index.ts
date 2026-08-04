@@ -42,7 +42,7 @@ function MountedWristMenu({
   onEventRef.current = onEvent
   const initialSnapshotRef = useRef(snapshot)
   const lastSnapshotRef = useRef(snapshot)
-  const [state] = useState(() =>
+  const [menuState] = useState(() =>
     createThreeWristMenuState({
       renderer,
       snapshot: initialSnapshotRef.current,
@@ -53,14 +53,14 @@ function MountedWristMenu({
   useEffect(() => {
     if (lastSnapshotRef.current !== snapshot) {
       lastSnapshotRef.current = snapshot
-      syncThreeWristMenu(state, snapshot)
+      syncThreeWristMenu(menuState, snapshot)
     }
-  }, [state, snapshot])
+  }, [menuState, snapshot])
 
-  useEffect(() => () => disposeThreeWristMenu(state), [state])
+  useEffect(() => () => disposeThreeWristMenu(menuState), [menuState])
 
   fiber.useFrame((fiberState, _delta, frame) => {
-    updateThreeWristMenu(state, {
+    updateThreeWristMenu(menuState, {
       time: fiberState.clock.elapsedTime * 1000,
       frame: frame ?? null,
     })
@@ -68,7 +68,7 @@ function MountedWristMenu({
 
   const stopSceneEvent = (event: SceneShieldEvent) => event.stopPropagation()
   const shieldProps: ThreeElements['primitive'] = {
-    object: state.presentation.group,
+    object: menuState.presentation.group,
     onPointerOver: stopSceneEvent,
     onPointerMove: stopSceneEvent,
     onPointerDown: stopSceneEvent,
@@ -82,6 +82,11 @@ function MountedWristMenu({
   return createElement('primitive', shieldProps)
 }
 
+/**
+ * React Three Fiber lifecycle and Scene Event Shield for the shared Three.js
+ * Renderer Integration. Rendering outside an R3F root is intentionally inert
+ * for SSR.
+ */
 export function WristMenu(props: WristMenuProps): ReactElement | null {
   const [fiber, setFiber] = useState<FiberModule>()
 

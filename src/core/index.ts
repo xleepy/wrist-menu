@@ -29,6 +29,7 @@ export type {
   ToggleItem,
 } from './host-snapshot.js'
 
+/** Session features a Host Application may request for Wrist Menu support. */
 export const wristMenuSessionFeatures = {
   optionalFeatures: ['hand-tracking', 'local-floor'],
 } as const
@@ -111,12 +112,14 @@ export type {
 } from './scroll-state.js'
 export { VISIBLE_SLOTS } from './scroll-state.js'
 
+/** One renderer-neutral sample of poses and input for the current XR frame. */
 export type FrameSample = Readonly<{
   sequence: number
   time: number
   visibility: 'visible' | 'visible-blurred' | 'hidden'
   viewerPosition: Vector3Tuple | null
   wristSources: readonly WristSourceSample[]
+  /** Changes after session, reference-space, recenter, or attachment resets. */
   lifecycleRevision: number
   selectionSources: readonly SelectionSourceSample[]
   scrollSources?: readonly ScrollSourceSample[]
@@ -167,6 +170,7 @@ export type WristMenuEvent =
       time: number
     }>
 
+/** Read-only output consumed by Renderer Integrations. */
 export type PresentationModel = Readonly<{
   visible: boolean
   targetable: boolean
@@ -276,6 +280,7 @@ function cancelAllSelection(
   }
 }
 
+/** Create the framework-neutral behavior state used by every Renderer Integration. */
 export function createWristMenuRuntimeState(
   options: CreateWristMenuRuntimeOptions,
 ): WristMenuRuntimeState {

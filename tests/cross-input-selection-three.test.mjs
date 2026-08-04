@@ -113,6 +113,52 @@ test('optional controller haptic rejection cannot prevent or duplicate semantic 
   disposeThreeWristMenu(menu)
 })
 
+test('Wrist Menu Events and controller haptics follow current instance state when the Host callback throws', () => {
+  let requests = 0
+  const fixture = createControllerHapticFixture({
+    pulse() {
+      requests += 1
+      return true
+    },
+  })
+  const initialEvents = []
+  const replacementEvents = []
+  const menu = createThreeWristMenuState({
+    renderer: fixture.renderer,
+    snapshot: crossInputSnapshot,
+    onEvent: (event) => initialEvents.push(event),
+  })
+  menu.onEvent = (event) => {
+    replacementEvents.push(event)
+    if (event.type === 'selection-intent') {
+      throw new Error('replacement Host callback failed')
+    }
+  }
+  menu.inputSourceById = new Map()
+
+  updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 20, frame: fixture.frame })
+  fixture.session.dispatch('selectstart', fixture.controller)
+  updateThreeWristMenu(menu, { time: 30, frame: fixture.frame })
+  fixture.session.dispatch('select', fixture.controller)
+  fixture.session.dispatch('selectend', fixture.controller)
+  assert.throws(
+    () => updateThreeWristMenu(menu, { time: 40, frame: fixture.frame }),
+    /replacement Host callback failed/,
+  )
+
+  assert.equal(requests, 1)
+  assert.equal(
+    initialEvents.filter(({ type }) => type === 'selection-intent').length,
+    0,
+  )
+  assert.equal(
+    replacementEvents.filter(({ type }) => type === 'selection-intent').length,
+    1,
+  )
+  disposeThreeWristMenu(menu)
+})
+
 test('disabled controller targets never request haptics', () => {
   let requests = 0
   const fixture = createControllerHapticFixture({

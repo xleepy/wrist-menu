@@ -5,6 +5,7 @@ export type ControllerSelectionSourceSample = Readonly<{
   kind: 'controller'
   handedness: Handedness
   selectPressed: boolean
+  /** True only after this physical action emitted WebXR's successful `select`. */
   selectCompleted: boolean
 }>
 
@@ -28,6 +29,7 @@ export type HandTargetObservation = Readonly<{
   sourceId: string
   kind: 'hand-fingertip'
   itemId: string
+  /** `pressed` means the fingertip sphere reached or crossed the press plane. */
   phase: 'hover' | 'pressed'
 }>
 
@@ -95,6 +97,11 @@ export type SelectionStepInput = Readonly<{
   disabledItemIds: ReadonlySet<string>
 }>
 
+/**
+ * Create the renderer-neutral selection portion of Interaction State shared by
+ * hand and controller adapters. It deliberately knows nothing about rays,
+ * joints, or haptics.
+ */
 export function createSelectionState(): SelectionState {
   return {
     sourceStates: new Map(),

@@ -263,3 +263,58 @@ test('visibility blur and reference reset cancel claims without waiting for a fr
   )
   disposeThreeWristMenu(menu)
 })
+
+test('session and reference-space handlers keep one identity for the instance lifetime', () => {
+  const { renderer } = createXrFixture()
+  const firstSession = renderer.xr.getSession()
+  const firstReferenceSpace = renderer.xr.getReferenceSpace()
+  const menu = createThreeWristMenuState({
+    renderer,
+    snapshot: controllerActionSnapshot,
+    onEvent: () => undefined,
+  })
+  const sessionHandlers = menu.sessionHandlers
+  const referenceSpaceHandler = menu.referenceSpaceHandler
+
+  assert.ok(sessionHandlers)
+  assert.equal(typeof referenceSpaceHandler, 'function')
+
+  updateThreeWristMenu(menu, { time: 16, frame: null })
+  for (const [eventType, handler] of Object.entries(sessionHandlers)) {
+    assert.equal(firstSession.listeners.get(eventType)?.has(handler), true)
+  }
+  assert.equal(
+    firstReferenceSpace.listeners.get('reset')?.has(referenceSpaceHandler),
+    true,
+  )
+
+  const secondSession = new FakeXrSession([])
+  const secondReferenceSpace = new FakeReferenceSpace()
+  renderer.xr.getSession = () => secondSession
+  renderer.xr.getReferenceSpace = () => secondReferenceSpace
+  updateThreeWristMenu(menu, { time: 32, frame: null })
+
+  assert.equal(menu.sessionHandlers, sessionHandlers)
+  assert.equal(menu.referenceSpaceHandler, referenceSpaceHandler)
+  for (const [eventType, handler] of Object.entries(sessionHandlers)) {
+    assert.equal(firstSession.listeners.get(eventType)?.has(handler), false)
+    assert.equal(secondSession.listeners.get(eventType)?.has(handler), true)
+  }
+  assert.equal(
+    firstReferenceSpace.listeners.get('reset')?.has(referenceSpaceHandler),
+    false,
+  )
+  assert.equal(
+    secondReferenceSpace.listeners.get('reset')?.has(referenceSpaceHandler),
+    true,
+  )
+
+  disposeThreeWristMenu(menu)
+  for (const [eventType, handler] of Object.entries(sessionHandlers)) {
+    assert.equal(secondSession.listeners.get(eventType)?.has(handler), false)
+  }
+  assert.equal(
+    secondReferenceSpace.listeners.get('reset')?.has(referenceSpaceHandler),
+    false,
+  )
+})
