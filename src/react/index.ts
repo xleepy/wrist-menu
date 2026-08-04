@@ -13,36 +13,7 @@ import {
   type WristMenuEvent,
 } from '../three/index.js'
 
-export {
-  createWristMenuRuntime,
-  defaultRevealConfiguration,
-  resolveControllerWristOffset,
-  resolveRevealConfiguration,
-  wristMenuSessionFeatures,
-  type ActivationMode,
-  type ControllerDeviceTarget,
-  type ControllerSelectionSourceSample,
-  type ControllerWristConfiguration,
-  type ControllerWristOffset,
-  type ControllerWristPreset,
-  type FrameSample,
-  type HostSnapshot,
-  type PoseSample,
-  type PresentationModel,
-  type QuaternionTuple,
-  type RevealConfiguration,
-  type RevealConfigurationOverrides,
-  type RevealPhase,
-  type SelectionIntent,
-  type TargetObservation,
-  type Vector3Tuple,
-  type VisibilityChangeReason,
-  type WristAnchorPose,
-  type WristSourceSample,
-  type WristMenuEvent,
-  type WristMenuSessionFeatures,
-  type WristMenuRuntime,
-} from '../core/index.js'
+export * from '../core/index.js'
 
 export type WristMenuProps = Readonly<{
   snapshot: HostSnapshot

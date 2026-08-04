@@ -1,15 +1,12 @@
-import { Raycaster, type Intersection } from 'three/src/core/Raycaster.js'
-import { BoxGeometry } from 'three/src/geometries/BoxGeometry.js'
-import { MeshBasicMaterial } from 'three/src/materials/MeshBasicMaterial.js'
-import { Matrix4 } from 'three/src/math/Matrix4.js'
-import { Quaternion } from 'three/src/math/Quaternion.js'
-import { Vector3 } from 'three/src/math/Vector3.js'
-import { Group } from 'three/src/objects/Group.js'
-import { Mesh } from 'three/src/objects/Mesh.js'
+import { Raycaster } from 'three/src/core/Raycaster.js'
 import type {
   Object3D,
   Object3DEventMap,
 } from 'three/src/core/Object3D.js'
+import { Matrix4 } from 'three/src/math/Matrix4.js'
+import { Quaternion } from 'three/src/math/Quaternion.js'
+import { Vector3 } from 'three/src/math/Vector3.js'
+import { Group } from 'three/src/objects/Group.js'
 import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js'
 
 import {
@@ -28,37 +25,11 @@ import {
   type WristSourceSample,
   type WristMenuEvent,
 } from '../core/index.js'
+import { copyHostSnapshot } from '../core/host-snapshot.js'
+import { selectWristSource } from '../core/wrist-anchor.js'
+import { WristMenuPresentation } from './wrist-menu-presentation.js'
 
-export {
-  createWristMenuRuntime,
-  defaultRevealConfiguration,
-  resolveControllerWristOffset,
-  resolveRevealConfiguration,
-  wristMenuSessionFeatures,
-  type ActivationMode,
-  type ControllerDeviceTarget,
-  type ControllerSelectionSourceSample,
-  type ControllerWristConfiguration,
-  type ControllerWristOffset,
-  type ControllerWristPreset,
-  type FrameSample,
-  type HostSnapshot,
-  type PoseSample,
-  type PresentationModel,
-  type QuaternionTuple,
-  type RevealConfiguration,
-  type RevealConfigurationOverrides,
-  type RevealPhase,
-  type SelectionIntent,
-  type TargetObservation,
-  type Vector3Tuple,
-  type WristAnchorPose,
-  type WristSourceSample,
-  type WristMenuRuntime,
-  type WristMenuEvent,
-  type WristMenuSessionFeatures,
-  type VisibilityChangeReason,
-} from '../core/index.js'
+export * from '../core/index.js'
 
 export type ThreeWristMenuRenderer = Pick<WebGLRenderer, 'xr'>
 
@@ -80,120 +51,6 @@ export type ThreeWristMenu = Readonly<{
   blocksSceneInput(inputSource: XRInputSource): boolean
   dispose(): void
 }>
-
-const decorativeRaycast: Mesh['raycast'] = () => undefined
-const interactiveRaycast = Mesh.prototype.raycast
-
-class WristMenuPresentation {
-  readonly group = new Group()
-  readonly hitRegions: Mesh[] = []
-  private readonly resources: Array<{ dispose(): void }> = []
-  private readonly rowMeshes: Mesh[] = []
-  private readonly visualMaterials: MeshBasicMaterial[] = []
-
-  constructor(snapshot: HostSnapshot) {
-    this.group.name = 'wrist-menu-attachment-root'
-
-    const panelGeometry = new BoxGeometry(0.192, 0.158, 0.004)
-    const panelMaterial = new MeshBasicMaterial({
-      color: 0x081415,
-      transparent: true,
-    })
-    const panel = new Mesh(panelGeometry, panelMaterial)
-    panel.name = 'wrist-menu-command-slab'
-    panel.position.z = -0.004
-    panel.raycast = decorativeRaycast
-    this.group.add(panel)
-    this.resources.push(panelGeometry, panelMaterial)
-    this.visualMaterials.push(panelMaterial)
-
-    this.renderItems(snapshot)
-  }
-
-  renderItems(snapshot: Pick<HostSnapshot, 'menuDefinition'>) {
-    for (const mesh of [...this.rowMeshes, ...this.hitRegions]) {
-      mesh.removeFromParent()
-    }
-    for (const resource of this.resources.splice(2)) resource.dispose()
-    this.rowMeshes.length = 0
-    this.hitRegions.length = 0
-    this.visualMaterials.length = 1
-
-    const rowCount = snapshot.menuDefinition.length
-    snapshot.menuDefinition.forEach((item, index) => {
-      const y = (rowCount - 1) * 0.01125 - index * 0.0225
-      const rowGeometry = new BoxGeometry(0.176, 0.02, 0.003)
-      const rowMaterial = new MeshBasicMaterial({
-        color: 0x102020,
-        transparent: true,
-      })
-      const row = new Mesh(rowGeometry, rowMaterial)
-      row.name = `wrist-menu-action-visual:${item.id}`
-      row.position.set(0, y, 0.001)
-      row.raycast = decorativeRaycast
-
-      const hitGeometry = new BoxGeometry(0.176, 0.02, 0.008)
-      const hitMaterial = new MeshBasicMaterial({ visible: false })
-      const hitRegion = new Mesh(hitGeometry, hitMaterial)
-      hitRegion.name = `wrist-menu-hit-region:${item.id}`
-      hitRegion.position.set(0, y, 0.008)
-      hitRegion.userData['wristMenuItemId'] = item.id
-      hitRegion.raycast = decorativeRaycast
-
-      this.group.add(row, hitRegion)
-      this.rowMeshes.push(row)
-      this.hitRegions.push(hitRegion)
-      this.visualMaterials.push(rowMaterial)
-      this.resources.push(rowGeometry, rowMaterial, hitGeometry, hitMaterial)
-    })
-  }
-
-  setModel(model: PresentationModel, targetable: boolean) {
-    this.group.visible = model.visible
-    this.setTargetable(targetable && model.visible)
-    for (const material of this.visualMaterials) {
-      material.opacity = model.opacity
-      material.depthWrite = model.opacity >= 1
-    }
-
-    const itemById = new Map(model.items.map((item) => [item.id, item]))
-    for (const row of this.rowMeshes) {
-      const itemId = row.name.slice('wrist-menu-action-visual:'.length)
-      const item = itemById.get(itemId)
-      const material = row.material as MeshBasicMaterial
-      material.color.setHex(
-        item?.interaction === 'armed'
-          ? 0x2e7d61
-          : item?.interaction === 'hovered'
-            ? 0x1d4438
-            : 0x102020,
-      )
-    }
-  }
-
-  setTargetable(targetable: boolean) {
-    for (const hitRegion of this.hitRegions) {
-      hitRegion.raycast = targetable ? interactiveRaycast : decorativeRaycast
-    }
-  }
-
-  itemIdForIntersection(
-    intersection: Intersection<Object3D<Object3DEventMap>> | undefined,
-  ): string | undefined {
-    const itemId = intersection?.object.userData['wristMenuItemId']
-    return typeof itemId === 'string' ? itemId : undefined
-  }
-
-  dispose() {
-    this.group.removeFromParent()
-    for (const resource of this.resources) resource.dispose()
-    this.resources.length = 0
-    this.rowMeshes.length = 0
-    this.hitRegions.length = 0
-    this.visualMaterials.length = 0
-    this.group.clear()
-  }
-}
 
 type SelectEvent = Readonly<{ inputSource: XRInputSource }>
 
@@ -230,11 +87,12 @@ function materializeAnchorSettings(snapshot: HostSnapshot): AnchorSettings {
 export function createThreeWristMenu(
   options: CreateThreeWristMenuOptions,
 ): ThreeWristMenu {
+  const initialSnapshot = copyHostSnapshot(options.snapshot)
   const runtime = createWristMenuRuntime({
-    snapshot: options.snapshot,
+    snapshot: initialSnapshot,
     onEvent: options.onEvent,
   })
-  const presentation = new WristMenuPresentation(options.snapshot)
+  const presentation = new WristMenuPresentation()
   const raycaster = new Raycaster()
   const rayMatrix = new Matrix4()
   const rayOrigin = new Vector3()
@@ -245,7 +103,7 @@ export function createThreeWristMenu(
   const anchorOrientation = new Quaternion()
   const anchorScale = new Vector3(1, 1, 1)
   const sourceIds = new WeakMap<XRInputSource, string>()
-  let anchorSettings = materializeAnchorSettings(options.snapshot)
+  let anchorSettings = materializeAnchorSettings(initialSnapshot)
   let pendingAnchorSettings: AnchorSettings | undefined
   let sourcePressed = new WeakMap<XRInputSource, boolean>()
   let sourceCompleted = new WeakSet<XRInputSource>()
@@ -254,7 +112,7 @@ export function createThreeWristMenu(
   let inputSourceSequence = 0
   let frameSequence = 0
   let geometryBarrierThrough = 1
-  let presentationRevision = 1
+  let presentationRevision = 0
   let session: XRSession | null = null
   let referenceSpace: XRReferenceSpace | null = null
   let lifecycleRevision = 0
@@ -412,8 +270,9 @@ export function createThreeWristMenu(
 
     sync(nextSnapshot) {
       assertActive()
-      runtime.sync(nextSnapshot)
-      pendingAnchorSettings = materializeAnchorSettings(nextSnapshot)
+      const copiedSnapshot = copyHostSnapshot(nextSnapshot)
+      runtime.sync(copiedSnapshot)
+      pendingAnchorSettings = materializeAnchorSettings(copiedSnapshot)
     },
 
     update({ time, frame }) {
@@ -498,13 +357,10 @@ export function createThreeWristMenu(
           controllerSources.push({ id, inputSource })
         }
 
-        const wristSource = wristSources
-          .filter((source) => source.handedness === anchorSettings.wrist)
-          .sort(
-            (left, right) =>
-              Number(left.kind === 'controller') -
-              Number(right.kind === 'controller'),
-          )[0]
+        const wristSource = selectWristSource(
+          wristSources,
+          anchorSettings.wrist,
+        )
         const currentAnchor =
           wristSource === undefined
             ? undefined
@@ -571,9 +427,7 @@ export function createThreeWristMenu(
 
       if (model.revision !== presentationRevision) {
         presentationRevision = model.revision
-        presentation.renderItems({
-          menuDefinition: model.items.map(({ interaction: _interaction, ...item }) => item),
-        })
+        presentation.renderItems(model.items)
         geometryBarrierThrough = frameSequence
       }
 
@@ -606,10 +460,16 @@ export function createThreeWristMenu(
       disposed = true
       try {
         attachSession(null)
-        attachReferenceSpace(null)
-        runtime.dispose()
       } finally {
-        presentation.dispose()
+        try {
+          attachReferenceSpace(null)
+        } finally {
+          try {
+            runtime.dispose()
+          } finally {
+            presentation.dispose()
+          }
+        }
       }
     },
   })

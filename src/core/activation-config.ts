@@ -1,4 +1,4 @@
-import type { Handedness } from './index.js'
+import type { Handedness } from './host-snapshot.js'
 
 export type ActivationMode =
   | 'automatic'

@@ -3,9 +3,10 @@
 An ESM-only WebXR Wrist Menu Package with framework-neutral, Three.js, and React
 Three Fiber entry points.
 
-The current `0.0.0` slice attaches an Action Item menu to a tracked wrist or
-Controller Wrist Proxy, reveals it intentionally, and gives controller target
-rays the same selection semantics in vanilla Three.js and React Three Fiber.
+The `0.0.0` implementation attaches a complete, Host-controlled version-1 Menu
+Definition to a tracked wrist or Controller Wrist Proxy, reveals it
+intentionally, and gives controller target rays the same selection semantics
+in vanilla Three.js and React Three Fiber.
 
 ```ts
 import type { HostSnapshot } from '@xleepy/wrist-menu'
@@ -16,10 +17,50 @@ const snapshot = {
   // Optional values override the documented 35° / 50° and 300 / 200 ms defaults.
   comfort: { enterAngleDegrees: 30 },
   menuDefinition: [
-    { type: 'action', id: 'spawn-cube', label: 'Spawn cube' },
+    { type: 'action', id: 'reset', label: 'Reset workshop', iconKey: 'reset' },
+    { type: 'separator', label: 'Scene' },
+    { type: 'toggle', id: 'grid', label: 'Show grid', value: true },
+    {
+      type: 'choice-group',
+      id: 'shape',
+      label: 'Primitive shape',
+      selectedValue: 'cube',
+      options: [
+        { id: 'cube', label: 'Cube', value: 'cube' },
+        { id: 'sphere', label: 'Sphere', value: 'sphere' },
+      ],
+    },
+    {
+      type: 'action',
+      id: 'remove',
+      label: 'Remove selection',
+      disabled: true,
+      disabledReason: 'Select a Workshop Object first',
+    },
   ],
 } as const satisfies HostSnapshot
 ```
+
+Interactive IDs and Choice Group IDs are stable and globally unique. Choice
+values are strings or finite numbers; Toggle Item values are booleans. Every
+interactive item requires a label, may provide a portable `iconKey`, and may be
+disabled with an optional reason. Separators may omit both identity and label.
+
+`sync(nextSnapshot)` validates and deeply copies the complete input immediately,
+then applies the latest valid snapshot atomically at the next Frame Sample. A
+failed sync leaves both the live and already-queued snapshots unchanged.
+
+Selection Intents are proposals. An Action Item reports its `itemId`; a Toggle
+Item reports its current and proposed boolean values; a choice reports its
+group, item, current value, and proposed value. The Wrist Menu Package never
+changes displayed Toggle or Choice state itself—the Host Application supplies
+the next complete snapshot.
+
+The current Renderer Integration preserves this complete semantic content on
+ordered rows and explicit Hit Regions, including portable labels, icon keys,
+values, selected state, and disabled reasons. The production Reach typography,
+procedural icon atlas, and virtualized viewport are a separate presentation
+milestone; they do not change this Host or event contract.
 
 Vanilla hosts create a `createThreeWristMenu` instance, attach its stable
 `group`, and call `update({ time, frame })` from their existing XR loop. Before
@@ -47,8 +88,8 @@ The core `createWristMenuRuntime` accepts only portable Frame Samples and Target
 Observations. A `FrameSample` contains current-frame viewer and wrist poses plus
 a `lifecycleRevision` that custom integrations increment after session,
 reference-space, recenter, or attachment resets. A controller arms on select
-start and commits on release over the same Action Item. Newly revealed, moved,
-or recreated presentation geometry becomes targetable only after a following
+start and commits on release over the same enabled Menu Item. Newly revealed,
+moved, or recreated presentation geometry becomes targetable only after a following
 Frame Sample. Tracking loss, source replacement, visibility interruption,
 reparenting, session end, and disposal cancel interaction and require fresh
 acquisition.

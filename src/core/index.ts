@@ -1,3 +1,33 @@
+import {
+  anchoringSettingsEqual,
+  copyHostSnapshot,
+  createPresentationItems,
+  findInteractiveItem,
+  type Handedness,
+  type HostSnapshot,
+  type PresentationItem,
+} from './host-snapshot.js'
+
+export type {
+  ActionItem,
+  ChoiceGroup,
+  ChoiceOption,
+  ChoiceValue,
+  Handedness,
+  HostSnapshot,
+  MenuDefinitionEntry,
+  MenuInteraction,
+  MenuValue,
+  PresentationActionItem,
+  PresentationChoiceGroup,
+  PresentationChoiceOption,
+  PresentationItem,
+  PresentationSeparatorItem,
+  PresentationToggleItem,
+  SeparatorItem,
+  ToggleItem,
+} from './host-snapshot.js'
+
 /** Session features a Host Application may request for Wrist Menu support. */
 export const wristMenuSessionFeatures = {
   optionalFeatures: ['hand-tracking', 'local-floor'],
@@ -5,19 +35,8 @@ export const wristMenuSessionFeatures = {
 
 export type WristMenuSessionFeatures = typeof wristMenuSessionFeatures
 
-export type Handedness = 'left' | 'right'
-
 import {
-  copyControllerWristConfiguration,
-  resolveControllerWristOffset,
   resolveRevealConfiguration,
-  type ActivationMode,
-  type ControllerDeviceTarget,
-  type ControllerWristConfiguration,
-  type ControllerWristOffset,
-  type ControllerWristPreset,
-  type RevealConfiguration,
-  type RevealConfigurationOverrides,
   type Vector3Tuple,
 } from './activation-config.js'
 import {
@@ -28,6 +47,7 @@ import {
 } from './reveal-state.js'
 import {
   resolveWristAnchor,
+  selectWristSource,
   type PoseSample,
   type QuaternionTuple,
   type WristAnchorPose,
@@ -55,26 +75,6 @@ export {
   type WristSourceSample,
 } from './wrist-anchor.js'
 export type { RevealPhase, VisibilityChangeReason } from './reveal-state.js'
-
-export type ActionItem = Readonly<{
-  type: 'action'
-  id: string
-  label: string
-}>
-
-/**
- * Complete Host Application-owned input. Comfort values and controller
- * geometry are portable overrides; omitted values resolve to documented
- * package defaults.
- */
-export type HostSnapshot = Readonly<{
-  activationMode: ActivationMode
-  wrist: Handedness
-  menuDefinition: readonly ActionItem[]
-  comfort?: RevealConfigurationOverrides
-  controllerWrist?: ControllerWristConfiguration
-}>
-
 export type ControllerSelectionSourceSample = Readonly<{
   id: string
   kind: 'controller'
@@ -96,17 +96,31 @@ export type FrameSample = Readonly<{
   selectionSources: readonly ControllerSelectionSourceSample[]
 }>
 
-/** Evidence that a controller target ray currently intersects an Action Item. */
+/** Evidence that a controller target ray currently intersects a Menu Item. */
 export type TargetObservation = Readonly<{
   sourceId: string
   kind: 'controller-target-ray'
   itemId: string
 }>
 
-export type SelectionIntent = Readonly<{
-  type: 'action'
-  itemId: string
-}>
+export type SelectionIntent =
+  | Readonly<{
+      type: 'action'
+      itemId: string
+    }>
+  | Readonly<{
+      type: 'toggle'
+      itemId: string
+      currentValue: boolean
+      proposedValue: boolean
+    }>
+  | Readonly<{
+      type: 'choice'
+      groupId: string
+      itemId: string
+      currentValue: string | number
+      proposedValue: string | number
+    }>
 
 export type WristMenuEvent =
   | Readonly<{
@@ -139,13 +153,6 @@ export type WristMenuEvent =
       time: number
     }>
 
-export type PresentationItem = Readonly<{
-  type: 'action'
-  id: string
-  label: string
-  interaction: 'idle' | 'hovered' | 'armed'
-}>
-
 /** Read-only output consumed by Renderer Integrations. */
 export type PresentationModel = Readonly<{
   visible: boolean
@@ -177,94 +184,46 @@ type OwnedSelection = Readonly<{
   itemId: string
 }>
 
-function copySnapshot(snapshot: HostSnapshot): HostSnapshot {
-  if (
-    snapshot.activationMode !== 'automatic' &&
-    snapshot.activationMode !== 'forced-open' &&
-    snapshot.activationMode !== 'forced-closed' &&
-    snapshot.activationMode !== 'disabled'
-  ) {
-    throw new TypeError('Host Snapshot activationMode is not supported')
+function selectionIntentFor(
+  snapshot: HostSnapshot,
+  itemId: string,
+): SelectionIntent {
+  const located = findInteractiveItem(snapshot.menuDefinition, itemId)
+  if (located === undefined) {
+    throw new Error(`Selection-owned Menu Item disappeared: ${itemId}`)
   }
-  if (snapshot.wrist !== 'left' && snapshot.wrist !== 'right') {
-    throw new TypeError('Host Snapshot wrist must be "left" or "right"')
-  }
-  if (!Array.isArray(snapshot.menuDefinition)) {
-    throw new TypeError('Host Snapshot menuDefinition must be an array')
-  }
-
-  const ids = new Set<string>()
-  const menuDefinition = snapshot.menuDefinition.map((item) => {
-    if (item.type !== 'action') {
-      throw new TypeError('This Wrist Menu Package version supports only Action Items')
+  if (located.group !== undefined) {
+    const option = located.group.options.find(({ id }) => id === itemId)
+    if (option === undefined) {
+      throw new Error(`Selection-owned Choice Option disappeared: ${itemId}`)
     }
-    if (item.id.trim() === '' || item.label.trim() === '') {
-      throw new TypeError('Action Items require non-empty ids and labels')
-    }
-    if (ids.has(item.id)) {
-      throw new TypeError(`Action Item id must be unique: ${item.id}`)
-    }
-    ids.add(item.id)
-    return Object.freeze({ type: 'action' as const, id: item.id, label: item.label })
-  })
-
-  const controllerWrist = copyControllerWristConfiguration(
-    snapshot.controllerWrist,
-  )
-  return Object.freeze({
-    activationMode: snapshot.activationMode,
-    wrist: snapshot.wrist,
-    menuDefinition: Object.freeze(menuDefinition),
-    ...(snapshot.comfort === undefined
-      ? {}
-      : { comfort: resolveRevealConfiguration(snapshot.comfort) }),
-    ...(controllerWrist === undefined ? {} : { controllerWrist }),
-  })
-}
-
-function anchoringSettingsEqual(
-  left: HostSnapshot,
-  right: HostSnapshot,
-): boolean {
-  if (left.wrist !== right.wrist) {
-    return false
+    return Object.freeze({
+      type: 'choice',
+      groupId: located.group.id,
+      itemId: option.id,
+      currentValue: located.group.selectedValue,
+      proposedValue: option.value,
+    })
   }
-  const leftComfort = resolveRevealConfiguration(left.comfort)
-  const rightComfort = resolveRevealConfiguration(right.comfort)
-  if (
-    Object.keys(leftComfort).some(
-      (key) =>
-        leftComfort[key as keyof RevealConfiguration] !==
-        rightComfort[key as keyof RevealConfiguration],
-    )
-  ) {
-    return false
+  if ('type' in located.item && located.item.type === 'toggle') {
+    return Object.freeze({
+      type: 'toggle',
+      itemId: located.item.id,
+      currentValue: located.item.value,
+      proposedValue: !located.item.value,
+    })
   }
-  return (['left', 'right'] as const).every((handedness) => {
-    const leftOffset = resolveControllerWristOffset(
-      left.controllerWrist,
-      handedness,
-    )
-    const rightOffset = resolveControllerWristOffset(
-      right.controllerWrist,
-      handedness,
-    )
-    return (
-      leftOffset.translationMeters.every(
-        (value, index) => value === rightOffset.translationMeters[index],
-      ) &&
-      leftOffset.rotationDegrees.every(
-        (value, index) => value === rightOffset.rotationDegrees[index],
-      )
-    )
-  })
+  if ('type' in located.item && located.item.type === 'action') {
+    return Object.freeze({ type: 'action', itemId: located.item.id })
+  }
+  throw new Error(`Selection-owned Menu Item has no intent: ${itemId}`)
 }
 
 /** Create the framework-neutral behavior runtime used by every integration. */
 export function createWristMenuRuntime(
   options: CreateWristMenuRuntimeOptions,
 ): WristMenuRuntime {
-  let snapshot = copySnapshot(options.snapshot)
+  let snapshot = copyHostSnapshot(options.snapshot)
   let revealConfiguration = resolveRevealConfiguration(snapshot.comfort)
   let pendingSnapshot: HostSnapshot | undefined
   let disposed = false
@@ -303,7 +262,7 @@ export function createWristMenuRuntime(
   return Object.freeze({
     sync(nextSnapshot) {
       assertActive()
-      pendingSnapshot = copySnapshot(nextSnapshot)
+      pendingSnapshot = copyHostSnapshot(nextSnapshot)
     },
 
     step(frameSample, targetObservations) {
@@ -316,26 +275,28 @@ export function createWristMenuRuntime(
       let resetReveal = false
 
       if (pendingSnapshot !== undefined) {
-        cancelOwnership('host-snapshot-changed', frameSample.time)
-        const activationModeChanged =
-          snapshot.activationMode !== pendingSnapshot.activationMode
-        resetReveal =
-          !anchoringSettingsEqual(snapshot, pendingSnapshot) ||
-          (activationModeChanged && pendingSnapshot.activationMode === 'automatic')
-        snapshot = pendingSnapshot
-        revealConfiguration = resolveRevealConfiguration(snapshot.comfort)
+        const snapshotToApply = pendingSnapshot
         pendingSnapshot = undefined
+        const activationModeChanged =
+          snapshot.activationMode !== snapshotToApply.activationMode
+        resetReveal =
+          !anchoringSettingsEqual(snapshot, snapshotToApply) ||
+          (activationModeChanged && snapshotToApply.activationMode === 'automatic')
+        snapshot = snapshotToApply
+        revealConfiguration = resolveRevealConfiguration(snapshot.comfort)
         revision += 1
         targetableAfterSequence = frameSample.sequence
+        cancelOwnership('host-snapshot-changed', frameSample.time)
       }
 
       if (!Array.isArray(frameSample.wristSources)) {
         throw new TypeError('Frame Sample wristSources must be an array')
       }
 
-      const wristSource = frameSample.wristSources
-        .filter((source) => source.handedness === snapshot.wrist)
-        .sort((left, right) => Number(left.kind === 'controller') - Number(right.kind === 'controller'))[0]
+      const wristSource = selectWristSource(
+        frameSample.wristSources,
+        snapshot.wrist,
+      )
       const anchor =
         wristSource === undefined
           ? undefined
@@ -402,7 +363,6 @@ export function createWristMenuRuntime(
         cancelOwnership('lifecycle-interrupted', frameSample.time)
       }
 
-      const itemsById = new Map(snapshot.menuDefinition.map((item) => [item.id, item]))
       const observationsBySource = new Map<string, TargetObservation>()
       if (targetable) {
         for (const observation of targetObservations) {
@@ -411,7 +371,8 @@ export function createWristMenuRuntime(
             observation.kind === 'controller-target-ray' &&
             source !== undefined &&
             source.handedness !== snapshot.wrist &&
-            itemsById.has(observation.itemId) &&
+            findInteractiveItem(snapshot.menuDefinition, observation.itemId) !==
+              undefined &&
             !observationsBySource.has(observation.sourceId)
           ) {
             observationsBySource.set(observation.sourceId, observation)
@@ -424,6 +385,10 @@ export function createWristMenuRuntime(
         const wasPressed = previousPressed.get(source.id) ?? source.selectPressed
         const observation = observationsBySource.get(source.id)
         const eligible = source.handedness !== snapshot.wrist
+        const observedItem =
+          observation === undefined
+            ? undefined
+            : findInteractiveItem(snapshot.menuDefinition, observation.itemId)
 
         if (
           ownedSelection?.sourceId === source.id &&
@@ -438,7 +403,8 @@ export function createWristMenuRuntime(
           source.selectPressed &&
           eligible &&
           ownedSelection === undefined &&
-          observation !== undefined
+          observation !== undefined &&
+          observedItem?.item.disabled !== true
         ) {
           ownedSelection = Object.freeze({
             sourceId: source.id,
@@ -463,7 +429,7 @@ export function createWristMenuRuntime(
           } else if (observation?.itemId === committed.itemId) {
             options.onEvent({
               type: 'selection-intent',
-              intent: { type: 'action', itemId: committed.itemId },
+              intent: selectionIntentFor(snapshot, committed.itemId),
               source: { kind: 'controller', handedness: source.handedness },
               menuWrist: snapshot.wrist,
               time: frameSample.time,
@@ -492,18 +458,12 @@ export function createWristMenuRuntime(
         revealPhase: reveal.phase,
         anchorPose: reveal.anchorPose,
         revision,
-        items: Object.freeze(
-          snapshot.menuDefinition.map((item) =>
-            Object.freeze({
-              ...item,
-              interaction:
-                ownedSelection?.itemId === item.id
-                  ? ('armed' as const)
-                  : hoveredItemIds.has(item.id)
-                    ? ('hovered' as const)
-                    : ('idle' as const),
-            }),
-          ),
+        items: createPresentationItems(snapshot.menuDefinition, (itemId) =>
+          ownedSelection?.itemId === itemId
+            ? 'armed'
+            : hoveredItemIds.has(itemId)
+              ? 'hovered'
+              : 'idle',
         ),
       })
     },

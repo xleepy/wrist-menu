@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   createWristMenuRuntime,
   defaultRevealConfiguration,
+  resolveWristAnchor,
 } from '../dist/core/index.js'
 import {
   automaticHandSnapshot,
@@ -256,6 +257,32 @@ test('Controller Wrist Proxy presets mirror Quest 2 candidate A and leave unknow
     },
   })
   assert.deepEqual(explicit.anchorPose.position, [1, 2, 3])
+})
+
+test('controller automatic facing uses the resolved proxy position and orientation', () => {
+  const source = {
+    id: 'left-controller',
+    kind: 'controller',
+    handedness: 'left',
+    pose: identityPose,
+  }
+  const offsetFor = (translationMeters, rotationDegrees) => ({
+    offsets: { left: { translationMeters, rotationDegrees } },
+  })
+
+  const rotated = resolveWristAnchor(
+    source,
+    [1, 0, 0],
+    offsetFor([0, 0, 0], [0, 0, 180]),
+  )
+  assert.ok(Math.abs(rotated.facingAngleDegrees - 180) < 1e-9)
+
+  const translated = resolveWristAnchor(
+    source,
+    [1, 1, 0],
+    offsetFor([1, 0, 0], [0, 0, 0]),
+  )
+  assert.ok(Math.abs(translated.facingAngleDegrees - 90) < 1e-9)
 })
 
 test('forced modes bypass facing confidence but never XR lifecycle safety', () => {

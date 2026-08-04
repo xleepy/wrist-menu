@@ -3,7 +3,7 @@ import {
   type ControllerWristConfiguration,
   type Vector3Tuple,
 } from './activation-config.js'
-import type { Handedness } from './index.js'
+import type { Handedness } from './host-snapshot.js'
 
 export type QuaternionTuple = readonly [number, number, number, number]
 
@@ -34,6 +34,20 @@ export type ResolvedWristAnchor = Readonly<{
   automaticEligible: boolean
 }>
 
+/** Select the configured wrist, preferring an articulated hand over its proxy. */
+export function selectWristSource(
+  sources: readonly WristSourceSample[],
+  handedness: Handedness,
+): WristSourceSample | undefined {
+  let controller: WristSourceSample | undefined
+  for (const source of sources) {
+    if (source.handedness !== handedness) continue
+    if (source.kind === 'hand') return source
+    controller ??= source
+  }
+  return controller
+}
+
 export function resolveWristAnchor(
   source: WristSourceSample,
   viewerPosition: Vector3Tuple | null,
@@ -50,6 +64,9 @@ export function resolveWristAnchor(
       : resolveControllerWristOffset(controllerWrist, source.handedness)
   const sourceOrientation = normalizeQuaternion(pose.orientation)
   const offsetOrientation = quaternionFromEulerDegrees(offset.rotationDegrees)
+  const resolvedAnchorOrientation = normalizeQuaternion(
+    multiplyQuaternions(sourceOrientation, offsetOrientation),
+  )
   const surfaceBasis =
     source.kind === 'hand'
       ? quaternionFromEulerDegrees([90, 0, 0])
@@ -59,10 +76,7 @@ export function resolveWristAnchor(
           0,
         ])
   const orientation = normalizeQuaternion(
-    multiplyQuaternions(
-      multiplyQuaternions(sourceOrientation, offsetOrientation),
-      surfaceBasis,
-    ),
+    multiplyQuaternions(resolvedAnchorOrientation, surfaceBasis),
   )
   const translated = rotateVector(sourceOrientation, offset.translationMeters)
   const position = Object.freeze([
@@ -79,11 +93,13 @@ export function resolveWristAnchor(
         : source.handedness === 'left'
           ? [1, 0, 0]
           : [-1, 0, 0]
-    const palmNormal = normalizeVector(rotateVector(sourceOrientation, localPalmNormal))
+    const palmNormal = normalizeVector(
+      rotateVector(resolvedAnchorOrientation, localPalmNormal),
+    )
     const towardViewer = normalizeVector([
-      viewerPosition[0] - pose.position[0],
-      viewerPosition[1] - pose.position[1],
-      viewerPosition[2] - pose.position[2],
+      viewerPosition[0] - position[0],
+      viewerPosition[1] - position[1],
+      viewerPosition[2] - position[2],
     ])
     const cosine = clamp(dot(palmNormal, towardViewer), -1, 1)
     facingAngleDegrees = (Math.acos(cosine) * 180) / Math.PI

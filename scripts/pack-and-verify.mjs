@@ -31,6 +31,8 @@ const expectedFiles = [
   'dist/core/activation-config.js',
   'dist/core/index.d.ts',
   'dist/core/index.js',
+  'dist/core/host-snapshot.d.ts',
+  'dist/core/host-snapshot.js',
   'dist/core/reveal-state.d.ts',
   'dist/core/reveal-state.js',
   'dist/core/wrist-anchor.d.ts',
@@ -39,6 +41,8 @@ const expectedFiles = [
   'dist/react/index.js',
   'dist/three/index.d.ts',
   'dist/three/index.js',
+  'dist/three/wrist-menu-presentation.d.ts',
+  'dist/three/wrist-menu-presentation.js',
   'package.json',
 ].sort()
 
