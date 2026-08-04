@@ -2,7 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Scene } from 'three'
 
-import { createThreeWristMenu } from '../dist/three/index.js'
+import {
+  createThreeWristMenuState,
+  disposeThreeWristMenu,
+  threeWristMenuBlocksSceneInput,
+  updateThreeWristMenu,
+} from '../dist/three/index.js'
 import { crossInputSnapshot } from '../fixtures/cross-input-selection.mjs'
 import {
   createControllerHapticFixture,
@@ -12,56 +17,56 @@ import {
 test('vanilla integration samples an inclusive fingertip press plane and latches until withdrawal', () => {
   const events = []
   const fixture = createHandXrFixture()
-  const menu = createThreeWristMenu({
+  const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: crossInputSnapshot,
     onEvent: (event) => events.push(event),
   })
-  new Scene().add(menu.group)
+  new Scene().add(menu.presentation.group)
 
-  menu.update({ time: 10, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
   fixture.setFingertipZ(0.03)
-  menu.update({ time: 20, frame: fixture.frame })
-  assert.equal(menu.blocksSceneInput(fixture.handSource), true)
+  updateThreeWristMenu(menu, { time: 20, frame: fixture.frame })
+  assert.equal(threeWristMenuBlocksSceneInput(menu, fixture.handSource), true)
   assert.equal(events.some(({ type }) => type === 'selection-intent'), false)
 
   // Hit Region front plane is z=0.012; radius=0.005 makes z=0.017 inclusive.
   fixture.setFingertipZ(0.017)
-  menu.update({ time: 30, frame: fixture.frame })
-  menu.update({ time: 40, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 30, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 40, frame: fixture.frame })
   assert.deepEqual(
     events.filter(({ type }) => type === 'selection-intent').map(({ source }) => source),
     [{ id: 'input-source-2', kind: 'hand', handedness: 'right' }],
   )
-  assert.equal(menu.blocksSceneInput(fixture.handSource), true)
+  assert.equal(threeWristMenuBlocksSceneInput(menu, fixture.handSource), true)
 
   fixture.setFingertipZ(0.01701)
-  menu.update({ time: 50, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 50, frame: fixture.frame })
   assert.equal(
     events.filter(({ type }) => type === 'selection-intent').length,
     1,
   )
 
   fixture.setFingertipZ(0.05)
-  menu.update({ time: 60, frame: fixture.frame })
-  assert.equal(menu.blocksSceneInput(fixture.handSource), false)
-  menu.dispose()
+  updateThreeWristMenu(menu, { time: 60, frame: fixture.frame })
+  assert.equal(threeWristMenuBlocksSceneInput(menu, fixture.handSource), false)
+  disposeThreeWristMenu(menu)
 })
 
 test('tracking loss cancels a direct-hand approach and reappearance inside cannot commit', () => {
   const events = []
   const fixture = createHandXrFixture()
-  const menu = createThreeWristMenu({
+  const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: crossInputSnapshot,
     onEvent: (event) => events.push(event),
   })
 
-  menu.update({ time: 10, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
   fixture.setFingertipZ(0.03)
-  menu.update({ time: 20, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 20, frame: fixture.frame })
   fixture.setFingertipTracked(false)
-  menu.update({ time: 30, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 30, frame: fixture.frame })
   assert.equal(
     events.find(({ type }) => type === 'selection-cancellation')?.reason,
     'lifecycle-interrupted',
@@ -69,9 +74,9 @@ test('tracking loss cancels a direct-hand approach and reappearance inside canno
 
   fixture.setFingertipZ(0.017)
   fixture.setFingertipTracked(true)
-  menu.update({ time: 40, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 40, frame: fixture.frame })
   assert.equal(events.some(({ type }) => type === 'selection-intent'), false)
-  menu.dispose()
+  disposeThreeWristMenu(menu)
 })
 
 test('optional controller haptic rejection cannot prevent or duplicate semantic delivery', async () => {
@@ -85,19 +90,19 @@ test('optional controller haptic rejection cannot prevent or duplicate semantic 
     },
   })
   const events = []
-  const menu = createThreeWristMenu({
+  const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: crossInputSnapshot,
     onEvent: (event) => events.push(event),
   })
 
-  menu.update({ time: 10, frame: fixture.frame })
-  menu.update({ time: 20, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 20, frame: fixture.frame })
   fixture.session.dispatch('selectstart', fixture.controller)
-  menu.update({ time: 30, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 30, frame: fixture.frame })
   fixture.session.dispatch('select', fixture.controller)
   fixture.session.dispatch('selectend', fixture.controller)
-  menu.update({ time: 40, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 40, frame: fixture.frame })
   await Promise.resolve()
 
   assert.equal(requests, 1)
@@ -105,7 +110,53 @@ test('optional controller haptic rejection cannot prevent or duplicate semantic 
     events.filter(({ type }) => type === 'selection-intent').length,
     1,
   )
-  menu.dispose()
+  disposeThreeWristMenu(menu)
+})
+
+test('Wrist Menu Events and controller haptics follow current instance state when the Host callback throws', () => {
+  let requests = 0
+  const fixture = createControllerHapticFixture({
+    pulse() {
+      requests += 1
+      return true
+    },
+  })
+  const initialEvents = []
+  const replacementEvents = []
+  const menu = createThreeWristMenuState({
+    renderer: fixture.renderer,
+    snapshot: crossInputSnapshot,
+    onEvent: (event) => initialEvents.push(event),
+  })
+  menu.onEvent = (event) => {
+    replacementEvents.push(event)
+    if (event.type === 'selection-intent') {
+      throw new Error('replacement Host callback failed')
+    }
+  }
+  menu.inputSourceById = new Map()
+
+  updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 20, frame: fixture.frame })
+  fixture.session.dispatch('selectstart', fixture.controller)
+  updateThreeWristMenu(menu, { time: 30, frame: fixture.frame })
+  fixture.session.dispatch('select', fixture.controller)
+  fixture.session.dispatch('selectend', fixture.controller)
+  assert.throws(
+    () => updateThreeWristMenu(menu, { time: 40, frame: fixture.frame }),
+    /replacement Host callback failed/,
+  )
+
+  assert.equal(requests, 1)
+  assert.equal(
+    initialEvents.filter(({ type }) => type === 'selection-intent').length,
+    0,
+  )
+  assert.equal(
+    replacementEvents.filter(({ type }) => type === 'selection-intent').length,
+    1,
+  )
+  disposeThreeWristMenu(menu)
 })
 
 test('disabled controller targets never request haptics', () => {
@@ -117,7 +168,7 @@ test('disabled controller targets never request haptics', () => {
     },
   })
   const events = []
-  const menu = createThreeWristMenu({
+  const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: {
       ...crossInputSnapshot,
@@ -126,15 +177,15 @@ test('disabled controller targets never request haptics', () => {
     onEvent: (event) => events.push(event),
   })
 
-  menu.update({ time: 10, frame: fixture.frame })
-  menu.update({ time: 20, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 20, frame: fixture.frame })
   fixture.session.dispatch('selectstart', fixture.controller)
-  menu.update({ time: 30, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 30, frame: fixture.frame })
   fixture.session.dispatch('select', fixture.controller)
   fixture.session.dispatch('selectend', fixture.controller)
-  menu.update({ time: 40, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 40, frame: fixture.frame })
 
   assert.equal(requests, 0)
   assert.equal(events.some(({ type }) => type === 'selection-intent'), false)
-  menu.dispose()
+  disposeThreeWristMenu(menu)
 })

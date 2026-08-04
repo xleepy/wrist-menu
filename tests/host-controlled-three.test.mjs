@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Raycaster, Vector3 } from 'three'
 
-import { createThreeWristMenu } from '../dist/three/index.js'
+import {
+  createThreeWristMenuState,
+  disposeThreeWristMenu,
+  updateThreeWristMenu,
+} from '../dist/three/index.js'
 import { hostControlledSnapshot } from '../fixtures/host-controlled-menu.mjs'
 import {
   createHostControlledXrFixture,
@@ -13,7 +17,7 @@ import {
 test('vanilla renders all Host-controlled rows in order and emits semantic intents', () => {
   const events = []
   const fixture = createHostControlledXrFixture()
-  const menu = createThreeWristMenu({
+  const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: hostControlledSnapshot,
     onEvent: (event) => events.push(event),
@@ -21,10 +25,10 @@ test('vanilla renders all Host-controlled rows in order and emits semantic inten
 
   driveControlledIntentJourney({
     ...fixture,
-    advance: (time) => menu.update({ time, frame: fixture.frame }),
+    advance: (time) => updateThreeWristMenu(menu, { time, frame: fixture.frame }),
   })
 
-  const rows = menu.group.children.filter(({ name }) => name.includes('-visual:'))
+  const rows = menu.presentation.group.children.filter(({ name }) => name.includes('-visual:'))
   assert.deepEqual(
     rows.map(({ name }) => name),
     [
@@ -55,12 +59,12 @@ test('vanilla renders all Host-controlled rows in order and emits semantic inten
     expectedControlledIntentOrder,
   )
 
-  menu.dispose()
+  disposeThreeWristMenu(menu)
 })
 
 test('vanilla releases presentation resources when a disposal event callback throws', () => {
   const fixture = createHostControlledXrFixture()
-  const menu = createThreeWristMenu({
+  const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: hostControlledSnapshot,
     onEvent: (event) => {
@@ -69,25 +73,25 @@ test('vanilla releases presentation resources when a disposal event callback thr
       }
     },
   })
-  menu.update({ time: 16, frame: fixture.frame })
-  menu.update({ time: 32, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 16, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 32, frame: fixture.frame })
   fixture.session.dispatch('selectstart', fixture.inputSource)
-  menu.update({ time: 48, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 48, frame: fixture.frame })
 
-  assert.throws(() => menu.dispose(), /Host disposal callback failed/)
-  assert.equal(menu.group.children.length, 0)
+  assert.throws(() => disposeThreeWristMenu(menu), /Host disposal callback failed/)
+  assert.equal(menu.presentation.group.children.length, 0)
   assert.throws(
-    () => menu.update({ time: 64, frame: fixture.frame }),
+    () => updateThreeWristMenu(menu, { time: 64, frame: fixture.frame }),
     /disposed/,
   )
-  assert.doesNotThrow(() => menu.dispose())
+  assert.doesNotThrow(() => disposeThreeWristMenu(menu))
 })
 
 test('complete presentation rows share reveal opacity and targeting barriers', () => {
   const fixture = createHostControlledXrFixture()
   const snapshot = structuredClone(hostControlledSnapshot)
   snapshot.comfort.transitionMs = 150
-  const menu = createThreeWristMenu({
+  const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot,
     onEvent: () => undefined,
@@ -97,9 +101,9 @@ test('complete presentation rows share reveal opacity and targeting barriers', (
     new Vector3(0, 0, -1),
   )
 
-  menu.update({ time: 0, frame: fixture.frame })
-  menu.update({ time: 75, frame: fixture.frame })
-  const visualMaterials = menu.group.children
+  updateThreeWristMenu(menu, { time: 0, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 75, frame: fixture.frame })
+  const visualMaterials = menu.presentation.group.children
     .filter(
       ({ name }) =>
         name === 'wrist-menu-command-slab' || name.includes('-visual:'),
@@ -108,14 +112,14 @@ test('complete presentation rows share reveal opacity and targeting barriers', (
   assert.ok(visualMaterials.length > 1)
   assert.ok(visualMaterials.every(({ opacity }) => opacity === 0.5))
   assert.ok(visualMaterials.every(({ depthWrite }) => depthWrite === false))
-  assert.equal(ray.intersectObject(menu.group, true).length, 0)
+  assert.equal(ray.intersectObject(menu.presentation.group, true).length, 0)
 
-  menu.update({ time: 150, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 150, frame: fixture.frame })
   assert.ok(visualMaterials.every(({ opacity }) => opacity === 1))
   assert.ok(visualMaterials.every(({ depthWrite }) => depthWrite === true))
-  assert.equal(ray.intersectObject(menu.group, true).length, 0)
-  menu.update({ time: 151, frame: fixture.frame })
-  assert.ok(ray.intersectObject(menu.group, true).length > 0)
+  assert.equal(ray.intersectObject(menu.presentation.group, true).length, 0)
+  updateThreeWristMenu(menu, { time: 151, frame: fixture.frame })
+  assert.ok(ray.intersectObject(menu.presentation.group, true).length > 0)
 
-  menu.dispose()
+  disposeThreeWristMenu(menu)
 })

@@ -76,312 +76,325 @@ type OwnedSelection = Readonly<{
   itemId: string
 }>
 
+export type SelectionState = {
+  sourceStates: Map<string, SourceState>
+  claims: Set<string>
+  focus: FocusedSelection | undefined
+  ownership: OwnedSelection | undefined
+}
+
 export type SelectionFrameResult = Readonly<{
   transitions: readonly SelectionTransition[]
   hoveredItemIds: ReadonlySet<string>
   armedItemId: string | undefined
 }>
 
-export type SelectionStateMachine = Readonly<{
-  step(options: Readonly<{
-    targetable: boolean
-    menuWrist: Handedness
-    sources: readonly SelectionSourceSample[]
-    observations: readonly TargetObservation[]
-    disabledItemIds: ReadonlySet<string>
-  }>): SelectionFrameResult
-  cancel(reason: SelectionCancellationReason): readonly SelectionCancellation[]
-  cancelForSource(sourceId: string, reason: SelectionCancellationReason): readonly SelectionCancellation[]
-  blocksSceneInput(sourceId: string): boolean
-  clear(): void
+export type SelectionStepInput = Readonly<{
+  targetable: boolean
+  menuWrist: Handedness
+  sources: readonly SelectionSourceSample[]
+  observations: readonly TargetObservation[]
+  disabledItemIds: ReadonlySet<string>
 }>
 
 /**
- * Renderer-neutral Selection State Machine shared by hand and controller
- * adapters. It deliberately knows nothing about rays, joints, or haptics.
+ * Create the renderer-neutral selection portion of Interaction State shared by
+ * hand and controller adapters. It deliberately knows nothing about rays,
+ * joints, or haptics.
  */
-export function createSelectionStateMachine(): SelectionStateMachine {
-  const sourceStates = new Map<string, SourceState>()
-  const claims = new Set<string>()
-  let focus: FocusedSelection | undefined
-  let ownership: OwnedSelection | undefined
+export function createSelectionState(): SelectionState {
+  return {
+    sourceStates: new Map(),
+    claims: new Set(),
+    focus: undefined,
+    ownership: undefined,
+  }
+}
 
-  const cancelFocus = (
-    reason: SelectionCancellationReason,
-    transitions: SelectionTransition[],
-    neutral: boolean,
-  ) => {
-    if (focus?.kind !== 'hand') return
-    const cancelled = focus
-    focus = undefined
-    const state = sourceStates.get(cancelled.sourceId)
-    if (state !== undefined) state.neutral = neutral
-    transitions.push({
-      type: 'cancel',
-      itemId: cancelled.itemId,
-      sourceId: cancelled.sourceId,
-      reason,
+function cancelFocus(
+  state: SelectionState,
+  reason: SelectionCancellationReason,
+  transitions: SelectionTransition[],
+  neutral: boolean,
+): void {
+  if (state.focus?.kind !== 'hand') return
+  const cancelled = state.focus
+  state.focus = undefined
+  const sourceState = state.sourceStates.get(cancelled.sourceId)
+  if (sourceState !== undefined) sourceState.neutral = neutral
+  transitions.push({
+    type: 'cancel',
+    itemId: cancelled.itemId,
+    sourceId: cancelled.sourceId,
+    reason,
+  })
+}
+
+function cancelOwnership(
+  state: SelectionState,
+  reason: SelectionCancellationReason,
+  transitions: SelectionTransition[],
+  neutral: boolean,
+): void {
+  if (state.ownership === undefined) return
+  const cancelled = state.ownership
+  state.ownership = undefined
+  if (state.focus?.sourceId === cancelled.sourceId) state.focus = undefined
+  const sourceState = state.sourceStates.get(cancelled.sourceId)
+  if (sourceState !== undefined) sourceState.neutral = neutral
+  transitions.push({
+    type: 'cancel',
+    itemId: cancelled.itemId,
+    sourceId: cancelled.sourceId,
+    reason,
+  })
+}
+
+export function advanceSelectionState(
+  state: SelectionState,
+  input: SelectionStepInput,
+): SelectionFrameResult {
+  const transitions: SelectionTransition[] = []
+  const sourceById = new Map(
+    input.sources
+      .filter(({ handedness }) => handedness !== input.menuWrist)
+      .map((source) => [source.id, source]),
+  )
+  const observationBySource = new Map<string, TargetObservation>()
+  for (const observation of input.observations) {
+    const source = sourceById.get(observation.sourceId)
+    if (
+      source !== undefined &&
+      ((source.kind === 'controller' &&
+        observation.kind === 'controller-target-ray') ||
+        (source.kind === 'hand' &&
+          observation.kind === 'hand-fingertip')) &&
+      !observationBySource.has(observation.sourceId)
+    ) {
+      observationBySource.set(observation.sourceId, observation)
+    }
+  }
+
+  for (const sourceId of [...state.sourceStates.keys()]) {
+    if (sourceById.has(sourceId)) continue
+    if (state.ownership?.sourceId === sourceId) {
+      cancelOwnership(state, 'lifecycle-interrupted', transitions, false)
+    } else if (state.focus?.sourceId === sourceId) {
+      cancelFocus(state, 'lifecycle-interrupted', transitions, false)
+      state.focus = undefined
+    }
+    state.claims.delete(sourceId)
+    state.sourceStates.delete(sourceId)
+  }
+
+  for (const source of sourceById.values()) {
+    const observation = observationBySource.get(source.id)
+    if (!state.sourceStates.has(source.id)) {
+      state.sourceStates.set(source.id, {
+        neutral:
+          source.kind === 'controller'
+            ? !source.selectPressed
+            : observation === undefined,
+        wasPressed:
+          source.kind === 'controller' ? source.selectPressed : false,
+      })
+    }
+  }
+
+  if (!input.targetable) {
+    cancelOwnership(state, 'lifecycle-interrupted', transitions, false)
+    cancelFocus(state, 'lifecycle-interrupted', transitions, false)
+    state.focus = undefined
+    state.claims.clear()
+    return Object.freeze({
+      transitions: Object.freeze(transitions),
+      hoveredItemIds: new Set<string>(),
+      armedItemId: undefined,
     })
   }
 
-  const cancelOwnership = (
-    reason: SelectionCancellationReason,
-    transitions: SelectionTransition[],
-    neutral: boolean,
-  ) => {
-    if (ownership === undefined) return
-    const cancelled = ownership
-    ownership = undefined
-    if (focus?.sourceId === cancelled.sourceId) focus = undefined
-    const state = sourceStates.get(cancelled.sourceId)
-    if (state !== undefined) state.neutral = neutral
-    transitions.push({
-      type: 'cancel',
-      itemId: cancelled.itemId,
-      sourceId: cancelled.sourceId,
-      reason,
-    })
+  if (state.ownership !== undefined) {
+    const source = sourceById.get(state.ownership.sourceId)
+    const observation = observationBySource.get(state.ownership.sourceId)
+    if (source?.kind === 'controller') {
+      if (source.selectPressed && observation?.itemId !== state.ownership.itemId) {
+        cancelOwnership(
+          state,
+          observation === undefined ? 'released-away' : 'target-changed',
+          transitions,
+          false,
+        )
+      }
+    }
+  }
+
+  if (state.focus !== undefined) {
+    const observation = observationBySource.get(state.focus.sourceId)
+    if (observation?.itemId !== state.focus.itemId) {
+      if (state.focus.kind === 'hand') {
+        cancelFocus(
+          state,
+          observation === undefined ? 'released-away' : 'target-changed',
+          transitions,
+          observation === undefined,
+        )
+      } else {
+        state.focus = undefined
+      }
+    }
+  }
+
+  for (const source of sourceById.values()) {
+    const sourceState = state.sourceStates.get(source.id)!
+    const observation = observationBySource.get(source.id)
+
+    if (source.kind === 'controller') {
+      const pressed = source.selectPressed
+      if (!pressed) {
+        sourceState.neutral = true
+        state.claims.delete(source.id)
+      }
+
+      if (
+        state.focus === undefined &&
+        sourceState.neutral &&
+        observation !== undefined &&
+        !input.disabledItemIds.has(observation.itemId)
+      ) {
+        state.focus = {
+          sourceId: source.id,
+          itemId: observation.itemId,
+          kind: 'controller',
+        }
+      }
+
+      if (
+        !sourceState.wasPressed &&
+        pressed &&
+        sourceState.neutral &&
+        state.ownership === undefined &&
+        state.focus?.sourceId === source.id &&
+        state.focus.itemId === observation?.itemId &&
+        !input.disabledItemIds.has(state.focus.itemId)
+      ) {
+        state.ownership = { sourceId: source.id, itemId: state.focus.itemId }
+        sourceState.neutral = false
+        state.claims.add(source.id)
+      }
+
+      if (
+        sourceState.wasPressed &&
+        !pressed &&
+        state.ownership?.sourceId === source.id
+      ) {
+        const completed = state.ownership
+        state.ownership = undefined
+        if (source.selectCompleted && observation?.itemId === completed.itemId) {
+          transitions.push({
+            type: 'commit',
+            itemId: completed.itemId,
+            source,
+          })
+        } else {
+          transitions.push({
+            type: 'cancel',
+            itemId: completed.itemId,
+            sourceId: completed.sourceId,
+            reason:
+              observation?.itemId === completed.itemId
+                ? 'action-cancelled'
+                : observation === undefined
+                  ? 'released-away'
+                  : 'target-changed',
+          })
+        }
+      }
+      sourceState.wasPressed = pressed
+      continue
+    }
+
+    if (observation === undefined) {
+      sourceState.neutral = true
+      state.claims.delete(source.id)
+      continue
+    }
+    if (
+      state.focus === undefined &&
+      sourceState.neutral &&
+      !input.disabledItemIds.has(observation.itemId)
+    ) {
+      state.focus = {
+        sourceId: source.id,
+        itemId: observation.itemId,
+        kind: 'hand',
+      }
+      state.claims.add(source.id)
+    }
+    if (
+      state.focus?.sourceId === source.id &&
+      state.focus.itemId === observation.itemId &&
+      observation.kind === 'hand-fingertip' &&
+      observation.phase === 'pressed'
+    ) {
+      const committed = state.focus
+      state.focus = undefined
+      sourceState.neutral = false
+      transitions.push({
+        type: 'commit',
+        itemId: committed.itemId,
+        source,
+      })
+    }
   }
 
   return Object.freeze({
-    step({
-      targetable,
-      menuWrist,
-      sources,
-      observations,
-      disabledItemIds,
-    }) {
-      const transitions: SelectionTransition[] = []
-      const sourceById = new Map(
-        sources
-          .filter(({ handedness }) => handedness !== menuWrist)
-          .map((source) => [source.id, source]),
-      )
-      const observationBySource = new Map<string, TargetObservation>()
-      for (const observation of observations) {
-        const source = sourceById.get(observation.sourceId)
-        if (
-          source !== undefined &&
-          ((source.kind === 'controller' &&
-            observation.kind === 'controller-target-ray') ||
-            (source.kind === 'hand' &&
-              observation.kind === 'hand-fingertip')) &&
-          !observationBySource.has(observation.sourceId)
-        ) {
-          observationBySource.set(observation.sourceId, observation)
-        }
-      }
-
-      for (const sourceId of [...sourceStates.keys()]) {
-        if (sourceById.has(sourceId)) continue
-        if (ownership?.sourceId === sourceId) {
-          cancelOwnership('lifecycle-interrupted', transitions, false)
-        } else if (focus?.sourceId === sourceId) {
-          cancelFocus('lifecycle-interrupted', transitions, false)
-          focus = undefined
-        }
-        claims.delete(sourceId)
-        sourceStates.delete(sourceId)
-      }
-
-      for (const source of sourceById.values()) {
-        const observation = observationBySource.get(source.id)
-        if (!sourceStates.has(source.id)) {
-          sourceStates.set(source.id, {
-            neutral:
-              source.kind === 'controller'
-                ? !source.selectPressed
-                : observation === undefined,
-            wasPressed:
-              source.kind === 'controller' ? source.selectPressed : false,
-          })
-        }
-      }
-
-      if (!targetable) {
-        cancelOwnership('lifecycle-interrupted', transitions, false)
-        cancelFocus('lifecycle-interrupted', transitions, false)
-        focus = undefined
-        claims.clear()
-        return Object.freeze({
-          transitions: Object.freeze(transitions),
-          hoveredItemIds: new Set<string>(),
-          armedItemId: undefined,
-        })
-      }
-
-      if (ownership !== undefined) {
-        const source = sourceById.get(ownership.sourceId)
-        const observation = observationBySource.get(ownership.sourceId)
-        if (source?.kind === 'controller') {
-          if (source.selectPressed && observation?.itemId !== ownership.itemId) {
-            cancelOwnership(
-              observation === undefined ? 'released-away' : 'target-changed',
-              transitions,
-              false,
-            )
-          }
-        }
-      }
-
-      if (focus !== undefined) {
-        const observation = observationBySource.get(focus.sourceId)
-        if (observation?.itemId !== focus.itemId) {
-          if (focus.kind === 'hand') {
-            cancelFocus(
-              observation === undefined ? 'released-away' : 'target-changed',
-              transitions,
-              observation === undefined,
-            )
-          } else {
-            focus = undefined
-          }
-        }
-      }
-
-      for (const source of sourceById.values()) {
-        const state = sourceStates.get(source.id)!
-        const observation = observationBySource.get(source.id)
-
-        if (source.kind === 'controller') {
-          const pressed = source.selectPressed
-          if (!pressed) {
-            state.neutral = true
-            claims.delete(source.id)
-          }
-
-          if (
-            focus === undefined &&
-            state.neutral &&
-            observation !== undefined &&
-            !disabledItemIds.has(observation.itemId)
-          ) {
-            focus = {
-              sourceId: source.id,
-              itemId: observation.itemId,
-              kind: 'controller',
-            }
-          }
-
-          if (
-            !state.wasPressed &&
-            pressed &&
-            state.neutral &&
-            ownership === undefined &&
-            focus?.sourceId === source.id &&
-            focus.itemId === observation?.itemId &&
-            !disabledItemIds.has(focus.itemId)
-          ) {
-            ownership = { sourceId: source.id, itemId: focus.itemId }
-            state.neutral = false
-            claims.add(source.id)
-          }
-
-          if (
-            state.wasPressed &&
-            !pressed &&
-            ownership?.sourceId === source.id
-          ) {
-            const completed = ownership
-            ownership = undefined
-            if (source.selectCompleted && observation?.itemId === completed.itemId) {
-              transitions.push({
-                type: 'commit',
-                itemId: completed.itemId,
-                source,
-              })
-            } else {
-              transitions.push({
-                type: 'cancel',
-                itemId: completed.itemId,
-                sourceId: completed.sourceId,
-                reason:
-                  observation?.itemId === completed.itemId
-                    ? 'action-cancelled'
-                    : observation === undefined
-                      ? 'released-away'
-                      : 'target-changed',
-              })
-            }
-          }
-          state.wasPressed = pressed
-          continue
-        }
-
-        if (observation === undefined) {
-          state.neutral = true
-          claims.delete(source.id)
-          continue
-        }
-        if (
-          focus === undefined &&
-          state.neutral &&
-          !disabledItemIds.has(observation.itemId)
-        ) {
-          focus = {
-            sourceId: source.id,
-            itemId: observation.itemId,
-            kind: 'hand',
-          }
-          claims.add(source.id)
-        }
-        if (
-          focus?.sourceId === source.id &&
-          focus.itemId === observation.itemId &&
-          observation.kind === 'hand-fingertip' &&
-          observation.phase === 'pressed'
-        ) {
-          const committed = focus
-          focus = undefined
-          state.neutral = false
-          transitions.push({
-            type: 'commit',
-            itemId: committed.itemId,
-            source,
-          })
-        }
-      }
-
-      return Object.freeze({
-        transitions: Object.freeze(transitions),
-        hoveredItemIds: new Set(
-          [...observationBySource.values()].map(({ itemId }) => itemId),
-        ),
-        armedItemId: ownership?.itemId,
-      })
-    },
-
-    cancel(reason) {
-      const transitions: SelectionTransition[] = []
-      cancelOwnership(reason, transitions, false)
-      cancelFocus(reason, transitions, false)
-      focus = undefined
-      claims.clear()
-      return Object.freeze(transitions) as readonly SelectionCancellation[]
-    },
-
-    cancelForSource(sourceId, reason) {
-      const transitions: SelectionTransition[] = []
-      if (ownership?.sourceId === sourceId) {
-        cancelOwnership(reason, transitions, false)
-      }
-      if (focus?.sourceId === sourceId) {
-        cancelFocus(reason, transitions, false)
-        focus = undefined
-      }
-      claims.delete(sourceId)
-      return Object.freeze(transitions) as readonly SelectionCancellation[]
-    },
-
-    blocksSceneInput(sourceId) {
-      return claims.has(sourceId)
-    },
-
-    clear() {
-      focus = undefined
-      ownership = undefined
-      claims.clear()
-      sourceStates.clear()
-    },
+    transitions: Object.freeze(transitions),
+    hoveredItemIds: new Set(
+      [...observationBySource.values()].map(({ itemId }) => itemId),
+    ),
+    armedItemId: state.ownership?.itemId,
   })
+}
+
+export function cancelSelectionState(
+  state: SelectionState,
+  reason: SelectionCancellationReason,
+): readonly SelectionCancellation[] {
+  const transitions: SelectionTransition[] = []
+  cancelOwnership(state, reason, transitions, false)
+  cancelFocus(state, reason, transitions, false)
+  state.focus = undefined
+  state.claims.clear()
+  return Object.freeze(transitions) as readonly SelectionCancellation[]
+}
+
+export function cancelSelectionForSource(
+  state: SelectionState,
+  sourceId: string,
+  reason: SelectionCancellationReason,
+): readonly SelectionCancellation[] {
+  const transitions: SelectionTransition[] = []
+  if (state.ownership?.sourceId === sourceId) {
+    cancelOwnership(state, reason, transitions, false)
+  }
+  if (state.focus?.sourceId === sourceId) {
+    cancelFocus(state, reason, transitions, false)
+    state.focus = undefined
+  }
+  state.claims.delete(sourceId)
+  return Object.freeze(transitions) as readonly SelectionCancellation[]
+}
+
+export function selectionBlocksSceneInput(
+  state: SelectionState,
+  sourceId: string,
+): boolean {
+  return state.claims.has(sourceId)
+}
+
+export function clearSelectionState(state: SelectionState): void {
+  state.focus = undefined
+  state.ownership = undefined
+  state.claims.clear()
+  state.sourceStates.clear()
 }

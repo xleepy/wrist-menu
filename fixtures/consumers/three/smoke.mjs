@@ -5,7 +5,10 @@ import * as three from 'three'
 import { wristMenuSessionFeatures as rootFeatures } from '@xleepy/wrist-menu'
 import { wristMenuSessionFeatures as coreFeatures } from '@xleepy/wrist-menu/core'
 import {
-  createThreeWristMenu,
+  createThreeWristMenuState,
+  disposeThreeWristMenu,
+  threeWristMenuBlocksSceneInput,
+  updateThreeWristMenu,
   wristMenuSessionFeatures as threeFeatures,
 } from '@xleepy/wrist-menu/three'
 import {
@@ -17,5 +20,19 @@ assert.deepEqual(rootFeatures.optionalFeatures, ['hand-tracking', 'local-floor']
 assert.equal(coreFeatures, rootFeatures)
 assert.equal(threeFeatures, rootFeatures)
 
-await runPackedThreeControllerJourney({ createThreeWristMenu, iwer, three })
-await runPackedThreeHandJourney({ createThreeWristMenu, iwer, three })
+await runPackedThreeControllerJourney({
+  createThreeWristMenuState,
+  disposeThreeWristMenu,
+  threeWristMenuBlocksSceneInput,
+  updateThreeWristMenu,
+  iwer,
+  three,
+})
+await runPackedThreeHandJourney({
+  createThreeWristMenuState,
+  disposeThreeWristMenu,
+  threeWristMenuBlocksSceneInput,
+  updateThreeWristMenu,
+  iwer,
+  three,
+})

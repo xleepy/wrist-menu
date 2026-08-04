@@ -62,10 +62,12 @@ values, selected state, and disabled reasons. The production Reach typography,
 procedural icon atlas, and virtualized viewport are a separate presentation
 milestone; they do not change this Host or event contract.
 
-Vanilla hosts create a `createThreeWristMenu` instance, attach its stable
-`group`, and call `update({ time, frame })` from their existing XR loop. Before
-handling a scene action, call `blocksSceneInput(inputSource)` so the same
-physical action cannot also affect content behind the menu. React hosts mount
+Vanilla hosts create a Wrist Menu Instance with `createThreeWristMenuState`,
+attach its stable `presentation.group`, and call
+`updateThreeWristMenu(state, { time, frame })` from their existing XR loop.
+Before handling a scene action, call
+`threeWristMenuBlocksSceneInput(state, inputSource)` so the same physical action
+cannot also affect content behind the menu. React hosts mount
 `<WristMenu snapshot={snapshot} onEvent={onEvent} />` inside their R3F tree; its
 managed Scene Event Shield stops synthetic events behind active Hit Regions.
 
@@ -84,10 +86,11 @@ show/hide transitions. These values are available as
 `forced-open`, `forced-closed`, and `disabled` are also supported; WebXR hidden
 or blurred lifecycle safety always takes precedence.
 
-The core `createWristMenuRuntime` accepts only portable Frame Samples and Target
-Observations. A `FrameSample` contains current-frame viewer and wrist poses plus
-a `lifecycleRevision` that custom integrations increment after session,
-reference-space, recenter, or attachment resets. A controller arms on select
+The core `createWristMenuRuntimeState` creates renderer-neutral instance state.
+Custom Renderer Integrations pass only portable Frame Samples and Target
+Observations to `stepWristMenuRuntime`. A `FrameSample` contains current-frame viewer and wrist
+poses plus a `lifecycleRevision` that custom integrations increment after
+session, reference-space, recenter, or attachment resets. A controller arms on select
 start and commits on release over the same enabled Menu Item. A direct hand
 focuses with the index fingertip and commits when its reported fingertip sphere
 reaches the Hit Region's press plane. Both routes emit the same source-independent

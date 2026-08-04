@@ -47,7 +47,12 @@ import {
   type VisibilityChangeReason,
 } from './reveal-state.js'
 import {
-  createSelectionStateMachine,
+  advanceSelectionState,
+  cancelSelectionForSource,
+  cancelSelectionState,
+  clearSelectionState,
+  createSelectionState,
+  selectionBlocksSceneInput,
   type SelectionCancellation,
   type SelectionCancellationReason,
   type SelectionSourceSample,
@@ -56,9 +61,7 @@ import {
 import {
   advanceScrollState,
   createScrollState,
-  releaseScrollOwnership,
   resetScrollState,
-  setScrollBarrier,
   VISIBLE_SLOTS,
   type ScrollFrameResult,
   type ScrollSourceSample,
@@ -182,20 +185,27 @@ export type PresentationModel = Readonly<{
   scrollBarrierActive: boolean
 }>
 
-export type WristMenuRuntime = Readonly<{
-  sync(nextSnapshot: HostSnapshot): void
-  step(
-    frameSample: FrameSample,
-    targetObservations: readonly TargetObservation[],
-  ): PresentationModel
-  blocksSceneInput(sourceId: string): boolean
-  dispose(): void
-}>
-
 export type CreateWristMenuRuntimeOptions = Readonly<{
   snapshot: HostSnapshot
   onEvent: (event: WristMenuEvent) => void
 }>
+
+export type WristMenuRuntimeState = {
+  onEvent: (event: WristMenuEvent) => void
+  snapshot: HostSnapshot
+  revealConfiguration: ReturnType<typeof resolveRevealConfiguration>
+  pendingSnapshot: HostSnapshot | undefined
+  disposed: boolean
+  revision: number
+  targetableAfterSequence: number | undefined
+  lastTime: number
+  revealState: ReturnType<typeof createRevealState>
+  revealWasInteractive: boolean
+  lastReportedVisible: boolean
+  lastLifecycleRevision: number | undefined
+  selectionState: ReturnType<typeof createSelectionState>
+  scrollState: ScrollState
+}
 
 function countMenuRows(
   menuDefinition: readonly MenuDefinitionEntry[],
@@ -246,229 +256,248 @@ function selectionIntentFor(
   throw new Error(`Selection-owned Menu Item has no intent: ${itemId}`)
 }
 
-/** Create the framework-neutral behavior runtime used by every integration. */
-export function createWristMenuRuntime(
-  options: CreateWristMenuRuntimeOptions,
-): WristMenuRuntime {
-  let snapshot = copyHostSnapshot(options.snapshot)
-  let revealConfiguration = resolveRevealConfiguration(snapshot.comfort)
-  let pendingSnapshot: HostSnapshot | undefined
-  let disposed = false
-  let revision = 1
-  let targetableAfterSequence: number | undefined
-  let lastTime = 0
-  const revealState = createRevealState()
-  let revealWasInteractive = false
-  let lastReportedVisible = false
-  let lastLifecycleRevision: number | undefined
-  const selection = createSelectionStateMachine()
-  const scrollState = createScrollState()
+function emitCancellation(
+  state: WristMenuRuntimeState,
+  cancellation: SelectionCancellation,
+  time: number,
+): void {
+  state.onEvent({
+    type: 'selection-cancellation',
+    itemId: cancellation.itemId,
+    sourceId: cancellation.sourceId,
+    reason: cancellation.reason,
+    time,
+  })
+}
 
-  const assertActive = () => {
-    if (disposed) throw new Error('Wrist Menu Instance is disposed')
+function cancelAllSelection(
+  state: WristMenuRuntimeState,
+  reason: SelectionCancellationReason,
+  time: number,
+): void {
+  for (const cancellation of cancelSelectionState(state.selectionState, reason)) {
+    emitCancellation(state, cancellation, time)
+  }
+}
+
+/** Create the framework-neutral behavior state used by every Renderer Integration. */
+export function createWristMenuRuntimeState(
+  options: CreateWristMenuRuntimeOptions,
+): WristMenuRuntimeState {
+  return {
+    onEvent: options.onEvent,
+    snapshot: copyHostSnapshot(options.snapshot),
+    revealConfiguration: resolveRevealConfiguration(options.snapshot.comfort),
+    pendingSnapshot: undefined,
+    disposed: false,
+    revision: 1,
+    targetableAfterSequence: undefined,
+    lastTime: 0,
+    revealState: createRevealState(),
+    revealWasInteractive: false,
+    lastReportedVisible: false,
+    lastLifecycleRevision: undefined,
+    selectionState: createSelectionState(),
+    scrollState: createScrollState(),
+  }
+}
+
+function assertActive(state: WristMenuRuntimeState): void {
+  if (state.disposed) throw new Error('Wrist Menu Instance is disposed')
+}
+
+export function syncWristMenuRuntime(
+  state: WristMenuRuntimeState,
+  nextSnapshot: HostSnapshot,
+): void {
+  assertActive(state)
+  state.pendingSnapshot = copyHostSnapshot(nextSnapshot)
+}
+
+export function stepWristMenuRuntime(
+  state: WristMenuRuntimeState,
+  frameSample: FrameSample,
+  targetObservations: readonly TargetObservation[],
+): PresentationModel {
+  assertActive(state)
+  if (!Number.isFinite(frameSample.sequence) || !Number.isFinite(frameSample.time)) {
+    throw new TypeError('Frame Sample sequence and time must be finite')
+  }
+  state.lastTime = frameSample.time
+
+  let resetReveal = false
+
+  if (state.pendingSnapshot !== undefined) {
+    const snapshotToApply = state.pendingSnapshot
+    state.pendingSnapshot = undefined
+    const activationModeChanged =
+      state.snapshot.activationMode !== snapshotToApply.activationMode
+    resetReveal =
+      !anchoringSettingsEqual(state.snapshot, snapshotToApply) ||
+      (activationModeChanged && snapshotToApply.activationMode === 'automatic')
+    state.snapshot = snapshotToApply
+    state.revealConfiguration = resolveRevealConfiguration(state.snapshot.comfort)
+    state.revision += 1
+    state.targetableAfterSequence = frameSample.sequence
+    cancelAllSelection(state, 'host-snapshot-changed', frameSample.time)
+    resetScrollState(state.scrollState)
   }
 
-  const emitCancellation = (
-    cancellation: SelectionCancellation,
-    time: number,
-  ) => {
-    options.onEvent({
-      type: 'selection-cancellation',
-      itemId: cancellation.itemId,
-      sourceId: cancellation.sourceId,
-      reason: cancellation.reason,
-      time,
+  if (!Array.isArray(frameSample.wristSources)) {
+    throw new TypeError('Frame Sample wristSources must be an array')
+  }
+
+  const wristSource = selectWristSource(
+    frameSample.wristSources,
+    state.snapshot.wrist,
+  )
+  const anchor =
+    wristSource === undefined
+      ? undefined
+      : resolveWristAnchor(
+          wristSource,
+          frameSample.viewerPosition,
+          state.snapshot.controllerWrist,
+        )
+  const lifecycleReset =
+    state.revealState.initialized &&
+    frameSample.lifecycleRevision !== state.lastLifecycleRevision
+  const reveal = advanceRevealState(state.revealState, {
+    time: frameSample.time,
+    visibility: frameSample.visibility,
+    activationMode: state.snapshot.activationMode,
+    hasContent: state.snapshot.menuDefinition.length > 0,
+    resetReason: lifecycleReset
+      ? 'lifecycle-interrupted'
+      : resetReveal
+        ? 'host-snapshot-changed'
+        : null,
+    sourcePresent: wristSource !== undefined,
+    anchor,
+    configuration: state.revealConfiguration,
+  })
+  state.lastLifecycleRevision = frameSample.lifecycleRevision
+
+  if (reveal.interactive && !state.revealWasInteractive) {
+    state.targetableAfterSequence = frameSample.sequence
+  }
+  state.revealWasInteractive = reveal.interactive
+  const visible = reveal.visible
+  const targetable =
+    reveal.interactive &&
+    state.targetableAfterSequence !== undefined &&
+    frameSample.sequence > state.targetableAfterSequence
+
+  if (!targetable) {
+    cancelAllSelection(state, 'lifecycle-interrupted', frameSample.time)
+  }
+
+  if (visible !== state.lastReportedVisible) {
+    state.lastReportedVisible = visible
+    state.onEvent({
+      type: 'visibility-change',
+      visible,
+      reason: reveal.visibilityReason,
+      time: frameSample.time,
     })
   }
 
-  const cancelSelection = (
-    reason: SelectionCancellationReason,
-    time: number,
-  ) => {
-    for (const cancellation of selection.cancel(reason)) {
-      emitCancellation(cancellation, time)
+  const disabledItemIds = new Set<string>()
+  const validObservations = targetObservations.filter((observation) => {
+    const located = findInteractiveItem(
+      state.snapshot.menuDefinition,
+      observation.itemId,
+    )
+    if (located?.item.disabled === true) {
+      disabledItemIds.add(observation.itemId)
+    }
+    return located !== undefined
+  })
+
+  const totalRows = countMenuRows(state.snapshot.menuDefinition)
+  const scrollSources = frameSample.scrollSources ?? []
+  const scrollResult = advanceScrollState(
+    state.scrollState,
+    frameSample.sequence,
+    totalRows,
+    scrollSources,
+  )
+
+  if (scrollResult.scrollingSourceIds.size > 0) {
+    for (const sourceId of scrollResult.scrollingSourceIds) {
+      for (const cancellation of cancelSelectionForSource(
+        state.selectionState,
+        sourceId,
+        'lifecycle-interrupted',
+      )) {
+        emitCancellation(state, cancellation, frameSample.time)
+      }
+    }
+  }
+
+  const selectionResult = advanceSelectionState(state.selectionState, {
+    targetable,
+    menuWrist: state.snapshot.wrist,
+    sources: frameSample.selectionSources,
+    observations: validObservations,
+    disabledItemIds,
+  })
+  for (const transition of selectionResult.transitions) {
+    if (transition.type === 'cancel') {
+      emitCancellation(state, transition, frameSample.time)
+    } else {
+      state.onEvent({
+        type: 'selection-intent',
+        intent: selectionIntentFor(state.snapshot, transition.itemId),
+        source: {
+          id: transition.source.id,
+          kind: transition.source.kind,
+          handedness: transition.source.handedness,
+        },
+        menuWrist: state.snapshot.wrist,
+        time: frameSample.time,
+      })
     }
   }
 
   return Object.freeze({
-    sync(nextSnapshot) {
-      assertActive()
-      pendingSnapshot = copyHostSnapshot(nextSnapshot)
-    },
-
-    step(frameSample, targetObservations) {
-      assertActive()
-      if (!Number.isFinite(frameSample.sequence) || !Number.isFinite(frameSample.time)) {
-        throw new TypeError('Frame Sample sequence and time must be finite')
-      }
-      lastTime = frameSample.time
-
-      let resetReveal = false
-
-      if (pendingSnapshot !== undefined) {
-        const snapshotToApply = pendingSnapshot
-        pendingSnapshot = undefined
-        const activationModeChanged =
-          snapshot.activationMode !== snapshotToApply.activationMode
-        resetReveal =
-          !anchoringSettingsEqual(snapshot, snapshotToApply) ||
-          (activationModeChanged && snapshotToApply.activationMode === 'automatic')
-        snapshot = snapshotToApply
-        revealConfiguration = resolveRevealConfiguration(snapshot.comfort)
-        revision += 1
-        targetableAfterSequence = frameSample.sequence
-        cancelSelection('host-snapshot-changed', frameSample.time)
-        resetScrollState(scrollState)
-      }
-
-      if (!Array.isArray(frameSample.wristSources)) {
-        throw new TypeError('Frame Sample wristSources must be an array')
-      }
-
-      const wristSource = selectWristSource(
-        frameSample.wristSources,
-        snapshot.wrist,
-      )
-      const anchor =
-        wristSource === undefined
-          ? undefined
-          : resolveWristAnchor(
-              wristSource,
-              frameSample.viewerPosition,
-              snapshot.controllerWrist,
-            )
-      const lifecycleReset =
-        revealState.initialized &&
-        frameSample.lifecycleRevision !== lastLifecycleRevision
-      const reveal = advanceRevealState(revealState, {
-        time: frameSample.time,
-        visibility: frameSample.visibility,
-        activationMode: snapshot.activationMode,
-        hasContent: snapshot.menuDefinition.length > 0,
-        resetReason: lifecycleReset
-          ? 'lifecycle-interrupted'
-          : resetReveal
-            ? 'host-snapshot-changed'
-            : null,
-        sourcePresent: wristSource !== undefined,
-        anchor,
-        configuration: revealConfiguration,
-      })
-      lastLifecycleRevision = frameSample.lifecycleRevision
-
-      if (reveal.interactive && !revealWasInteractive) {
-        targetableAfterSequence = frameSample.sequence
-      }
-      revealWasInteractive = reveal.interactive
-      const visible = reveal.visible
-      const targetable =
-        reveal.interactive &&
-        targetableAfterSequence !== undefined &&
-        frameSample.sequence > targetableAfterSequence
-
-      if (!targetable) {
-        cancelSelection('lifecycle-interrupted', frameSample.time)
-      }
-
-      if (visible !== lastReportedVisible) {
-        lastReportedVisible = visible
-        options.onEvent({
-          type: 'visibility-change',
-          visible,
-          reason: reveal.visibilityReason,
-          time: frameSample.time,
-        })
-      }
-
-      const disabledItemIds = new Set<string>()
-      const validObservations = targetObservations.filter((observation) => {
-        const located = findInteractiveItem(
-          snapshot.menuDefinition,
-          observation.itemId,
-        )
-        if (located?.item.disabled === true) {
-          disabledItemIds.add(observation.itemId)
-        }
-        return located !== undefined
-      })
-
-      const totalRows = countMenuRows(snapshot.menuDefinition)
-      const scrollSources = frameSample.scrollSources ?? []
-      const scrollResult = advanceScrollState(
-        scrollState,
-        frameSample.sequence,
-        totalRows,
-        scrollSources,
-      )
-
-      if (scrollResult.scrollingSourceIds.size > 0) {
-        for (const sourceId of scrollResult.scrollingSourceIds) {
-          for (const cancellation of selection.cancelForSource(sourceId, 'lifecycle-interrupted')) {
-            emitCancellation(cancellation, frameSample.time)
-          }
-        }
-      }
-
-      const selectionResult = selection.step({
-        targetable,
-        menuWrist: snapshot.wrist,
-        sources: frameSample.selectionSources,
-        observations: validObservations,
-        disabledItemIds,
-      })
-      for (const transition of selectionResult.transitions) {
-        if (transition.type === 'cancel') {
-          emitCancellation(transition, frameSample.time)
-        } else {
-          options.onEvent({
-            type: 'selection-intent',
-            intent: selectionIntentFor(snapshot, transition.itemId),
-            source: {
-              id: transition.source.id,
-              kind: transition.source.kind,
-              handedness: transition.source.handedness,
-            },
-            menuWrist: snapshot.wrist,
-            time: frameSample.time,
-          })
-        }
-      }
-
-      return Object.freeze({
-        visible,
-        targetable,
-        opacity: reveal.opacity,
-        revealPhase: reveal.phase,
-        anchorPose: reveal.anchorPose,
-        revision,
-        items: createPresentationItems(snapshot.menuDefinition, (itemId) =>
-          selectionResult.armedItemId === itemId
-            ? 'armed'
-            : selectionResult.hoveredItemIds.has(itemId)
-              ? 'hovered'
-              : 'idle',
-        ),
-        scrollOffset: scrollResult.offset,
-        totalRows: scrollResult.totalRows,
-        visibleSlots: scrollResult.visibleSlots,
-        scrollBarrierActive: scrollResult.barrierActive,
-      })
-    },
-
-    blocksSceneInput(sourceId) {
-      assertActive()
-      return selection.blocksSceneInput(sourceId)
-    },
-
-    dispose() {
-      if (disposed) return
-      disposed = true
-      try {
-        cancelSelection('disposed', lastTime)
-      } finally {
-        selection.clear()
-        resetScrollState(scrollState)
-      }
-    },
+    visible,
+    targetable,
+    opacity: reveal.opacity,
+    revealPhase: reveal.phase,
+    anchorPose: reveal.anchorPose,
+    revision: state.revision,
+    items: createPresentationItems(state.snapshot.menuDefinition, (itemId) =>
+      selectionResult.armedItemId === itemId
+        ? 'armed'
+        : selectionResult.hoveredItemIds.has(itemId)
+          ? 'hovered'
+          : 'idle',
+    ),
+    scrollOffset: scrollResult.offset,
+    totalRows: scrollResult.totalRows,
+    visibleSlots: scrollResult.visibleSlots,
+    scrollBarrierActive: scrollResult.barrierActive,
   })
+}
+
+export function wristMenuRuntimeBlocksSceneInput(
+  state: WristMenuRuntimeState,
+  sourceId: string,
+): boolean {
+  assertActive(state)
+  return selectionBlocksSceneInput(state.selectionState, sourceId)
+}
+
+export function disposeWristMenuRuntime(
+  state: WristMenuRuntimeState,
+): void {
+  if (state.disposed) return
+  state.disposed = true
+  try {
+    cancelAllSelection(state, 'disposed', state.lastTime)
+  } finally {
+    clearSelectionState(state.selectionState)
+    resetScrollState(state.scrollState)
+  }
 }

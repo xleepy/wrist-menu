@@ -8,7 +8,10 @@ import {
 } from 'react'
 
 import {
-  createThreeWristMenu,
+  createThreeWristMenuState,
+  disposeThreeWristMenu,
+  syncThreeWristMenu,
+  updateThreeWristMenu,
   type HostSnapshot,
   type WristMenuEvent,
 } from '../three/index.js'
@@ -39,8 +42,8 @@ function MountedWristMenu({
   onEventRef.current = onEvent
   const initialSnapshotRef = useRef(snapshot)
   const lastSnapshotRef = useRef(snapshot)
-  const [instance] = useState(() =>
-    createThreeWristMenu({
+  const [menuState] = useState(() =>
+    createThreeWristMenuState({
       renderer,
       snapshot: initialSnapshotRef.current,
       onEvent: (event) => onEventRef.current(event),
@@ -50,22 +53,22 @@ function MountedWristMenu({
   useEffect(() => {
     if (lastSnapshotRef.current !== snapshot) {
       lastSnapshotRef.current = snapshot
-      instance.sync(snapshot)
+      syncThreeWristMenu(menuState, snapshot)
     }
-  }, [instance, snapshot])
+  }, [menuState, snapshot])
 
-  useEffect(() => () => instance.dispose(), [instance])
+  useEffect(() => () => disposeThreeWristMenu(menuState), [menuState])
 
-  fiber.useFrame((state, _delta, frame) => {
-    instance.update({
-      time: state.clock.elapsedTime * 1000,
+  fiber.useFrame((fiberState, _delta, frame) => {
+    updateThreeWristMenu(menuState, {
+      time: fiberState.clock.elapsedTime * 1000,
       frame: frame ?? null,
     })
   }, -1000)
 
   const stopSceneEvent = (event: SceneShieldEvent) => event.stopPropagation()
   const shieldProps: ThreeElements['primitive'] = {
-    object: instance.group,
+    object: menuState.presentation.group,
     onPointerOver: stopSceneEvent,
     onPointerMove: stopSceneEvent,
     onPointerDown: stopSceneEvent,
@@ -81,7 +84,8 @@ function MountedWristMenu({
 
 /**
  * React Three Fiber lifecycle and Scene Event Shield for the shared Three.js
- * integration. Rendering outside an R3F root is intentionally inert for SSR.
+ * Renderer Integration. Rendering outside an R3F root is intentionally inert
+ * for SSR.
  */
 export function WristMenu(props: WristMenuProps): ReactElement | null {
   const [fiber, setFiber] = useState<FiberModule>()
