@@ -68,6 +68,7 @@ function createXrFixture() {
   return {
     frame,
     inputSource,
+    referenceSpace,
     renderer,
     session,
     setTargetingMenu(targeting) {
@@ -115,10 +116,13 @@ test('vanilla integration enforces the geometry barrier and claims one controlle
   assert.equal(sceneActions, 0)
   assert.equal(menu.blocksSceneInput(inputSource), false)
   assert.equal(events.filter(({ type }) => type === 'selection-intent').length, 1)
-  assert.equal(events[0]?.intent.itemId, 'spawn-cube')
+  assert.equal(
+    events.find(({ type }) => type === 'selection-intent')?.intent.itemId,
+    'spawn-cube',
+  )
 
   menu.update({ time: 80, frame })
-  assert.equal(events.length, 1)
+  assert.equal(events.filter(({ type }) => type === 'selection-intent').length, 1)
 
   menu.dispose()
   menu.dispose()
@@ -142,8 +146,10 @@ test('vanilla integration cancels selectend without a successful select', () => 
   session.dispatch('selectend', inputSource)
   menu.update({ time: 64, frame })
 
-  assert.equal(events[0]?.type, 'selection-cancellation')
-  assert.equal(events[0]?.reason, 'action-cancelled')
+  assert.equal(
+    events.find(({ type }) => type === 'selection-cancellation')?.reason,
+    'action-cancelled',
+  )
   menu.dispose()
 })
 
@@ -176,6 +182,79 @@ test('vanilla integration does not claim a press that began away from the menu',
   session.dispatch('selectend', inputSource)
   menu.update({ time: 80, frame })
 
-  assert.equal(events.length, 0)
+  assert.equal(
+    events.filter(
+      ({ type }) =>
+        type === 'selection-intent' || type === 'selection-cancellation',
+    ).length,
+    0,
+  )
+  menu.dispose()
+})
+
+test('session end immediately clears claims and hides the attachment', () => {
+  const events = []
+  const { frame, inputSource, renderer, session } = createXrFixture()
+  const menu = createThreeWristMenu({
+    renderer,
+    snapshot: controllerActionSnapshot,
+    onEvent: (event) => events.push(event),
+  })
+
+  menu.update({ time: 16, frame })
+  menu.update({ time: 32, frame })
+  session.dispatch('selectstart', inputSource)
+  menu.update({ time: 48, frame })
+  assert.equal(menu.blocksSceneInput(inputSource), true)
+
+  session.dispatch('end')
+
+  assert.equal(menu.blocksSceneInput(inputSource), false)
+  assert.equal(menu.group.visible, false)
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'selection-cancellation' &&
+        event.reason === 'lifecycle-interrupted',
+    ),
+    true,
+  )
+  menu.dispose()
+})
+
+test('visibility blur and reference reset cancel claims without waiting for a frame', () => {
+  const events = []
+  const { frame, inputSource, referenceSpace, renderer, session } = createXrFixture()
+  const menu = createThreeWristMenu({
+    renderer,
+    snapshot: controllerActionSnapshot,
+    onEvent: (event) => events.push(event),
+  })
+
+  menu.update({ time: 16, frame })
+  menu.update({ time: 32, frame })
+  session.dispatch('selectstart', inputSource)
+  menu.update({ time: 48, frame })
+  assert.equal(menu.blocksSceneInput(inputSource), true)
+
+  session.visibilityState = 'visible-blurred'
+  session.dispatch('visibilitychange')
+  assert.equal(menu.blocksSceneInput(inputSource), false)
+
+  session.visibilityState = 'visible'
+  session.dispatch('visibilitychange')
+  menu.update({ time: 64, frame })
+  session.dispatch('selectend', inputSource)
+  menu.update({ time: 80, frame })
+  session.dispatch('selectstart', inputSource)
+  menu.update({ time: 96, frame })
+  assert.equal(menu.blocksSceneInput(inputSource), true)
+
+  referenceSpace.dispatchReset()
+  assert.equal(menu.blocksSceneInput(inputSource), false)
+  assert.equal(menu.group.visible, false)
+  assert.ok(
+    events.filter(({ type }) => type === 'selection-cancellation').length >= 2,
+  )
   menu.dispose()
 })

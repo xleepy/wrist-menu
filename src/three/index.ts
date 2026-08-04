@@ -52,6 +52,7 @@ export {
   type WristMenuRuntime,
   type WristMenuEvent,
   type WristMenuSessionFeatures,
+  type VisibilityChangeReason,
 } from '../core/index.js'
 
 export type ThreeWristMenuRenderer = Pick<WebGLRenderer, 'xr'>
@@ -78,7 +79,7 @@ export type ThreeWristMenu = Readonly<{
 const decorativeRaycast: Mesh['raycast'] = () => undefined
 const interactiveRaycast = Mesh.prototype.raycast
 
-class ControllerTracerPresentation {
+class WristMenuPresentation {
   readonly group = new Group()
   readonly hitRegions: Mesh[] = []
   private readonly resources: Array<{ dispose(): void }> = []
@@ -199,7 +200,7 @@ export function createThreeWristMenu(
     snapshot: options.snapshot,
     onEvent: options.onEvent,
   })
-  const presentation = new ControllerTracerPresentation(options.snapshot)
+  const presentation = new WristMenuPresentation(options.snapshot)
   const raycaster = new Raycaster()
   const rayMatrix = new Matrix4()
   const rayOrigin = new Vector3()
@@ -214,7 +215,7 @@ export function createThreeWristMenu(
   let sourceCompleted = new WeakSet<XRInputSource>()
   let lastTargetBySource = new WeakMap<XRInputSource, string>()
   let provisionalClaims = new WeakSet<XRInputSource>()
-  let sourceSequence = 0
+  let inputSourceSequence = 0
   let frameSequence = 0
   let geometryBarrierThrough = 1
   let presentationRevision = 1
@@ -224,6 +225,7 @@ export function createThreeWristMenu(
   let observedSession = false
   let observedParent = false
   let lastParent: Object3D<Object3DEventMap> | null = null
+  let lastUpdateTime = 0
   let disposed = false
 
   const clearTransientInput = () => {
@@ -241,8 +243,8 @@ export function createThreeWristMenu(
   const sourceId = (inputSource: XRInputSource) => {
     const existing = sourceIds.get(inputSource)
     if (existing !== undefined) return existing
-    sourceSequence += 1
-    const created = `controller-${sourceSequence}`
+    inputSourceSequence += 1
+    const created = `input-source-${inputSourceSequence}`
     sourceIds.set(inputSource, created)
     return created
   }
@@ -259,8 +261,46 @@ export function createThreeWristMenu(
   const onSelect = (event: SelectEvent) => {
     sourceCompleted.add(event.inputSource)
   }
-  const onSessionEnd = () => attachSession(null)
-  const onReferenceSpaceReset = () => interruptLifecycle()
+  const applyLifecycleSample = (
+    visibility: 'visible-blurred' | 'hidden',
+  ) => {
+    presentation.setTargetable(false)
+    if (visibility === 'hidden') presentation.group.visible = false
+    frameSequence += 1
+    const model = runtime.step(
+      {
+        sequence: frameSequence,
+        time: lastUpdateTime,
+        visibility,
+        viewerPosition: null,
+        wristSources: [],
+        lifecycleRevision,
+        selectionSources: [],
+      },
+      [],
+    )
+    presentation.setModel(model, false)
+  }
+  const onSessionEnd = () => {
+    attachSession(null)
+    applyLifecycleSample('hidden')
+  }
+  const onSessionVisibilityChange = () => {
+    interruptLifecycle()
+    if (session?.visibilityState === 'visible-blurred') {
+      applyLifecycleSample('visible-blurred')
+    } else if (session?.visibilityState === 'hidden') {
+      applyLifecycleSample('hidden')
+    }
+  }
+  const onInputSourcesChange = () => {
+    interruptLifecycle()
+    applyLifecycleSample('hidden')
+  }
+  const onReferenceSpaceReset = () => {
+    interruptLifecycle()
+    applyLifecycleSample('hidden')
+  }
 
   const attachSession = (nextSession: XRSession | null) => {
     if (session === nextSession) return
@@ -268,6 +308,8 @@ export function createThreeWristMenu(
       session.removeEventListener('selectstart', onSelectStart)
       session.removeEventListener('select', onSelect)
       session.removeEventListener('selectend', onSelectEnd)
+      session.removeEventListener('inputsourceschange', onInputSourcesChange)
+      session.removeEventListener('visibilitychange', onSessionVisibilityChange)
       session.removeEventListener('end', onSessionEnd)
     }
     if (observedSession) interruptLifecycle()
@@ -277,6 +319,8 @@ export function createThreeWristMenu(
       session.addEventListener('selectstart', onSelectStart)
       session.addEventListener('select', onSelect)
       session.addEventListener('selectend', onSelectEnd)
+      session.addEventListener('inputsourceschange', onInputSourcesChange)
+      session.addEventListener('visibilitychange', onSessionVisibilityChange)
       session.addEventListener('end', onSessionEnd)
     }
   }
@@ -337,6 +381,7 @@ export function createThreeWristMenu(
 
     update({ time, frame }) {
       assertActive()
+      lastUpdateTime = time
       frameSequence += 1
       const nextSession = options.renderer.xr.getSession()
       attachSession(nextSession)
@@ -384,7 +429,6 @@ export function createThreeWristMenu(
               id,
               kind: 'hand',
               handedness: inputSource.handedness,
-              profiles: [...inputSource.profiles],
               pose: wristPose === null ? null : poseSample(wristPose),
             })
             continue
@@ -398,7 +442,6 @@ export function createThreeWristMenu(
             id,
             kind: 'controller',
             handedness: inputSource.handedness,
-            profiles: [...inputSource.profiles],
             pose: gripPose == null ? null : poseSample(gripPose),
           })
           selectionSources.push({

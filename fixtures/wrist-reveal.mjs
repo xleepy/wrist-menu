@@ -38,11 +38,9 @@ export function wristFrame({
               id: sourceId,
               kind,
               handedness: wrist,
-              profiles: kind === 'hand' ? ['generic-hand-select'] : ['unknown'],
               pose,
             },
           ],
     selectionSources,
   }
 }
-

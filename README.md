@@ -53,5 +53,9 @@ Frame Sample. Tracking loss, source replacement, visibility interruption,
 reparenting, session end, and disposal cancel interaction and require fresh
 acquisition.
 
+The event sink also receives source-independent `visibility-change` events with
+the authoritative automatic, Host Application, tracking, source-replacement,
+or XR lifecycle reason.
+
 Only the package root, `/core`, `/three`, and `/react` are public. Deep imports
 are unsupported.

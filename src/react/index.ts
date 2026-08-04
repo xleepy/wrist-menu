@@ -37,6 +37,7 @@ export {
   type SelectionIntent,
   type TargetObservation,
   type Vector3Tuple,
+  type VisibilityChangeReason,
   type WristAnchorPose,
   type WristSourceSample,
   type WristMenuEvent,

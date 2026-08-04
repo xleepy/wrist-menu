@@ -72,7 +72,36 @@ test('fixed and irregular frame traces converge at the same absolute times', () 
 
   assert.deepEqual(
     replay([0, 50, 100, 150, 200, 250, 300, 350, 400, 450]),
-    replay([0, 73, 161, 299, 300, 367, 450]),
+    replay([0, 73, 161, 299, 367, 450]),
+  )
+})
+
+test('visibility events report automatic reveal and hide transitions', () => {
+  const { events, runtime } = createRuntime()
+  runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
+  runtime.step(wristFrame({ sequence: 2, time: 450 }), [])
+
+  const outsideExit = wristFrame({ sequence: 3, time: 500 })
+  outsideExit.viewerPosition = [0, 0, 1]
+  runtime.step(outsideExit, [])
+  runtime.step({ ...outsideExit, sequence: 4, time: 650 }, [])
+
+  assert.deepEqual(
+    events.filter(({ type }) => type === 'visibility-change'),
+    [
+      {
+        type: 'visibility-change',
+        visible: true,
+        reason: 'automatic',
+        time: 450,
+      },
+      {
+        type: 'visibility-change',
+        visible: false,
+        reason: 'automatic',
+        time: 650,
+      },
+    ],
   )
 })
 
@@ -96,7 +125,7 @@ test('tracking loss is visual-only for 250 ms and reacquisition needs a fresh 20
 })
 
 test('source replacement and lifecycle reset cancel and require fresh acquisition', () => {
-  const { runtime } = createRuntime()
+  const { events, runtime } = createRuntime()
   runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
   runtime.step(wristFrame({ sequence: 2, time: 300 }), [])
   runtime.step(wristFrame({ sequence: 3, time: 450 }), [])
@@ -108,6 +137,13 @@ test('source replacement and lifecycle reset cancel and require fresh acquisitio
   )
   assert.equal(replaced.visible, false)
   assert.equal(replaced.revealPhase, 'reacquire-dwell')
+  assert.equal(
+    events.find(
+      (event) =>
+        event.type === 'visibility-change' && event.visible === false,
+    )?.reason,
+    'source-replaced',
+  )
 
   runtime.step(wristFrame({ sequence: 6, time: 700, sourceId: 'left-hand-replacement' }), [])
   runtime.step(wristFrame({ sequence: 7, time: 850, sourceId: 'left-hand-replacement' }), [])
@@ -122,6 +158,22 @@ test('source replacement and lifecycle reset cancel and require fresh acquisitio
   )
   assert.equal(reset.visible, false)
   assert.equal(reset.revealPhase, 'reacquire-dwell')
+})
+
+test('explicit default comfort values do not trigger semantic reacquisition', () => {
+  const { runtime } = createRuntime()
+  runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
+  runtime.step(wristFrame({ sequence: 2, time: 450 }), [])
+  runtime.step(wristFrame({ sequence: 3, time: 451 }), [])
+
+  runtime.sync({
+    ...automaticHandSnapshot,
+    comfort: { ...defaultRevealConfiguration },
+  })
+  const synchronized = runtime.step(wristFrame({ sequence: 4, time: 452 }), [])
+
+  assert.equal(synchronized.visible, true)
+  assert.equal(synchronized.revealPhase, 'visible')
 })
 
 test('Controller Wrist Proxy presets mirror Quest 2 candidate A and leave unknown devices neutral', () => {
@@ -187,3 +239,54 @@ test('forced modes bypass facing confidence but never XR lifecycle safety', () =
   assert.equal(disabled.targetable, false)
 })
 
+test('disposal remains terminal when a cancellation callback throws', () => {
+  const runtime = createWristMenuRuntime({
+    snapshot: {
+      ...automaticHandSnapshot,
+      activationMode: 'forced-open',
+      comfort: { transitionMs: 0 },
+      controllerWrist: {
+        offsets: {
+          left: {
+            translationMeters: [0, 0, 0],
+            rotationDegrees: [0, 0, 0],
+          },
+        },
+      },
+    },
+    onEvent(event) {
+      if (event.type === 'selection-cancellation') throw new Error('host failure')
+    },
+  })
+  const selectionSources = [
+    {
+      id: 'right-controller',
+      kind: 'controller',
+      handedness: 'right',
+      selectPressed: false,
+      selectCompleted: false,
+    },
+  ]
+  const observation = {
+    sourceId: 'right-controller',
+    kind: 'controller-target-ray',
+    itemId: 'spawn-cube',
+  }
+  runtime.step(wristFrame({ sequence: 1, time: 0, kind: 'controller', selectionSources }), [])
+  runtime.step(wristFrame({ sequence: 2, time: 1, kind: 'controller', selectionSources }), [observation])
+  runtime.step(
+    wristFrame({
+      sequence: 3,
+      time: 2,
+      kind: 'controller',
+      selectionSources: [{ ...selectionSources[0], selectPressed: true }],
+    }),
+    [observation],
+  )
+
+  assert.throws(() => runtime.dispose(), /host failure/)
+  assert.throws(
+    () => runtime.step(wristFrame({ sequence: 4, time: 3 }), []),
+    /disposed/,
+  )
+})

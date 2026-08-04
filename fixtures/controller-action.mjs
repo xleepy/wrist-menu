@@ -43,7 +43,6 @@ export function frameSample(sequence, selectPressed, selectCompleted = false) {
         id: 'left-controller',
         kind: 'controller',
         handedness: 'left',
-        profiles: ['unknown'],
         pose: {
           position: [0, 0, 0],
           orientation: [0, -Math.SQRT1_2, 0, Math.SQRT1_2],

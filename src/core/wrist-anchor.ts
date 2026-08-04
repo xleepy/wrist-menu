@@ -17,7 +17,6 @@ export type WristSourceSample = Readonly<{
   id: string
   kind: 'hand' | 'controller'
   handedness: Handedness
-  profiles: readonly string[]
   pose: PoseSample | null
 }>
 
@@ -170,4 +169,3 @@ function dot(left: Vector3Tuple, right: Vector3Tuple): number {
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
 }
-

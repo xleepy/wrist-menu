@@ -14,6 +14,17 @@ export type RevealPhase =
   | 'tracking-grace'
   | 'suspended'
 
+export type VisibilityChangeReason =
+  | 'automatic'
+  | 'forced-open'
+  | 'forced-closed'
+  | 'disabled'
+  | 'empty-definition'
+  | 'tracking-lost'
+  | 'source-replaced'
+  | 'host-snapshot-changed'
+  | 'lifecycle-interrupted'
+
 export type RevealState = {
   initialized: boolean
   phase: RevealPhase
@@ -28,6 +39,7 @@ export type RevealState = {
   lossStartedAt: number | null
   transitionStartedAt: number | null
   transitionFromOpacity: number
+  visibilityReason: VisibilityChangeReason
 }
 
 export type RevealInput = Readonly<{
@@ -35,7 +47,7 @@ export type RevealInput = Readonly<{
   visibility: 'visible' | 'visible-blurred' | 'hidden'
   activationMode: ActivationMode
   hasContent: boolean
-  reset: boolean
+  resetReason: 'host-snapshot-changed' | 'lifecycle-interrupted' | null
   sourcePresent: boolean
   anchor: ResolvedWristAnchor | undefined
   configuration: RevealConfiguration
@@ -47,6 +59,7 @@ export type RevealOutput = Readonly<{
   visible: boolean
   interactive: boolean
   anchorPose: WristAnchorPose | null
+  visibilityReason: VisibilityChangeReason
 }>
 
 export function createRevealState(): RevealState {
@@ -64,6 +77,7 @@ export function createRevealState(): RevealState {
     lossStartedAt: null,
     transitionStartedAt: null,
     transitionFromOpacity: 0,
+    visibilityReason: 'automatic',
   }
 }
 
@@ -73,23 +87,29 @@ export function advanceRevealState(
 ): RevealOutput {
   advanceTransition(state, input.time, input.configuration.transitionMs)
 
-  if (input.reset) {
+  const resetHidVisiblePresentation =
+    input.resetReason !== null && state.opacity > 0
+  if (input.resetReason !== null) {
     resetForFreshAcquisition(state)
     hideImmediately(state)
+    state.visibilityReason = input.resetReason
   }
   state.initialized = true
 
   if (!input.hasContent || input.activationMode === 'disabled') {
+    state.visibilityReason = input.hasContent ? 'disabled' : 'empty-definition'
     hideImmediately(state)
     return output(state, false)
   }
   if (input.visibility === 'hidden') {
+    state.visibilityReason = 'lifecycle-interrupted'
     resetForFreshAcquisition(state)
     hideImmediately(state)
     state.phase = 'suspended'
     return output(state, false)
   }
   if (input.visibility === 'visible-blurred') {
+    state.visibilityReason = 'lifecycle-interrupted'
     state.revealLatched = false
     state.freshDwellRequired = true
     state.dwellStartedAt = null
@@ -101,13 +121,18 @@ export function advanceRevealState(
     input.anchor !== undefined &&
     state.boundSourceId !== null &&
     state.boundSourceId !== input.anchor.sourceId
+  const replacementHidVisiblePresentation = sourceReplaced && state.opacity > 0
+  const preserveInterruptionReason =
+    resetHidVisiblePresentation || replacementHidVisiblePresentation
   if (sourceReplaced) {
     resetForFreshAcquisition(state)
     hideImmediately(state)
+    state.visibilityReason = 'source-replaced'
   }
 
   if (input.anchor === undefined) {
     if (input.sourcePresent || state.boundSourceId !== null) {
+      state.visibilityReason = 'tracking-lost'
       applyTrackingLoss(state, input.time, input.configuration.visualGraceMs)
     } else {
       hideImmediately(state)
@@ -128,6 +153,9 @@ export function advanceRevealState(
   }
 
   if (input.activationMode === 'forced-closed') {
+    if (!preserveInterruptionReason) {
+      state.visibilityReason = 'forced-closed'
+    }
     state.revealLatched = false
     state.dwellStartedAt = null
     startHiding(state, input.time, input.configuration.transitionMs)
@@ -135,6 +163,9 @@ export function advanceRevealState(
   }
 
   if (input.activationMode === 'forced-open') {
+    if (!preserveInterruptionReason) {
+      state.visibilityReason = 'forced-open'
+    }
     state.revealLatched = true
     state.dwellStartedAt = null
     startShowing(state, input.time, input.configuration.transitionMs)
@@ -145,6 +176,9 @@ export function advanceRevealState(
     !input.anchor.automaticEligible ||
     input.anchor.facingAngleDegrees === null
   ) {
+    if (!preserveInterruptionReason) {
+      state.visibilityReason = 'tracking-lost'
+    }
     state.revealLatched = false
     state.dwellStartedAt = null
     hideImmediately(state)
@@ -153,10 +187,16 @@ export function advanceRevealState(
 
   const angle = input.anchor.facingAngleDegrees
   if (state.revealLatched && angle <= input.configuration.exitAngleDegrees) {
+    if (!preserveInterruptionReason) {
+      state.visibilityReason = 'automatic'
+    }
     startShowing(state, input.time, input.configuration.transitionMs)
     return output(state, state.phase === 'visible')
   }
   if (state.revealLatched) {
+    if (!preserveInterruptionReason) {
+      state.visibilityReason = 'automatic'
+    }
     state.revealLatched = false
     state.dwellStartedAt = null
     startHiding(state, input.time, input.configuration.transitionMs)
@@ -164,6 +204,9 @@ export function advanceRevealState(
   }
 
   if (angle > input.configuration.enterAngleDegrees) {
+    if (!preserveInterruptionReason) {
+      state.visibilityReason = 'automatic'
+    }
     state.dwellStartedAt = null
     if (state.opacity > 0) startHiding(state, input.time, input.configuration.transitionMs)
     else state.phase = 'hidden'
@@ -176,14 +219,22 @@ export function advanceRevealState(
   if (state.dwellStartedAt === null) state.dwellStartedAt = input.time
   const elapsed = input.time - state.dwellStartedAt
   if (elapsed < requiredDwell) {
+    if (!preserveInterruptionReason) {
+      state.visibilityReason = 'automatic'
+    }
     state.phase = state.freshDwellRequired ? 'reacquire-dwell' : 'dwelling'
     return output(state, false)
   }
 
   state.revealLatched = true
+  if (!preserveInterruptionReason) {
+    state.visibilityReason = 'automatic'
+  }
   state.freshDwellRequired = false
+  const revealStartedAt = state.dwellStartedAt + requiredDwell
   state.dwellStartedAt = null
-  startShowing(state, input.time, input.configuration.transitionMs)
+  startShowing(state, revealStartedAt, input.configuration.transitionMs)
+  advanceTransition(state, input.time, input.configuration.transitionMs)
   return output(state, state.phase === 'visible')
 }
 
@@ -296,6 +347,7 @@ function output(state: RevealState, interactive: boolean): RevealOutput {
     visible: state.opacity > 0,
     interactive,
     anchorPose: state.anchorPose,
+    visibilityReason: state.visibilityReason,
   })
 }
 

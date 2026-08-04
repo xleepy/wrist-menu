@@ -31,7 +31,7 @@ test('controller commits one Action Item only after release over the owned targe
   const committed = runtime.step(frameSample(4, false, true), [targetObservation])
   assert.equal(committed.items[0]?.interaction, 'hovered')
   assert.equal(runtime.blocksSceneInput('right-controller'), false)
-  assert.deepEqual(events, [
+  assert.deepEqual(events.filter(({ type }) => type === 'selection-intent'), [
     {
       type: 'selection-intent',
       intent: {
@@ -48,7 +48,7 @@ test('controller commits one Action Item only after release over the owned targe
   ])
 
   runtime.step(frameSample(5, false), [targetObservation])
-  assert.equal(events.length, 1)
+  assert.equal(events.filter(({ type }) => type === 'selection-intent').length, 1)
 })
 
 test('controller release away from the owned Action Item cancels without an intent', () => {
@@ -63,7 +63,7 @@ test('controller release away from the owned Action Item cancels without an inte
   runtime.step(frameSample(3, true), [targetObservation])
   runtime.step(frameSample(4, false, true), [])
 
-  assert.deepEqual(events, [
+  assert.deepEqual(events.filter(({ type }) => type === 'selection-cancellation'), [
     {
       type: 'selection-cancellation',
       itemId: 'spawn-cube',
@@ -91,8 +91,8 @@ test('controller loss cancels ownership and a held replacement cannot rearm', ()
     [],
   )
   assert.equal(runtime.blocksSceneInput('right-controller'), false)
-  assert.equal(events[0]?.type, 'selection-cancellation')
-  assert.equal(events[0]?.reason, 'lifecycle-interrupted')
+  const cancellation = events.find(({ type }) => type === 'selection-cancellation')
+  assert.equal(cancellation?.reason, 'lifecycle-interrupted')
 
   const replacement = {
     ...frameSample(5, true),
@@ -110,7 +110,10 @@ test('controller loss cancels ownership and a held replacement cannot rearm', ()
     { ...targetObservation, sourceId: 'replacement-controller' },
   ])
   assert.equal(runtime.blocksSceneInput('replacement-controller'), false)
-  assert.equal(events.length, 1)
+  assert.equal(
+    events.filter(({ type }) => type === 'selection-cancellation').length,
+    1,
+  )
 })
 
 test('selectend without a successful select cancels instead of committing', () => {
@@ -125,7 +128,7 @@ test('selectend without a successful select cancels instead of committing', () =
   runtime.step(frameSample(3, true), [targetObservation])
   runtime.step(frameSample(4, false, false), [targetObservation])
 
-  assert.deepEqual(events, [
+  assert.deepEqual(events.filter(({ type }) => type === 'selection-cancellation'), [
     {
       type: 'selection-cancellation',
       itemId: 'spawn-cube',

@@ -9,6 +9,7 @@ export type Handedness = 'left' | 'right'
 
 import {
   copyControllerWristConfiguration,
+  resolveControllerWristOffset,
   resolveRevealConfiguration,
   type ActivationMode,
   type ControllerDeviceTarget,
@@ -23,6 +24,7 @@ import {
   advanceRevealState,
   createRevealState,
   type RevealPhase,
+  type VisibilityChangeReason,
 } from './reveal-state.js'
 import {
   resolveWristAnchor,
@@ -52,7 +54,7 @@ export {
   type WristAnchorPose,
   type WristSourceSample,
 } from './wrist-anchor.js'
-export type { RevealPhase } from './reveal-state.js'
+export type { RevealPhase, VisibilityChangeReason } from './reveal-state.js'
 
 export type ActionItem = Readonly<{
   type: 'action'
@@ -115,6 +117,12 @@ export type WristMenuEvent =
         handedness: Handedness
       }>
       menuWrist: Handedness
+      time: number
+    }>
+  | Readonly<{
+      type: 'visibility-change'
+      visible: boolean
+      reason: VisibilityChangeReason
       time: number
     }>
   | Readonly<{
@@ -188,7 +196,7 @@ function copySnapshot(snapshot: HostSnapshot): HostSnapshot {
   const ids = new Set<string>()
   const menuDefinition = snapshot.menuDefinition.map((item) => {
     if (item.type !== 'action') {
-      throw new TypeError('The controller tracer supports only Action Items')
+      throw new TypeError('This Wrist Menu Package version supports only Action Items')
     }
     if (item.id.trim() === '' || item.label.trim() === '') {
       throw new TypeError('Action Items require non-empty ids and labels')
@@ -214,12 +222,41 @@ function copySnapshot(snapshot: HostSnapshot): HostSnapshot {
   })
 }
 
-function activationSettingsKey(snapshot: HostSnapshot): string {
-  return JSON.stringify({
-    activationMode: snapshot.activationMode,
-    wrist: snapshot.wrist,
-    comfort: snapshot.comfort ?? null,
-    controllerWrist: snapshot.controllerWrist ?? null,
+function activationSettingsEqual(
+  left: HostSnapshot,
+  right: HostSnapshot,
+): boolean {
+  if (left.activationMode !== right.activationMode || left.wrist !== right.wrist) {
+    return false
+  }
+  const leftComfort = resolveRevealConfiguration(left.comfort)
+  const rightComfort = resolveRevealConfiguration(right.comfort)
+  if (
+    Object.keys(leftComfort).some(
+      (key) =>
+        leftComfort[key as keyof RevealConfiguration] !==
+        rightComfort[key as keyof RevealConfiguration],
+    )
+  ) {
+    return false
+  }
+  return (['left', 'right'] as const).every((handedness) => {
+    const leftOffset = resolveControllerWristOffset(
+      left.controllerWrist,
+      handedness,
+    )
+    const rightOffset = resolveControllerWristOffset(
+      right.controllerWrist,
+      handedness,
+    )
+    return (
+      leftOffset.translationMeters.every(
+        (value, index) => value === rightOffset.translationMeters[index],
+      ) &&
+      leftOffset.rotationDegrees.every(
+        (value, index) => value === rightOffset.rotationDegrees[index],
+      )
+    )
   })
 }
 
@@ -228,6 +265,7 @@ export function createWristMenuRuntime(
   options: CreateWristMenuRuntimeOptions,
 ): WristMenuRuntime {
   let snapshot = copySnapshot(options.snapshot)
+  let revealConfiguration = resolveRevealConfiguration(snapshot.comfort)
   let pendingSnapshot: HostSnapshot | undefined
   let disposed = false
   let revision = 1
@@ -236,6 +274,7 @@ export function createWristMenuRuntime(
   let lastTime = 0
   const revealState = createRevealState()
   let revealWasInteractive = false
+  let lastReportedVisible = false
   let lastLifecycleRevision: number | undefined
   const previousPressed = new Map<string, boolean>()
   const claims = new Set<string>()
@@ -279,8 +318,9 @@ export function createWristMenuRuntime(
       if (pendingSnapshot !== undefined) {
         cancelOwnership('host-snapshot-changed', frameSample.time)
         resetReveal =
-          activationSettingsKey(snapshot) !== activationSettingsKey(pendingSnapshot)
+          !activationSettingsEqual(snapshot, pendingSnapshot)
         snapshot = pendingSnapshot
+        revealConfiguration = resolveRevealConfiguration(snapshot.comfort)
         pendingSnapshot = undefined
         revision += 1
         targetableAfterSequence = frameSample.sequence
@@ -301,18 +341,22 @@ export function createWristMenuRuntime(
               frameSample.viewerPosition,
               snapshot.controllerWrist,
             )
+      const lifecycleReset =
+        revealState.initialized &&
+        frameSample.lifecycleRevision !== lastLifecycleRevision
       const reveal = advanceRevealState(revealState, {
         time: frameSample.time,
         visibility: frameSample.visibility,
         activationMode: snapshot.activationMode,
         hasContent: snapshot.menuDefinition.length > 0,
-        reset:
-          resetReveal ||
-          (revealState.initialized &&
-            frameSample.lifecycleRevision !== lastLifecycleRevision),
+        resetReason: lifecycleReset
+          ? 'lifecycle-interrupted'
+          : resetReveal
+            ? 'host-snapshot-changed'
+            : null,
         sourcePresent: wristSource !== undefined,
         anchor,
-        configuration: resolveRevealConfiguration(snapshot.comfort),
+        configuration: revealConfiguration,
       })
       lastLifecycleRevision = frameSample.lifecycleRevision
 
@@ -331,6 +375,16 @@ export function createWristMenuRuntime(
           cancelOwnership('lifecycle-interrupted', frameSample.time)
         }
         claims.clear()
+      }
+
+      if (visible !== lastReportedVisible) {
+        lastReportedVisible = visible
+        options.onEvent({
+          type: 'visibility-change',
+          visible,
+          reason: reveal.visibilityReason,
+          time: frameSample.time,
+        })
       }
 
       const selectionSourcesById = new Map(
@@ -458,10 +512,13 @@ export function createWristMenuRuntime(
 
     dispose() {
       if (disposed) return
-      cancelOwnership('disposed', lastTime)
       disposed = true
-      claims.clear()
-      previousPressed.clear()
+      try {
+        cancelOwnership('disposed', lastTime)
+      } finally {
+        claims.clear()
+        previousPressed.clear()
+      }
     },
   })
 }
