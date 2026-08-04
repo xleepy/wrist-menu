@@ -11,7 +11,13 @@
     "react-dom": "18.3.1",
     "three": "0.185.1"
   },
+  "devDependencies": {
+    "@types/offscreencanvas": "2019.7.3",
+    "@types/react": "18.3.28",
+    "@types/react-dom": "18.3.7",
+    "typescript": "5.9.3"
+  },
   "scripts": {
-    "test": "node smoke.mjs"
+    "test": "node smoke.mjs && tsc -p tsconfig.json"
   }
 }

@@ -1,12 +1,10 @@
-import type { ThreeElements } from '@react-three/fiber'
-
 export {
   wristMenuSessionFeatures,
   type WristMenuSessionFeatures,
 } from '../core/index.js'
 
-/** Props reserved for the React Renderer Integration's scene group. */
-export type WristMenuProps = Readonly<Omit<ThreeElements['group'], 'children'>>
+/** The bootstrap component accepts no content before integration behavior exists. */
+export type WristMenuProps = Readonly<{ children?: never }>
 
 /**
  * Inert bootstrap boundary for the future React Renderer Integration.

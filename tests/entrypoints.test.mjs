@@ -10,13 +10,34 @@ const entries = [
 
 for (const [name, relativePath] of entries) {
   test(`${name} entry point imports without browser globals`, async () => {
-    const trappedGlobals = ['window', 'document', 'navigator', 'requestAnimationFrame']
+    const trappedGlobals = [
+      'window',
+      'document',
+      'navigator',
+      'fetch',
+      'requestAnimationFrame',
+      'setInterval',
+      'setTimeout',
+      'addEventListener',
+      'removeEventListener',
+      'HTMLCanvasElement',
+      'OffscreenCanvas',
+      'WebGLRenderingContext',
+      'WebGL2RenderingContext',
+      'XRSession',
+      'XRSystem',
+    ]
     const originalDescriptors = new Map(
       trappedGlobals.map((globalName) => [
         globalName,
         Object.getOwnPropertyDescriptor(globalThis, globalName),
       ]),
     )
+
+    const originalEventTargetMethods = {
+      addEventListener: EventTarget.prototype.addEventListener,
+      removeEventListener: EventTarget.prototype.removeEventListener,
+    }
 
     try {
       for (const globalName of trappedGlobals) {
@@ -28,11 +49,20 @@ for (const [name, relativePath] of entries) {
         })
       }
 
+      EventTarget.prototype.addEventListener = () => {
+        throw new Error('installed an event listener')
+      }
+      EventTarget.prototype.removeEventListener = () => {
+        throw new Error('removed an event listener')
+      }
+
       const entryUrl = new URL(relativePath, import.meta.url)
       entryUrl.searchParams.set('entrypoint-test', name)
       const module = await import(entryUrl.href)
       assert.ok(module)
     } finally {
+      Object.assign(EventTarget.prototype, originalEventTargetMethods)
+
       for (const [globalName, descriptor] of originalDescriptors) {
         if (descriptor === undefined) {
           delete globalThis[globalName]
