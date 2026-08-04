@@ -14,19 +14,7 @@ import {
   type WristMenuEvent,
 } from '../three/index.js'
 
-export {
-  createWristMenuRuntime,
-  wristMenuSessionFeatures,
-  type ControllerSelectionSourceSample,
-  type FrameSample,
-  type HostSnapshot,
-  type PresentationModel,
-  type SelectionIntent,
-  type TargetObservation,
-  type WristMenuEvent,
-  type WristMenuSessionFeatures,
-  type WristMenuRuntime,
-} from '../core/index.js'
+export * from '../core/index.js'
 
 export type WristMenuProps = Readonly<{
   snapshot: HostSnapshot
