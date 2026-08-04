@@ -15,7 +15,6 @@ export function xrPose(matrix, emulatedPosition = false) {
     },
   }
 }
-
 export function createWristXrFixture({
   menuKind = 'hand',
   menuWrist = 'left',
@@ -102,4 +101,3 @@ export function createWristXrFixture({
     },
   }
 }
-

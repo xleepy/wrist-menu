@@ -222,11 +222,11 @@ function copySnapshot(snapshot: HostSnapshot): HostSnapshot {
   })
 }
 
-function activationSettingsEqual(
+function anchoringSettingsEqual(
   left: HostSnapshot,
   right: HostSnapshot,
 ): boolean {
-  if (left.activationMode !== right.activationMode || left.wrist !== right.wrist) {
+  if (left.wrist !== right.wrist) {
     return false
   }
   const leftComfort = resolveRevealConfiguration(left.comfort)
@@ -317,8 +317,11 @@ export function createWristMenuRuntime(
 
       if (pendingSnapshot !== undefined) {
         cancelOwnership('host-snapshot-changed', frameSample.time)
+        const activationModeChanged =
+          snapshot.activationMode !== pendingSnapshot.activationMode
         resetReveal =
-          !activationSettingsEqual(snapshot, pendingSnapshot)
+          !anchoringSettingsEqual(snapshot, pendingSnapshot) ||
+          (activationModeChanged && pendingSnapshot.activationMode === 'automatic')
         snapshot = pendingSnapshot
         revealConfiguration = resolveRevealConfiguration(snapshot.comfort)
         pendingSnapshot = undefined

@@ -37,4 +37,3 @@ Quest 2 selection requires the explicit `deviceTarget: "quest-2"`. The runtime
 does not infer devices from overlapping input profile aliases. An explicit
 `preset` takes precedence over the device target, and a concrete offset for the
 active wrist takes precedence over both.
-

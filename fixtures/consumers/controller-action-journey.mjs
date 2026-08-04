@@ -323,11 +323,10 @@ export async function runPackedReactControllerJourney({
     const state = store.getState()
     assert.equal(xrStore.getState().session, fixture.session)
     assert.equal(xrStore.getState().inputSourceStates.length, 2)
-    const shield = state.scene.children.find(
-      ({ name }) => name === 'wrist-menu-scene-event-shield',
+    menuGroup = state.scene.children.find(
+      ({ name }) => name === 'wrist-menu-attachment-root',
     )
-    assert.ok(shield)
-    menuGroup = shield.children[0]
+    assert.ok(menuGroup)
     const ray = new three.Raycaster(
       new three.Vector3(0, 0, 1),
       new three.Vector3(0, 0, -1),
@@ -399,7 +398,7 @@ export async function runPackedReactControllerJourney({
     })
     assert.equal(
       state.scene.children.some(
-        ({ name }) => name === 'wrist-menu-scene-event-shield',
+        ({ name }) => name === 'wrist-menu-attachment-root',
       ),
       false,
     )

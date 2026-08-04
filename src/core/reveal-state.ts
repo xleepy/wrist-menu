@@ -140,6 +140,15 @@ export function advanceRevealState(
     return output(state, false)
   }
 
+  if (
+    input.activationMode === 'automatic' &&
+    !input.anchor.automaticEligible
+  ) {
+    state.visibilityReason = 'tracking-lost'
+    applyTrackingLoss(state, input.time, input.configuration.visualGraceMs)
+    return output(state, false)
+  }
+
   const wasTrackingLost = state.trackingLost
   state.boundSourceId = input.anchor.sourceId
   state.anchorPose = input.anchor.anchorPose
@@ -172,20 +181,10 @@ export function advanceRevealState(
     return output(state, state.phase === 'visible')
   }
 
-  if (
-    !input.anchor.automaticEligible ||
-    input.anchor.facingAngleDegrees === null
-  ) {
-    if (!preserveInterruptionReason) {
-      state.visibilityReason = 'tracking-lost'
-    }
-    state.revealLatched = false
-    state.dwellStartedAt = null
-    hideImmediately(state)
-    return output(state, false)
-  }
-
   const angle = input.anchor.facingAngleDegrees
+  if (angle === null) {
+    throw new Error('Automatic Wrist Menu anchor is missing its facing angle')
+  }
   if (state.revealLatched && angle <= input.configuration.exitAngleDegrees) {
     if (!preserveInterruptionReason) {
       state.visibilityReason = 'automatic'

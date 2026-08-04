@@ -169,9 +169,7 @@ test('React integration mounts the Three instance and shields its active Hit Reg
   })
 
   const state = store.getState()
-  const shield = state.scene.children[0]
-  const menuGroup = shield?.children[0]
-  assert.equal(shield?.name, 'wrist-menu-scene-event-shield')
+  const menuGroup = state.scene.children[0]
   assert.equal(menuGroup?.name, 'wrist-menu-attachment-root')
 
   const ray = new Raycaster(

@@ -124,6 +124,43 @@ test('tracking loss is visual-only for 250 ms and reacquisition needs a fresh 20
   assert.equal(runtime.step(wristFrame({ sequence: 11, time: 1150 }), []).opacity, 1)
 })
 
+for (const [label, frameOverrides] of [
+  [
+    'emulated wrist pose',
+    { pose: { ...identityPose, emulatedPosition: true } },
+  ],
+  ['missing viewer pose', { viewerPosition: null }],
+]) {
+  test(`${label} enters the same 250 ms non-interactive tracking grace`, () => {
+    const { runtime } = createRuntime()
+    runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
+    runtime.step(wristFrame({ sequence: 2, time: 450 }), [])
+    runtime.step(wristFrame({ sequence: 3, time: 451 }), [])
+
+    const confidenceLost = runtime.step(
+      wristFrame({ sequence: 4, time: 500, ...frameOverrides }),
+      [],
+    )
+    assert.equal(confidenceLost.revealPhase, 'tracking-grace')
+    assert.equal(confidenceLost.visible, true)
+    assert.equal(confidenceLost.targetable, false)
+    assert.equal(
+      runtime.step(
+        wristFrame({ sequence: 5, time: 749, ...frameOverrides }),
+        [],
+      ).visible,
+      true,
+    )
+    assert.equal(
+      runtime.step(
+        wristFrame({ sequence: 6, time: 750, ...frameOverrides }),
+        [],
+      ).visible,
+      false,
+    )
+  })
+}
+
 test('source replacement and lifecycle reset cancel and require fresh acquisition', () => {
   const { events, runtime } = createRuntime()
   runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
@@ -237,6 +274,22 @@ test('forced modes bypass facing confidence but never XR lifecycle safety', () =
   const disabled = runtime.step(wristFrame({ sequence: 4, time: 200 }), [])
   assert.equal(disabled.visible, false)
   assert.equal(disabled.targetable, false)
+})
+
+test('forced closed uses the ordinary hide transition', () => {
+  const { runtime } = createRuntime({
+    ...automaticHandSnapshot,
+    activationMode: 'forced-open',
+  })
+  runtime.step(wristFrame({ sequence: 1, time: 0 }), [])
+  runtime.step(wristFrame({ sequence: 2, time: 150 }), [])
+
+  runtime.sync({ ...automaticHandSnapshot, activationMode: 'forced-closed' })
+  const hiding = runtime.step(wristFrame({ sequence: 3, time: 200 }), [])
+  assert.equal(hiding.revealPhase, 'hiding')
+  assert.equal(hiding.opacity, 1)
+  assert.equal(runtime.step(wristFrame({ sequence: 4, time: 275 }), []).opacity, 0.5)
+  assert.equal(runtime.step(wristFrame({ sequence: 5, time: 350 }), []).visible, false)
 })
 
 test('disposal remains terminal when a cancellation callback throws', () => {

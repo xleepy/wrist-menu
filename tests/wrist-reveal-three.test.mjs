@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { Group, Matrix4, Vector3 } from 'three'
+import { Group, Matrix4, Raycaster, Vector3 } from 'three'
 
 import { createThreeWristMenu } from '../dist/three/index.js'
 import { automaticHandSnapshot } from '../fixtures/wrist-reveal.mjs'
@@ -78,6 +78,45 @@ test('controller anchor uses grip-derived Quest 2 proxy independently of target-
     ),
   )
   assert.notDeepEqual(menu.group.position.toArray().map(round4), [9, 8, 7])
+  menu.dispose()
+})
+
+test('controller raycasts use the current-frame wrist transform instead of stale geometry', () => {
+  const fixture = createWristXrFixture({ menuKind: 'controller' })
+  const wristOrientation = new Matrix4().makeRotationY(-Math.PI / 2)
+  fixture.setWristMatrix(wristOrientation)
+  const menu = createThreeWristMenu({
+    renderer: fixture.renderer,
+    snapshot: {
+      ...automaticHandSnapshot,
+      activationMode: 'forced-open',
+      comfort: { transitionMs: 0 },
+      controllerWrist: {
+        offsets: {
+          left: {
+            translationMeters: [0, 0, 0],
+            rotationDegrees: [0, 0, 0],
+          },
+        },
+      },
+    },
+    onEvent: () => undefined,
+  })
+  menu.update({ time: 0, frame: fixture.frame })
+  menu.update({ time: 1, frame: fixture.frame })
+  assert.ok(
+    new Raycaster(new Vector3(0, 0, 1), new Vector3(0, 0, -1))
+      .intersectObject(menu.group, true).length > 0,
+  )
+
+  fixture.setWristMatrix(
+    new Matrix4().makeTranslation(1, 0, 0).multiply(wristOrientation),
+  )
+  fixture.session.dispatch('selectstart', fixture.selectionSource)
+  menu.update({ time: 2, frame: fixture.frame })
+
+  assert.equal(menu.group.position.x, 1)
+  assert.equal(menu.blocksSceneInput(fixture.selectionSource), false)
   menu.dispose()
 })
 

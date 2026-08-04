@@ -14,7 +14,12 @@ import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js'
 
 import {
   createWristMenuRuntime,
+  resolveControllerWristOffset,
+  resolveWristAnchor,
+  type ActivationMode,
+  type ControllerWristConfiguration,
   type ControllerSelectionSourceSample,
+  type Handedness,
   type HostSnapshot,
   type PoseSample,
   type PresentationModel,
@@ -192,6 +197,35 @@ class WristMenuPresentation {
 
 type SelectEvent = Readonly<{ inputSource: XRInputSource }>
 
+type AnchorSettings = Readonly<{
+  activationMode: ActivationMode
+  wrist: Handedness
+  controllerWrist: ControllerWristConfiguration
+}>
+
+function materializeAnchorSettings(snapshot: HostSnapshot): AnchorSettings {
+  const copyOffset = (handedness: Handedness) => {
+    const offset = resolveControllerWristOffset(
+      snapshot.controllerWrist,
+      handedness,
+    )
+    return Object.freeze({
+      translationMeters: Object.freeze([...offset.translationMeters]) as Vector3Tuple,
+      rotationDegrees: Object.freeze([...offset.rotationDegrees]) as Vector3Tuple,
+    })
+  }
+  return Object.freeze({
+    activationMode: snapshot.activationMode,
+    wrist: snapshot.wrist,
+    controllerWrist: Object.freeze({
+      offsets: Object.freeze({
+        left: copyOffset('left'),
+        right: copyOffset('right'),
+      }),
+    }),
+  })
+}
+
 /** Create the vanilla Three.js Renderer Integration. */
 export function createThreeWristMenu(
   options: CreateThreeWristMenuOptions,
@@ -211,6 +245,8 @@ export function createThreeWristMenu(
   const anchorOrientation = new Quaternion()
   const anchorScale = new Vector3(1, 1, 1)
   const sourceIds = new WeakMap<XRInputSource, string>()
+  let anchorSettings = materializeAnchorSettings(options.snapshot)
+  let pendingAnchorSettings: AnchorSettings | undefined
   let sourcePressed = new WeakMap<XRInputSource, boolean>()
   let sourceCompleted = new WeakSet<XRInputSource>()
   let lastTargetBySource = new WeakMap<XRInputSource, string>()
@@ -377,12 +413,17 @@ export function createThreeWristMenu(
     sync(nextSnapshot) {
       assertActive()
       runtime.sync(nextSnapshot)
+      pendingAnchorSettings = materializeAnchorSettings(nextSnapshot)
     },
 
     update({ time, frame }) {
       assertActive()
       lastUpdateTime = time
       frameSequence += 1
+      if (pendingAnchorSettings !== undefined) {
+        anchorSettings = pendingAnchorSettings
+        pendingAnchorSettings = undefined
+      }
       const nextSession = options.renderer.xr.getSession()
       attachSession(nextSession)
 
@@ -396,6 +437,9 @@ export function createThreeWristMenu(
 
       const selectionSources: ControllerSelectionSourceSample[] = []
       const wristSources: WristSourceSample[] = []
+      const controllerSources: Array<
+        Readonly<{ id: string; inputSource: XRInputSource }>
+      > = []
       const targetObservations: TargetObservation[] = []
       const nextReferenceSpace = options.renderer.xr.getReferenceSpace()
       attachReferenceSpace(nextReferenceSpace)
@@ -451,7 +495,34 @@ export function createThreeWristMenu(
             selectPressed: sourcePressed.get(inputSource) ?? false,
             selectCompleted: sourceCompleted.has(inputSource),
           })
+          controllerSources.push({ id, inputSource })
+        }
 
+        const wristSource = wristSources
+          .filter((source) => source.handedness === anchorSettings.wrist)
+          .sort(
+            (left, right) =>
+              Number(left.kind === 'controller') -
+              Number(right.kind === 'controller'),
+          )[0]
+        const currentAnchor =
+          wristSource === undefined
+            ? undefined
+            : resolveWristAnchor(
+                wristSource,
+                viewerPosition,
+                anchorSettings.controllerWrist,
+              )
+        if (
+          currentAnchor !== undefined &&
+          (anchorSettings.activationMode !== 'automatic' ||
+            currentAnchor.automaticEligible)
+        ) {
+          applyAnchorPose(currentAnchor.anchorPose)
+        }
+        presentation.group.updateMatrixWorld(true)
+
+        for (const { id, inputSource } of controllerSources) {
           const pose = frame.getPose(inputSource.targetRaySpace, nextReferenceSpace)
           if (pose == null || !isGeometryTargetable) {
             lastTargetBySource.delete(inputSource)

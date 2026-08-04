@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement } from 'react'
 import { act, advance, createRoot } from '@react-three/fiber'
-import { Matrix4, Vector3 } from 'three'
+import { Group, Matrix4, Vector3 } from 'three'
 
 import { WristMenu } from '../dist/react/index.js'
 import { automaticHandSnapshot } from '../fixtures/wrist-reveal.mjs'
@@ -50,29 +50,38 @@ test('React integration follows current hand wrist poses and preserves non-inter
       )
     })
     const state = store.getState()
-    const shield = state.scene.children[0]
-    const menuGroup = shield.children[0]
+    const menuGroup = state.scene.children[0]
 
     fixture.setWristMatrix(new Matrix4().makeTranslation(-0.2, 1.25, -0.35))
     advance(0, true, state, fixture.frame)
-    advance(1, true, state, fixture.frame)
+    advance(0.001, true, state, fixture.frame)
     assert.deepEqual(
       menuGroup.getWorldPosition(new Vector3()).toArray().map(round4),
       [-0.2, 1.25, -0.35],
     )
     assert.equal(menuGroup.visible, true)
 
+    const reparentedOwner = new Group()
+    state.scene.add(reparentedOwner)
+    reparentedOwner.add(menuGroup)
+    advance(0.002, true, state, fixture.frame)
+    assert.equal(menuGroup.visible, false)
+    advance(0.201, true, state, fixture.frame)
+    assert.equal(menuGroup.visible, false)
+    advance(0.202, true, state, fixture.frame)
+    assert.equal(menuGroup.visible, true)
+
     fixture.setWristMatrix(new Matrix4().makeTranslation(-0.15, 1.2, -0.3))
-    advance(2, true, state, fixture.frame)
+    advance(0.203, true, state, fixture.frame)
     assert.deepEqual(
       menuGroup.getWorldPosition(new Vector3()).toArray().map(round4),
       [-0.15, 1.2, -0.3],
     )
 
     fixture.setWristTracked(false)
-    advance(3, true, state, fixture.frame)
+    advance(0.204, true, state, fixture.frame)
     assert.equal(menuGroup.visible, true)
-    advance(253, true, state, fixture.frame)
+    advance(0.454, true, state, fixture.frame)
     assert.equal(menuGroup.visible, false)
   } finally {
     await act(async () => root.unmount())
@@ -102,4 +111,3 @@ function createCanvas() {
 function round4(value) {
   return Math.round(value * 10_000) / 10_000
 }
-
