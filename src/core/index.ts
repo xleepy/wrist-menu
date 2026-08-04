@@ -7,6 +7,53 @@ export type WristMenuSessionFeatures = typeof wristMenuSessionFeatures
 
 export type Handedness = 'left' | 'right'
 
+import {
+  copyControllerWristConfiguration,
+  resolveRevealConfiguration,
+  type ActivationMode,
+  type ControllerDeviceTarget,
+  type ControllerWristConfiguration,
+  type ControllerWristOffset,
+  type ControllerWristPreset,
+  type RevealConfiguration,
+  type RevealConfigurationOverrides,
+  type Vector3Tuple,
+} from './activation-config.js'
+import {
+  advanceRevealState,
+  createRevealState,
+  type RevealPhase,
+} from './reveal-state.js'
+import {
+  resolveWristAnchor,
+  type PoseSample,
+  type QuaternionTuple,
+  type WristAnchorPose,
+  type WristSourceSample,
+} from './wrist-anchor.js'
+
+export {
+  defaultRevealConfiguration,
+  resolveControllerWristOffset,
+  resolveRevealConfiguration,
+  type ActivationMode,
+  type ControllerDeviceTarget,
+  type ControllerWristConfiguration,
+  type ControllerWristOffset,
+  type ControllerWristPreset,
+  type RevealConfiguration,
+  type RevealConfigurationOverrides,
+  type Vector3Tuple,
+} from './activation-config.js'
+export {
+  resolveWristAnchor,
+  type PoseSample,
+  type QuaternionTuple,
+  type WristAnchorPose,
+  type WristSourceSample,
+} from './wrist-anchor.js'
+export type { RevealPhase } from './reveal-state.js'
+
 export type ActionItem = Readonly<{
   type: 'action'
   id: string
@@ -14,13 +61,16 @@ export type ActionItem = Readonly<{
 }>
 
 /**
- * Complete Host Application-owned input for the first controller tracer.
- * Later menu item families extend this portable data boundary.
+ * Complete Host Application-owned input. Comfort values and controller
+ * geometry are portable overrides; omitted values resolve to documented
+ * package defaults.
  */
 export type HostSnapshot = Readonly<{
-  activationMode: 'forced-open'
+  activationMode: ActivationMode
   wrist: Handedness
   menuDefinition: readonly ActionItem[]
+  comfort?: RevealConfigurationOverrides
+  controllerWrist?: ControllerWristConfiguration
 }>
 
 export type ControllerSelectionSourceSample = Readonly<{
@@ -32,11 +82,15 @@ export type ControllerSelectionSourceSample = Readonly<{
   selectCompleted: boolean
 }>
 
-/** One renderer-neutral sample of controller input for the current XR frame. */
+/** One renderer-neutral sample of poses and input for the current XR frame. */
 export type FrameSample = Readonly<{
   sequence: number
   time: number
   visibility: 'visible' | 'visible-blurred' | 'hidden'
+  viewerPosition: Vector3Tuple | null
+  wristSources: readonly WristSourceSample[]
+  /** Changes after session, reference-space, recenter, or attachment resets. */
+  lifecycleRevision: number
   selectionSources: readonly ControllerSelectionSourceSample[]
 }>
 
@@ -88,6 +142,9 @@ export type PresentationItem = Readonly<{
 export type PresentationModel = Readonly<{
   visible: boolean
   targetable: boolean
+  opacity: number
+  revealPhase: RevealPhase
+  anchorPose: WristAnchorPose | null
   revision: number
   items: readonly PresentationItem[]
 }>
@@ -113,8 +170,13 @@ type OwnedSelection = Readonly<{
 }>
 
 function copySnapshot(snapshot: HostSnapshot): HostSnapshot {
-  if (snapshot.activationMode !== 'forced-open') {
-    throw new TypeError('Host Snapshot activationMode must be "forced-open"')
+  if (
+    snapshot.activationMode !== 'automatic' &&
+    snapshot.activationMode !== 'forced-open' &&
+    snapshot.activationMode !== 'forced-closed' &&
+    snapshot.activationMode !== 'disabled'
+  ) {
+    throw new TypeError('Host Snapshot activationMode is not supported')
   }
   if (snapshot.wrist !== 'left' && snapshot.wrist !== 'right') {
     throw new TypeError('Host Snapshot wrist must be "left" or "right"')
@@ -138,10 +200,26 @@ function copySnapshot(snapshot: HostSnapshot): HostSnapshot {
     return Object.freeze({ type: 'action' as const, id: item.id, label: item.label })
   })
 
+  const controllerWrist = copyControllerWristConfiguration(
+    snapshot.controllerWrist,
+  )
   return Object.freeze({
-    activationMode: 'forced-open' as const,
+    activationMode: snapshot.activationMode,
     wrist: snapshot.wrist,
     menuDefinition: Object.freeze(menuDefinition),
+    ...(snapshot.comfort === undefined
+      ? {}
+      : { comfort: resolveRevealConfiguration(snapshot.comfort) }),
+    ...(controllerWrist === undefined ? {} : { controllerWrist }),
+  })
+}
+
+function activationSettingsKey(snapshot: HostSnapshot): string {
+  return JSON.stringify({
+    activationMode: snapshot.activationMode,
+    wrist: snapshot.wrist,
+    comfort: snapshot.comfort ?? null,
+    controllerWrist: snapshot.controllerWrist ?? null,
   })
 }
 
@@ -156,6 +234,9 @@ export function createWristMenuRuntime(
   let targetableAfterSequence: number | undefined
   let ownedSelection: OwnedSelection | undefined
   let lastTime = 0
+  const revealState = createRevealState()
+  let revealWasInteractive = false
+  let lastLifecycleRevision: number | undefined
   const previousPressed = new Map<string, boolean>()
   const claims = new Set<string>()
 
@@ -193,22 +274,57 @@ export function createWristMenuRuntime(
       }
       lastTime = frameSample.time
 
+      let resetReveal = false
+
       if (pendingSnapshot !== undefined) {
         cancelOwnership('host-snapshot-changed', frameSample.time)
+        resetReveal =
+          activationSettingsKey(snapshot) !== activationSettingsKey(pendingSnapshot)
         snapshot = pendingSnapshot
         pendingSnapshot = undefined
         revision += 1
         targetableAfterSequence = frameSample.sequence
       }
 
-      if (targetableAfterSequence === undefined) {
-        targetableAfterSequence = frameSample.sequence
+      if (!Array.isArray(frameSample.wristSources)) {
+        throw new TypeError('Frame Sample wristSources must be an array')
       }
 
-      const visible =
-        frameSample.visibility === 'visible' && snapshot.menuDefinition.length > 0
+      const wristSource = frameSample.wristSources
+        .filter((source) => source.handedness === snapshot.wrist)
+        .sort((left, right) => Number(left.kind === 'controller') - Number(right.kind === 'controller'))[0]
+      const anchor =
+        wristSource === undefined
+          ? undefined
+          : resolveWristAnchor(
+              wristSource,
+              frameSample.viewerPosition,
+              snapshot.controllerWrist,
+            )
+      const reveal = advanceRevealState(revealState, {
+        time: frameSample.time,
+        visibility: frameSample.visibility,
+        activationMode: snapshot.activationMode,
+        hasContent: snapshot.menuDefinition.length > 0,
+        reset:
+          resetReveal ||
+          (revealState.initialized &&
+            frameSample.lifecycleRevision !== lastLifecycleRevision),
+        sourcePresent: wristSource !== undefined,
+        anchor,
+        configuration: resolveRevealConfiguration(snapshot.comfort),
+      })
+      lastLifecycleRevision = frameSample.lifecycleRevision
+
+      if (reveal.interactive && !revealWasInteractive) {
+        targetableAfterSequence = frameSample.sequence
+      }
+      revealWasInteractive = reveal.interactive
+      const visible = reveal.visible
       const targetable =
-        visible && frameSample.sequence > targetableAfterSequence
+        reveal.interactive &&
+        targetableAfterSequence !== undefined &&
+        frameSample.sequence > targetableAfterSequence
 
       if (!targetable) {
         if (ownedSelection !== undefined) {
@@ -315,6 +431,9 @@ export function createWristMenuRuntime(
       return Object.freeze({
         visible,
         targetable,
+        opacity: reveal.opacity,
+        revealPhase: reveal.phase,
+        anchorPose: reveal.anchorPose,
         revision,
         items: Object.freeze(
           snapshot.menuDefinition.map((item) =>

@@ -72,7 +72,9 @@ async function createIwerControllerFixture(iwer) {
     canvasContainer: { dataset: {}, style: {} },
   })
   device.primaryInputMode = 'controller'
-  device.controllers.left.connected = false
+  const menuController = device.controllers.left
+  menuController.position.set(0, 0, 0)
+  menuController.quaternion.set(0, -Math.SQRT1_2, 0, Math.SQRT1_2)
   const controller = device.controllers.right
   controller.position.set(0, 0, 1)
   controller.quaternion.set(0, 0, 0, 1)
@@ -137,6 +139,19 @@ export async function runPackedThreeControllerJourney({
   try {
     menu.update({ time: 16, frame: fixture.nextFrame(16) })
     assert.equal(ray.intersectObject(menu.group, true).length, 0)
+    fixture.controller.position.set(
+      menu.group.position.x,
+      menu.group.position.y,
+      menu.group.position.z + 1,
+    )
+    ray.set(
+      new three.Vector3(
+        menu.group.position.x,
+        menu.group.position.y,
+        menu.group.position.z + 1,
+      ),
+      new three.Vector3(0, 0, -1),
+    )
     menu.update({ time: 32, frame: fixture.nextFrame(32) })
     assert.ok(ray.intersectObject(menu.group, true).length > 0)
 
@@ -307,7 +322,7 @@ export async function runPackedReactControllerJourney({
 
     const state = store.getState()
     assert.equal(xrStore.getState().session, fixture.session)
-    assert.equal(xrStore.getState().inputSourceStates.length, 1)
+    assert.equal(xrStore.getState().inputSourceStates.length, 2)
     const shield = state.scene.children.find(
       ({ name }) => name === 'wrist-menu-scene-event-shield',
     )
@@ -322,10 +337,26 @@ export async function runPackedReactControllerJourney({
       fiber.advance(16, true, state, fixture.nextFrame(16))
     })
     assert.equal(ray.intersectObject(menuGroup, true).length, 0)
+    fixture.controller.position.set(
+      menuGroup.position.x,
+      menuGroup.position.y,
+      menuGroup.position.z + 1,
+    )
+    ray.set(
+      new three.Vector3(
+        menuGroup.position.x,
+        menuGroup.position.y,
+        menuGroup.position.z + 1,
+      ),
+      new three.Vector3(0, 0, -1),
+    )
     await fiber.act(async () => {
       fiber.advance(32, true, state, fixture.nextFrame(32))
     })
     assert.ok(ray.intersectObject(menuGroup, true).length > 0)
+    await fiber.act(async () => {
+      fiber.advance(33, true, state, fixture.nextFrame(33))
+    })
 
     let pressedFrame
     await fiber.act(async () => {

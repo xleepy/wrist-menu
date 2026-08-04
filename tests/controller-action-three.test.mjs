@@ -1,28 +1,62 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { Matrix4, Raycaster, Scene, Vector3 } from 'three'
+import { Matrix4, Quaternion, Raycaster, Scene, Vector3 } from 'three'
 
 import { createThreeWristMenu } from '../dist/three/index.js'
 import {
   controllerActionSnapshot,
+  FakeReferenceSpace,
   FakeXrSession,
 } from '../fixtures/controller-action.mjs'
+
+function xrPose(matrix) {
+  const position = new Vector3()
+  const orientation = new Quaternion()
+  matrix.decompose(position, orientation, new Vector3())
+  return {
+    emulatedPosition: false,
+    transform: {
+      matrix: matrix.toArray(),
+      position,
+      orientation,
+    },
+  }
+}
 
 function createXrFixture() {
   const inputSource = {
     handedness: 'right',
     targetRayMode: 'tracked-pointer',
     targetRaySpace: {},
+    gripSpace: {},
+    profiles: ['unknown'],
   }
-  const session = new FakeXrSession(inputSource)
+  const menuInputSource = {
+    handedness: 'left',
+    targetRayMode: 'tracked-pointer',
+    targetRaySpace: {},
+    gripSpace: {},
+    profiles: ['unknown'],
+  }
+  const session = new FakeXrSession([menuInputSource, inputSource])
   let targetRayMatrix = new Matrix4().makeTranslation(0, 0, 1).toArray()
-  const referenceSpace = {}
+  const referenceSpace = new FakeReferenceSpace()
   const frame = {
     session,
     getPose(space, reference) {
-      assert.equal(space, inputSource.targetRaySpace)
       assert.equal(reference, referenceSpace)
-      return { transform: { matrix: targetRayMatrix } }
+      if (space === inputSource.targetRaySpace) {
+        return xrPose(new Matrix4().fromArray(targetRayMatrix))
+      }
+      if (space === menuInputSource.gripSpace) {
+        return xrPose(new Matrix4().makeRotationY(-Math.PI / 2))
+      }
+      if (space === inputSource.gripSpace) return xrPose(new Matrix4())
+      if (space === menuInputSource.targetRaySpace) return null
+      throw new Error('unexpected XRSpace')
+    },
+    getViewerPose() {
+      return xrPose(new Matrix4().makeTranslation(0, 0, 1))
     },
   }
   const renderer = {
