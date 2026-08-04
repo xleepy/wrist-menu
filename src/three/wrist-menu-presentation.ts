@@ -1,12 +1,12 @@
+import type {
+  Object3D,
+  Object3DEventMap,
+} from 'three/src/core/Object3D.js'
 import { type Intersection } from 'three/src/core/Raycaster.js'
 import { BoxGeometry } from 'three/src/geometries/BoxGeometry.js'
 import { MeshBasicMaterial } from 'three/src/materials/MeshBasicMaterial.js'
 import { Group } from 'three/src/objects/Group.js'
 import { Mesh } from 'three/src/objects/Mesh.js'
-import type {
-  Object3D,
-  Object3DEventMap,
-} from 'three/src/core/Object3D.js'
 
 import type {
   PresentationActionItem,
@@ -69,23 +69,28 @@ function baseColor(item: InteractivePresentationItem): number {
   return 0x102020
 }
 
-export class ControllerTracerPresentation {
+export class WristMenuPresentation {
   readonly group = new Group()
   readonly hitRegions: Mesh[] = []
   private readonly resources: Array<{ dispose(): void }> = []
   private readonly rowMeshes: Mesh[] = []
+  private readonly visualMaterials: MeshBasicMaterial[] = []
 
   constructor() {
     this.group.name = 'wrist-menu-attachment-root'
 
     const panelGeometry = new BoxGeometry(0.192, 0.158, 0.004)
-    const panelMaterial = new MeshBasicMaterial({ color: 0x081415 })
+    const panelMaterial = new MeshBasicMaterial({
+      color: 0x081415,
+      transparent: true,
+    })
     const panel = new Mesh(panelGeometry, panelMaterial)
     panel.name = 'wrist-menu-command-slab'
     panel.position.z = -0.004
     panel.raycast = decorativeRaycast
     this.group.add(panel)
     this.resources.push(panelGeometry, panelMaterial)
+    this.visualMaterials.push(panelMaterial)
   }
 
   renderItems(items: readonly PresentationItem[]) {
@@ -95,6 +100,7 @@ export class ControllerTracerPresentation {
     for (const resource of this.resources.splice(2)) resource.dispose()
     this.rowMeshes.length = 0
     this.hitRegions.length = 0
+    this.visualMaterials.length = 1
 
     const rows = rowsFor(items)
     rows.forEach((item, index) => {
@@ -109,6 +115,7 @@ export class ControllerTracerPresentation {
             : item.type === 'choice-group'
               ? 0x183132
               : baseColor(item),
+        transparent: true,
       })
       const row = new Mesh(rowGeometry, rowMaterial)
       row.name = `wrist-menu-${item.type}-visual:${item.id}`
@@ -126,14 +133,13 @@ export class ControllerTracerPresentation {
             : undefined
       this.group.add(row)
       this.rowMeshes.push(row)
+      this.visualMaterials.push(rowMaterial)
       this.resources.push(rowGeometry, rowMaterial)
 
       if (item.type === 'separator' || item.type === 'choice-group') return
 
       row.userData['wristMenuSelected'] =
         item.type === 'toggle' || item.type === 'choice' ? item.selected : false
-      row.userData['wristMenuValue'] =
-        item.type === 'toggle' || item.type === 'choice' ? item.value : undefined
       row.userData['wristMenuDisabledReason'] = item.disabledReason
 
       const hitGeometry = new BoxGeometry(0.176, 0.02, 0.008)
@@ -154,6 +160,10 @@ export class ControllerTracerPresentation {
   setModel(model: PresentationModel, targetable: boolean) {
     this.group.visible = model.visible
     this.setTargetable(targetable && model.visible)
+    for (const material of this.visualMaterials) {
+      material.opacity = model.opacity
+      material.depthWrite = model.opacity >= 1
+    }
 
     const interactiveItems = rowsFor(model.items).filter(
       (item): item is InteractivePresentationItem =>
@@ -176,6 +186,8 @@ export class ControllerTracerPresentation {
       )
       row.userData['wristMenuSelected'] =
         item.type === 'toggle' || item.type === 'choice' ? item.selected : false
+      row.userData['wristMenuValue'] =
+        item.type === 'toggle' || item.type === 'choice' ? item.value : undefined
       row.userData['wristMenuDisabledReason'] = item.disabledReason
     }
   }
@@ -199,6 +211,7 @@ export class ControllerTracerPresentation {
     this.resources.length = 0
     this.rowMeshes.length = 0
     this.hitRegions.length = 0
+    this.visualMaterials.length = 0
     this.group.clear()
   }
 }

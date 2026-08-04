@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { Raycaster, Vector3 } from 'three'
 
 import { createThreeWristMenu } from '../dist/three/index.js'
 import { hostControlledSnapshot } from '../fixtures/host-controlled-menu.mjs'
@@ -48,7 +49,9 @@ test('vanilla renders all Host-controlled rows in order and emits semantic inten
     'Select a Workshop Object first',
   )
   assert.deepEqual(
-    events.map(({ intent }) => intent),
+    events
+      .filter(({ type }) => type === 'selection-intent')
+      .map(({ intent }) => intent),
     expectedControlledIntentOrder,
   )
 
@@ -78,4 +81,41 @@ test('vanilla releases presentation resources when a disposal event callback thr
     /disposed/,
   )
   assert.doesNotThrow(() => menu.dispose())
+})
+
+test('complete presentation rows share reveal opacity and targeting barriers', () => {
+  const fixture = createHostControlledXrFixture()
+  const snapshot = structuredClone(hostControlledSnapshot)
+  snapshot.comfort.transitionMs = 150
+  const menu = createThreeWristMenu({
+    renderer: fixture.renderer,
+    snapshot,
+    onEvent: () => undefined,
+  })
+  const ray = new Raycaster(
+    new Vector3(0, 0.0225, 1),
+    new Vector3(0, 0, -1),
+  )
+
+  menu.update({ time: 0, frame: fixture.frame })
+  menu.update({ time: 75, frame: fixture.frame })
+  const visualMaterials = menu.group.children
+    .filter(
+      ({ name }) =>
+        name === 'wrist-menu-command-slab' || name.includes('-visual:'),
+    )
+    .map(({ material }) => material)
+  assert.ok(visualMaterials.length > 1)
+  assert.ok(visualMaterials.every(({ opacity }) => opacity === 0.5))
+  assert.ok(visualMaterials.every(({ depthWrite }) => depthWrite === false))
+  assert.equal(ray.intersectObject(menu.group, true).length, 0)
+
+  menu.update({ time: 150, frame: fixture.frame })
+  assert.ok(visualMaterials.every(({ opacity }) => opacity === 1))
+  assert.ok(visualMaterials.every(({ depthWrite }) => depthWrite === true))
+  assert.equal(ray.intersectObject(menu.group, true).length, 0)
+  menu.update({ time: 151, frame: fixture.frame })
+  assert.ok(ray.intersectObject(menu.group, true).length > 0)
+
+  menu.dispose()
 })

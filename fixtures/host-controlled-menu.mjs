@@ -1,6 +1,15 @@
 export const hostControlledSnapshot = Object.freeze({
   activationMode: 'forced-open',
   wrist: 'left',
+  comfort: Object.freeze({ transitionMs: 0 }),
+  controllerWrist: Object.freeze({
+    offsets: Object.freeze({
+      left: Object.freeze({
+        translationMeters: Object.freeze([0, 0, 0]),
+        rotationDegrees: Object.freeze([0, 0, 0]),
+      }),
+    }),
+  }),
   menuDefinition: Object.freeze([
     Object.freeze({
       type: 'action',
@@ -54,6 +63,20 @@ export function controlledFrame(
     sequence,
     time: sequence * 16,
     visibility: 'visible',
+    viewerPosition: null,
+    lifecycleRevision: 0,
+    wristSources: [
+      {
+        id: 'left-controller',
+        kind: 'controller',
+        handedness: 'left',
+        pose: {
+          position: [0, 0, 0],
+          orientation: [0, -Math.SQRT1_2, 0, Math.SQRT1_2],
+          emulatedPosition: false,
+        },
+      },
+    ],
     selectionSources: [
       { ...rightController, selectPressed, selectCompleted },
     ],

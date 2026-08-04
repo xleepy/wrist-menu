@@ -8,6 +8,25 @@ import {
   observe,
 } from '../fixtures/host-controlled-menu.mjs'
 
+function automaticSnapshot() {
+  const snapshot = structuredClone(hostControlledSnapshot)
+  snapshot.activationMode = 'automatic'
+  snapshot.comfort = {
+    ...snapshot.comfort,
+    initialDwellMs: 0,
+    reacquireDwellMs: 200,
+    transitionMs: 0,
+  }
+  return snapshot
+}
+
+function automaticFrame(sequence, selectPressed = false, selectCompleted = false) {
+  return {
+    ...controlledFrame(sequence, selectPressed, selectCompleted),
+    viewerPosition: [0, 0, 1],
+  }
+}
+
 test('Presentation Model preserves the complete Host-owned Menu Definition order', () => {
   const runtime = createWristMenuRuntime({
     snapshot: hostControlledSnapshot,
@@ -113,6 +132,13 @@ test('invalid snapshots fail without replacing either live or pending Host state
     /Choice Group primitive-shape selectedValue must match exactly one option/,
   )
 
+  const invalidComfort = structuredClone(hostControlledSnapshot)
+  invalidComfort.comfort.enterAngleDegrees = 60
+  assert.throws(
+    () => runtime.sync(invalidComfort),
+    /exitAngleDegrees must be greater than or equal to enterAngleDegrees/,
+  )
+
   const applied = runtime.step(controlledFrame(2), [])
   assert.equal(applied.items[2].value, false)
   assert.equal(applied.items[3].selectedValue, 'cube')
@@ -152,6 +178,41 @@ test('content validation rejects unstable, non-portable, and ambiguous definitio
   }
   assert.throws(() => create(callbackSnapshot), /unsupported field: onEvent/)
 
+  const unknownComfort = structuredClone(hostControlledSnapshot)
+  unknownComfort.comfort.smoothing = 0.5
+  assert.throws(
+    () => create(unknownComfort),
+    /comfort contains unsupported field: smoothing/,
+  )
+
+  const accessorComfort = structuredClone(hostControlledSnapshot)
+  Object.defineProperty(accessorComfort.comfort, 'transitionMs', {
+    enumerable: true,
+    get: () => 0,
+  })
+  assert.throws(
+    () => create(accessorComfort),
+    /comfort field transitionMs must be portable data/,
+  )
+
+  const unknownControllerField = structuredClone(hostControlledSnapshot)
+  unknownControllerField.controllerWrist.profile = 'quest-touch'
+  assert.throws(
+    () => create(unknownControllerField),
+    /controllerWrist contains unsupported field: profile/,
+  )
+
+  const malformedControllerTuple = structuredClone(hostControlledSnapshot)
+  Object.defineProperty(
+    malformedControllerTuple.controllerWrist.offsets.left.translationMeters,
+    '1',
+    { enumerable: true, get: () => 0 },
+  )
+  assert.throws(
+    () => create(malformedControllerTuple),
+    /translationMeters field 1 must be portable data/,
+  )
+
   const nonFiniteValue = structuredClone(hostControlledSnapshot)
   nonFiniteValue.menuDefinition[3].options[0].value = Number.NaN
   assert.throws(() => create(nonFiniteValue), /string or finite number/)
@@ -185,6 +246,113 @@ test('content validation rejects unstable, non-portable, and ambiguous definitio
   assert.equal(empty.step(controlledFrame(1), []).visible, false)
 })
 
+test('rich automatic sync copies content and configuration atomically without reacquisition', () => {
+  const initial = automaticSnapshot()
+  const runtime = createWristMenuRuntime({
+    snapshot: initial,
+    onEvent: () => undefined,
+  })
+  runtime.step(automaticFrame(1), [])
+  assert.equal(runtime.step(automaticFrame(2), []).targetable, true)
+
+  const updated = structuredClone(initial)
+  updated.menuDefinition[2].value = false
+  updated.menuDefinition[3].selectedValue = 'sphere'
+  runtime.sync(updated)
+
+  updated.menuDefinition[2].value = true
+  updated.menuDefinition[3].selectedValue = 'cube'
+  updated.comfort.enterAngleDegrees = 5
+  updated.controllerWrist.offsets.left.translationMeters[0] = 1
+
+  const applied = runtime.step(automaticFrame(3), [])
+  assert.equal(applied.revision, 2)
+  assert.equal(applied.visible, true)
+  assert.equal(applied.revealPhase, 'visible')
+  assert.equal(applied.targetable, false)
+  assert.equal(applied.items[2].value, false)
+  assert.equal(applied.items[3].selectedValue, 'sphere')
+  assert.deepEqual(applied.anchorPose.position, [0, 0, 0])
+  assert.equal(runtime.step(automaticFrame(4), []).targetable, true)
+})
+
+test('anchoring sync cancels ownership, reacquires, and preserves callback-queued state', () => {
+  const initial = automaticSnapshot()
+  const firstUpdate = structuredClone(initial)
+  firstUpdate.menuDefinition[2].value = false
+  firstUpdate.controllerWrist.offsets.left.translationMeters[0] = 0.1
+  const callbackUpdate = structuredClone(firstUpdate)
+  callbackUpdate.menuDefinition[2].label = 'Grid from callback'
+  let runtime
+  runtime = createWristMenuRuntime({
+    snapshot: initial,
+    onEvent: (event) => {
+      if (
+        event.type === 'selection-cancellation' &&
+        event.reason === 'host-snapshot-changed'
+      ) {
+        runtime.sync(callbackUpdate)
+      }
+    },
+  })
+  runtime.step(automaticFrame(1), [])
+  runtime.step(automaticFrame(2), [observe('show-grid')])
+  runtime.step(automaticFrame(3, true), [observe('show-grid')])
+  runtime.sync(firstUpdate)
+
+  const firstBoundary = runtime.step(automaticFrame(4, true), [])
+  assert.equal(firstBoundary.revision, 2)
+  assert.equal(firstBoundary.visible, false)
+  assert.equal(firstBoundary.revealPhase, 'reacquire-dwell')
+  assert.equal(firstBoundary.items[2].value, false)
+  assert.equal(firstBoundary.items[2].label, 'Show grid')
+
+  const secondBoundary = runtime.step(automaticFrame(5), [])
+  assert.equal(secondBoundary.revision, 3)
+  assert.equal(secondBoundary.items[2].value, false)
+  assert.equal(secondBoundary.items[2].label, 'Grid from callback')
+})
+
+test('automatic reveal supports nested Choice Option ownership and intent', () => {
+  const events = []
+  const runtime = createWristMenuRuntime({
+    snapshot: automaticSnapshot(),
+    onEvent: (event) => events.push(event),
+  })
+  runtime.step(automaticFrame(1), [])
+  runtime.step(automaticFrame(2), [observe('shape-sphere')])
+  runtime.step(automaticFrame(3, true), [observe('shape-sphere')])
+  runtime.step(automaticFrame(4, false, true), [observe('shape-sphere')])
+
+  assert.equal(runtime.blocksSceneInput('right-controller'), false)
+  assert.deepEqual(
+    events.find(({ type }) => type === 'selection-intent')?.intent,
+    {
+      type: 'choice',
+      groupId: 'primitive-shape',
+      itemId: 'shape-sphere',
+      currentValue: 'cube',
+      proposedValue: 'sphere',
+    },
+  )
+})
+
+test('semantically neutral controller defaults do not reacquire automatic reveal', () => {
+  const initial = automaticSnapshot()
+  delete initial.controllerWrist
+  const runtime = createWristMenuRuntime({
+    snapshot: initial,
+    onEvent: () => undefined,
+  })
+  runtime.step(automaticFrame(1), [])
+  runtime.step(automaticFrame(2), [])
+
+  runtime.sync({ ...initial, controllerWrist: { preset: 'neutral' } })
+  const synchronized = runtime.step(automaticFrame(3), [])
+  assert.equal(synchronized.visible, true)
+  assert.equal(synchronized.revealPhase, 'visible')
+})
+
 test('toggle and choice Selection Intents propose values without mutating displayed state', () => {
   const events = []
   const runtime = createWristMenuRuntime({
@@ -204,7 +372,9 @@ test('toggle and choice Selection Intents propose values without mutating displa
   ])
 
   assert.deepEqual(
-    events.map(({ intent }) => intent),
+    events
+      .filter(({ type }) => type === 'selection-intent')
+      .map(({ intent }) => intent),
     [
       {
         type: 'toggle',
@@ -322,5 +492,8 @@ test('disabled items can be observed but never arm, claim, or emit an intent', (
   assert.equal(hovered.items[4].interaction, 'hovered')
   assert.equal(pressed.items[4].interaction, 'hovered')
   assert.equal(runtime.blocksSceneInput('right-controller'), false)
-  assert.deepEqual(events, [])
+  assert.deepEqual(
+    events.filter(({ type }) => type !== 'visibility-change'),
+    [],
+  )
 })

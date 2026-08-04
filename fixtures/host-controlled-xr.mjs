@@ -1,6 +1,9 @@
 import { Matrix4 } from 'three'
 
-import { FakeXrSession } from './controller-action.mjs'
+import {
+  FakeReferenceSpace,
+  FakeXrSession,
+} from './controller-action.mjs'
 
 export const rowTargetY = Object.freeze({
   action: 0.0675,
@@ -27,18 +30,45 @@ export const expectedControlledIntentOrder = Object.freeze([
 ])
 
 export function createHostControlledXrFixture() {
+  const menuInputSource = {
+    handedness: 'left',
+    targetRayMode: 'tracked-pointer',
+    targetRaySpace: {},
+    gripSpace: {},
+  }
   const inputSource = {
     handedness: 'right',
     targetRayMode: 'tracked-pointer',
     targetRaySpace: {},
   }
-  const session = new FakeXrSession(inputSource)
-  const referenceSpace = {}
+  const session = new FakeXrSession([menuInputSource, inputSource])
+  const referenceSpace = new FakeReferenceSpace()
   let targetY = rowTargetY.toggle
   const frame = {
     session,
+    getViewerPose() {
+      return null
+    },
     getPose(space, reference) {
-      if (space !== inputSource.targetRaySpace || reference !== referenceSpace) {
+      if (reference !== referenceSpace) {
+        throw new Error('Renderer Integration requested an unexpected XR space')
+      }
+      if (space === menuInputSource.gripSpace) {
+        return {
+          emulatedPosition: false,
+          transform: {
+            position: { x: 0, y: 0, z: 0 },
+            orientation: {
+              x: 0,
+              y: -Math.SQRT1_2,
+              z: 0,
+              w: Math.SQRT1_2,
+            },
+          },
+        }
+      }
+      if (space === menuInputSource.targetRaySpace) return null
+      if (space !== inputSource.targetRaySpace) {
         throw new Error('Renderer Integration requested an unexpected XR space')
       }
       return {
@@ -69,6 +99,7 @@ export function createHostControlledXrFixture() {
   return {
     frame,
     inputSource,
+    menuInputSource,
     renderer,
     session,
     target(item) {

@@ -64,7 +64,7 @@
     "build": "tsc -p tsconfig.build.json",
     "build:declarations": "tsc -p tsconfig.declarations.json",
     "check:core-types": "tsc -p tsconfig.core.json",
-    "test": "node --test tests/package-contract.test.mjs tests/entrypoints.test.mjs tests/react-ssr.test.mjs tests/controller-action-core.test.mjs tests/controller-action-three.test.mjs tests/controller-action-react.test.mjs tests/host-controlled-core.test.mjs tests/host-controlled-three.test.mjs tests/host-controlled-react.test.mjs",
+    "test": "node --test tests/package-contract.test.mjs tests/entrypoints.test.mjs tests/react-ssr.test.mjs tests/controller-action-core.test.mjs tests/controller-action-three.test.mjs tests/controller-action-react.test.mjs tests/host-controlled-core.test.mjs tests/host-controlled-three.test.mjs tests/host-controlled-react.test.mjs tests/wrist-reveal-core.test.mjs tests/wrist-reveal-three.test.mjs tests/wrist-reveal-react.test.mjs",
     "pack:verify": "node scripts/pack-and-verify.mjs",
     "test:consumers": "node scripts/test-consumers.mjs",
     "check": "npm run clean && npm run build && npm run build:declarations && npm run check:core-types && npm test && npm run pack:verify && npm run test:consumers"

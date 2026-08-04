@@ -1,3 +1,14 @@
+import {
+  copyControllerWristConfiguration,
+  resolveControllerWristOffset,
+  resolveRevealConfiguration,
+  type ActivationMode,
+  type ControllerWristConfiguration,
+  type RevealConfiguration,
+  type RevealConfigurationOverrides,
+  type Vector3Tuple,
+} from './activation-config.js'
+
 export type Handedness = 'left' | 'right'
 
 export type MenuValue = boolean | string | number
@@ -49,9 +60,11 @@ export type MenuDefinitionEntry =
 
 /** Complete Host Application-owned input supported by this implementation slice. */
 export type HostSnapshot = Readonly<{
-  activationMode: 'forced-open'
+  activationMode: ActivationMode
   wrist: Handedness
   menuDefinition: readonly MenuDefinitionEntry[]
+  comfort?: RevealConfigurationOverrides
+  controllerWrist?: ControllerWristConfiguration
 }>
 
 export type MenuInteraction = 'idle' | 'hovered' | 'armed'
@@ -177,7 +190,134 @@ function assertPortableArray(
     ) {
       throw new TypeError(`${name} contains an unsupported array field`)
     }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (
+      descriptor === undefined ||
+      !descriptor.enumerable ||
+      !Object.hasOwn(descriptor, 'value')
+    ) {
+      throw new TypeError(`${name} field ${key} must be portable data`)
+    }
   }
+}
+
+function copyOptionalComfort(
+  snapshot: Record<string, unknown>,
+): RevealConfiguration | undefined {
+  if (!Object.hasOwn(snapshot, 'comfort')) return undefined
+  const comfort = snapshot['comfort']
+  assertRecord(comfort, 'Host Snapshot comfort')
+  const keys = [
+    'enterAngleDegrees',
+    'exitAngleDegrees',
+    'initialDwellMs',
+    'reacquireDwellMs',
+    'visualGraceMs',
+    'transitionMs',
+  ] as const
+  assertKnownKeys(comfort, keys, 'Host Snapshot comfort')
+  const overrides: Partial<Record<(typeof keys)[number], number>> = {}
+  for (const key of keys) {
+    if (!Object.hasOwn(comfort, key)) continue
+    const value = comfort[key]
+    if (typeof value !== 'number') {
+      throw new TypeError(`comfort.${key} must be a number`)
+    }
+    overrides[key] = value
+  }
+  return resolveRevealConfiguration(overrides)
+}
+
+function copyVector3(value: unknown, name: string): Vector3Tuple {
+  assertPortableArray(value, name)
+  const [x, y, z] = value
+  if (
+    value.length !== 3 ||
+    typeof x !== 'number' ||
+    !Number.isFinite(x) ||
+    typeof y !== 'number' ||
+    !Number.isFinite(y) ||
+    typeof z !== 'number' ||
+    !Number.isFinite(z)
+  ) {
+    throw new TypeError(`${name} must contain exactly three finite numbers`)
+  }
+  return Object.freeze([x, y, z])
+}
+
+function copyOptionalControllerWrist(
+  snapshot: Record<string, unknown>,
+): ControllerWristConfiguration | undefined {
+  if (!Object.hasOwn(snapshot, 'controllerWrist')) return undefined
+  const raw = snapshot['controllerWrist']
+  assertRecord(raw, 'Host Snapshot controllerWrist')
+  assertKnownKeys(
+    raw,
+    ['deviceTarget', 'preset', 'offsets'],
+    'Host Snapshot controllerWrist',
+  )
+
+  const configuration: {
+    deviceTarget?: NonNullable<ControllerWristConfiguration['deviceTarget']>
+    preset?: NonNullable<ControllerWristConfiguration['preset']>
+    offsets?: Partial<Record<Handedness, Readonly<{
+      translationMeters: Vector3Tuple
+      rotationDegrees: Vector3Tuple
+    }>>>
+  } = {}
+  if (Object.hasOwn(raw, 'deviceTarget')) {
+    configuration.deviceTarget = raw['deviceTarget'] as NonNullable<
+      ControllerWristConfiguration['deviceTarget']
+    >
+  }
+  if (Object.hasOwn(raw, 'preset')) {
+    configuration.preset = raw['preset'] as NonNullable<
+      ControllerWristConfiguration['preset']
+    >
+  }
+  if (Object.hasOwn(raw, 'offsets')) {
+    const rawOffsets = raw['offsets']
+    assertRecord(rawOffsets, 'Host Snapshot controllerWrist.offsets')
+    assertKnownKeys(
+      rawOffsets,
+      ['left', 'right'],
+      'Host Snapshot controllerWrist.offsets',
+    )
+    const offsets: NonNullable<typeof configuration.offsets> = {}
+    for (const handedness of ['left', 'right'] as const) {
+      if (!Object.hasOwn(rawOffsets, handedness)) continue
+      const rawOffset = rawOffsets[handedness]
+      assertRecord(
+        rawOffset,
+        `Host Snapshot controllerWrist.offsets.${handedness}`,
+      )
+      assertKnownKeys(
+        rawOffset,
+        ['translationMeters', 'rotationDegrees'],
+        `Host Snapshot controllerWrist.offsets.${handedness}`,
+      )
+      offsets[handedness] = Object.freeze({
+        translationMeters: copyVector3(
+          requireOwn(
+            rawOffset,
+            'translationMeters',
+            `controllerWrist.offsets.${handedness}.translationMeters`,
+          ),
+          `controllerWrist.offsets.${handedness}.translationMeters`,
+        ),
+        rotationDegrees: copyVector3(
+          requireOwn(
+            rawOffset,
+            'rotationDegrees',
+            `controllerWrist.offsets.${handedness}.rotationDegrees`,
+          ),
+          `controllerWrist.offsets.${handedness}.rotationDegrees`,
+        ),
+      })
+    }
+    configuration.offsets = offsets
+  }
+  return copyControllerWristConfiguration(configuration)
 }
 
 function requireNonEmptyString(value: unknown, name: string): string {
@@ -369,12 +509,18 @@ function copySeparator(
   })
 }
 
-/** Validate and deeply copy the v1 content portion of a Host Snapshot. */
+/** Validate and deeply copy the complete portable Host Snapshot boundary. */
 export function copyHostSnapshot(snapshot: HostSnapshot): HostSnapshot {
   assertRecord(snapshot, 'Host Snapshot')
   assertKnownKeys(
     snapshot,
-    ['activationMode', 'wrist', 'menuDefinition'],
+    [
+      'activationMode',
+      'wrist',
+      'menuDefinition',
+      'comfort',
+      'controllerWrist',
+    ],
     'Host Snapshot',
   )
   const activationMode = requireOwn(
@@ -382,8 +528,13 @@ export function copyHostSnapshot(snapshot: HostSnapshot): HostSnapshot {
     'activationMode',
     'Host Snapshot activationMode',
   )
-  if (activationMode !== 'forced-open') {
-    throw new TypeError('Host Snapshot activationMode must be "forced-open"')
+  if (
+    activationMode !== 'automatic' &&
+    activationMode !== 'forced-open' &&
+    activationMode !== 'forced-closed' &&
+    activationMode !== 'disabled'
+  ) {
+    throw new TypeError('Host Snapshot activationMode is not supported')
   }
   const wrist = requireOwn(snapshot, 'wrist', 'Host Snapshot wrist')
   if (wrist !== 'left' && wrist !== 'right') {
@@ -395,6 +546,8 @@ export function copyHostSnapshot(snapshot: HostSnapshot): HostSnapshot {
     'Host Snapshot menuDefinition',
   )
   assertPortableArray(rawMenuDefinition, 'Menu Definition')
+  const comfort = copyOptionalComfort(snapshot)
+  const controllerWrist = copyOptionalControllerWrist(snapshot)
 
   const ids = new Set<string>()
   const menuDefinition = rawMenuDefinition.map((entry, index) => {
@@ -416,9 +569,48 @@ export function copyHostSnapshot(snapshot: HostSnapshot): HostSnapshot {
   })
 
   return Object.freeze({
-    activationMode: 'forced-open',
+    activationMode,
     wrist,
     menuDefinition: Object.freeze(menuDefinition),
+    ...(comfort === undefined ? {} : { comfort }),
+    ...(controllerWrist === undefined ? {} : { controllerWrist }),
+  })
+}
+
+/** Compare only resolved settings that require a fresh wrist acquisition. */
+export function anchoringSettingsEqual(
+  left: HostSnapshot,
+  right: HostSnapshot,
+): boolean {
+  if (left.wrist !== right.wrist) return false
+  const leftComfort = resolveRevealConfiguration(left.comfort)
+  const rightComfort = resolveRevealConfiguration(right.comfort)
+  if (
+    Object.keys(leftComfort).some(
+      (key) =>
+        leftComfort[key as keyof RevealConfiguration] !==
+        rightComfort[key as keyof RevealConfiguration],
+    )
+  ) {
+    return false
+  }
+  return (['left', 'right'] as const).every((handedness) => {
+    const leftOffset = resolveControllerWristOffset(
+      left.controllerWrist,
+      handedness,
+    )
+    const rightOffset = resolveControllerWristOffset(
+      right.controllerWrist,
+      handedness,
+    )
+    return (
+      leftOffset.translationMeters.every(
+        (value, index) => value === rightOffset.translationMeters[index],
+      ) &&
+      leftOffset.rotationDegrees.every(
+        (value, index) => value === rightOffset.rotationDegrees[index],
+      )
+    )
   })
 }
 

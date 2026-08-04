@@ -60,7 +60,7 @@ test('React applies complete snapshot props and preserves vanilla event ordering
     )
   })
   const state = store.getState()
-  const advanceMenu = (time) => advance(time, true, state, fixture.frame)
+  const advanceMenu = (time) => advance(time / 1_000, true, state, fixture.frame)
 
   driveControlledIntentJourney({
     ...fixture,
@@ -68,7 +68,9 @@ test('React applies complete snapshot props and preserves vanilla event ordering
   })
 
   assert.deepEqual(
-    events.map(({ intent }) => intent),
+    events
+      .filter(({ type }) => type === 'selection-intent')
+      .map(({ intent }) => intent),
     expectedControlledIntentOrder,
   )
 
@@ -85,10 +87,11 @@ test('React applies complete snapshot props and preserves vanilla event ordering
   })
   advanceMenu(144)
 
-  const shield = state.scene.children.find(
-    ({ name }) => name === 'wrist-menu-scene-event-shield',
+  const attachmentRoot = state.scene.children.find(
+    ({ name }) => name === 'wrist-menu-attachment-root',
   )
-  const rows = shield.children[0].children.filter(({ name }) =>
+  assert.ok(attachmentRoot)
+  const rows = attachmentRoot.children.filter(({ name }) =>
     name.includes('-visual:'),
   )
   assert.equal(rows[2].userData.wristMenuSelected, false)

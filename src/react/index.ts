@@ -6,7 +6,6 @@ import {
   useState,
   type ReactElement,
 } from 'react'
-import { Group } from 'three/src/objects/Group.js'
 
 import {
   createThreeWristMenu,
@@ -47,12 +46,6 @@ function MountedWristMenu({
       onEvent: (event) => onEventRef.current(event),
     }),
   )
-  const [shieldGroup] = useState(() => {
-    const group = new Group()
-    group.name = 'wrist-menu-scene-event-shield'
-    group.add(instance.group)
-    return group
-  })
 
   useEffect(() => {
     if (lastSnapshotRef.current !== snapshot) {
@@ -72,7 +65,7 @@ function MountedWristMenu({
 
   const stopSceneEvent = (event: SceneShieldEvent) => event.stopPropagation()
   const shieldProps: ThreeElements['primitive'] = {
-    object: shieldGroup,
+    object: instance.group,
     onPointerOver: stopSceneEvent,
     onPointerMove: stopSceneEvent,
     onPointerDown: stopSceneEvent,

@@ -12,6 +12,7 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  Quaternion,
   Raycaster,
   Vector3,
 } from 'three'
@@ -19,6 +20,7 @@ import {
 import { WristMenu } from '../dist/react/index.js'
 import {
   controllerActionSnapshot,
+  FakeReferenceSpace,
   FakeXrSession,
 } from '../fixtures/controller-action.mjs'
 
@@ -29,16 +31,40 @@ function createReactXrFixture() {
     handedness: 'right',
     targetRayMode: 'tracked-pointer',
     targetRaySpace: {},
+    gripSpace: {},
+    profiles: ['unknown'],
   }
-  const session = new FakeXrSession(inputSource)
-  const referenceSpace = {}
+  const menuInputSource = {
+    handedness: 'left',
+    targetRayMode: 'tracked-pointer',
+    targetRaySpace: {},
+    gripSpace: {},
+    profiles: ['unknown'],
+  }
+  const session = new FakeXrSession([menuInputSource, inputSource])
+  const referenceSpace = new FakeReferenceSpace()
+  const createPose = (matrix) => {
+    const position = new Vector3()
+    const orientation = new Quaternion()
+    matrix.decompose(position, orientation, new Vector3())
+    return {
+      emulatedPosition: false,
+      transform: { matrix: matrix.toArray(), position, orientation },
+    }
+  }
   const frame = {
     session,
-    getPose: () => ({
-      transform: {
-        matrix: new Matrix4().makeTranslation(0, 0, 1).toArray(),
-      },
-    }),
+    getPose(space) {
+      if (space === inputSource.targetRaySpace) {
+        return createPose(new Matrix4().makeTranslation(0, 0, 1))
+      }
+      if (space === menuInputSource.gripSpace) {
+        return createPose(new Matrix4().makeRotationY(-Math.PI / 2))
+      }
+      if (space === inputSource.gripSpace) return createPose(new Matrix4())
+      return null
+    },
+    getViewerPose: () => createPose(new Matrix4().makeTranslation(0, 0, 1)),
   }
   const xrListeners = new Map()
   const xr = {
@@ -143,9 +169,7 @@ test('React integration mounts the Three instance and shields its active Hit Reg
   })
 
   const state = store.getState()
-  const shield = state.scene.children[0]
-  const menuGroup = shield?.children[0]
-  assert.equal(shield?.name, 'wrist-menu-scene-event-shield')
+  const menuGroup = state.scene.children[0]
   assert.equal(menuGroup?.name, 'wrist-menu-attachment-root')
 
   const ray = new Raycaster(
