@@ -222,10 +222,13 @@ export function createThreeWristMenu(
 
     dispose() {
       if (disposed) return
-      attachSession(null)
-      runtime.dispose()
-      presentation.dispose()
       disposed = true
+      attachSession(null)
+      try {
+        runtime.dispose()
+      } finally {
+        presentation.dispose()
+      }
     },
   })
 }

@@ -51,7 +51,7 @@ export type FrameSample = Readonly<{
   selectionSources: readonly ControllerSelectionSourceSample[]
 }>
 
-/** Evidence that a controller target ray currently intersects an Action Item. */
+/** Evidence that a controller target ray currently intersects a Menu Item. */
 export type TargetObservation = Readonly<{
   sourceId: string
   kind: 'controller-target-ray'
@@ -214,11 +214,12 @@ export function createWristMenuRuntime(
       lastTime = frameSample.time
 
       if (pendingSnapshot !== undefined) {
-        cancelOwnership('host-snapshot-changed', frameSample.time)
-        snapshot = pendingSnapshot
+        const snapshotToApply = pendingSnapshot
         pendingSnapshot = undefined
+        snapshot = snapshotToApply
         revision += 1
         targetableAfterSequence = frameSample.sequence
+        cancelOwnership('host-snapshot-changed', frameSample.time)
       }
 
       if (targetableAfterSequence === undefined) {
@@ -358,10 +359,13 @@ export function createWristMenuRuntime(
 
     dispose() {
       if (disposed) return
-      cancelOwnership('disposed', lastTime)
       disposed = true
-      claims.clear()
-      previousPressed.clear()
+      try {
+        cancelOwnership('disposed', lastTime)
+      } finally {
+        claims.clear()
+        previousPressed.clear()
+      }
     },
   })
 }

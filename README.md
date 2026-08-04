@@ -53,6 +53,12 @@ group, item, current value, and proposed value. The Wrist Menu Package never
 changes displayed Toggle or Choice state itself—the Host Application supplies
 the next complete snapshot.
 
+The current Renderer Integration preserves this complete semantic content on
+ordered rows and explicit Hit Regions, including portable labels, icon keys,
+values, selected state, and disabled reasons. The production Reach typography,
+procedural icon atlas, and virtualized viewport are a separate presentation
+milestone; they do not change this Host or event contract.
+
 Vanilla hosts create a `createThreeWristMenu` instance, attach its stable
 `group`, and call `update({ time, frame })` from their existing XR loop. Before
 handling a scene action, call `blocksSceneInput(inputSource)` so the same

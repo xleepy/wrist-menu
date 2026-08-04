@@ -130,9 +130,53 @@ function assertKnownKeys(
   name: string,
 ) {
   const allowed = new Set(allowedKeys)
-  const unknown = Object.keys(record).find((key) => !allowed.has(key))
-  if (unknown !== undefined) {
-    throw new TypeError(`${name} contains unsupported field: ${unknown}`)
+  for (const key of Reflect.ownKeys(record)) {
+    if (typeof key !== 'string' || !allowed.has(key)) {
+      throw new TypeError(`${name} contains unsupported field: ${String(key)}`)
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(record, key)
+    if (
+      descriptor === undefined ||
+      !descriptor.enumerable ||
+      !Object.hasOwn(descriptor, 'value')
+    ) {
+      throw new TypeError(`${name} field ${key} must be portable data`)
+    }
+  }
+}
+
+function requireOwn(
+  record: Record<string, unknown>,
+  key: string,
+  name: string,
+): unknown {
+  if (!Object.hasOwn(record, key)) {
+    throw new TypeError(`${name} is required`)
+  }
+  return record[key]
+}
+
+function assertPortableArray(
+  value: unknown,
+  name: string,
+): asserts value is unknown[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${name} must be an array`)
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) {
+      throw new TypeError(`${name} must be a dense array`)
+    }
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (key === 'length') continue
+    if (
+      typeof key !== 'string' ||
+      !/^(0|[1-9]\d*)$/.test(key) ||
+      Number(key) >= value.length
+    ) {
+      throw new TypeError(`${name} contains an unsupported array field`)
+    }
   }
 }
 
@@ -148,7 +192,7 @@ function copyOptionalNonEmptyString(
   key: string,
   name: string,
 ): string | undefined {
-  if (!(key in record)) return undefined
+  if (!Object.hasOwn(record, key)) return undefined
   return requireNonEmptyString(record[key], name)
 }
 
@@ -156,7 +200,9 @@ function copyDisabledFields(
   record: Record<string, unknown>,
   name: string,
 ): Readonly<{ disabled?: boolean; disabledReason?: string }> {
-  const disabled = record['disabled']
+  const disabled = Object.hasOwn(record, 'disabled')
+    ? record['disabled']
+    : undefined
   if (disabled !== undefined && typeof disabled !== 'boolean') {
     throw new TypeError(`${name} disabled must be a boolean`)
   }
@@ -180,8 +226,14 @@ function copyInteractiveFields(
 ): InteractiveItemFields {
   const iconKey = copyOptionalNonEmptyString(record, 'iconKey', `${name} iconKey`)
   return Object.freeze({
-    id: requireNonEmptyString(record['id'], `${name} id`),
-    label: requireNonEmptyString(record['label'], `${name} label`),
+    id: requireNonEmptyString(
+      requireOwn(record, 'id', `${name} id`),
+      `${name} id`,
+    ),
+    label: requireNonEmptyString(
+      requireOwn(record, 'label', `${name} label`),
+      `${name} label`,
+    ),
     ...(iconKey === undefined ? {} : { iconKey }),
     ...copyDisabledFields(record, name),
   })
@@ -193,7 +245,7 @@ function copyChoiceValue(value: unknown, name: string): ChoiceValue {
   throw new TypeError(`${name} must be a string or finite number`)
 }
 
-function registerId(ids: Set<string>, id: string, name: string) {
+function registerId(ids: Set<string>, id: string) {
   if (ids.has(id)) throw new TypeError(`Menu item id must be unique: ${id}`)
   ids.add(id)
   return id
@@ -209,7 +261,7 @@ function copyAction(
     'Action Item',
   )
   const fields = copyInteractiveFields(record, 'Action Item')
-  registerId(ids, fields.id, 'Action Item')
+  registerId(ids, fields.id)
   return Object.freeze({ type: 'action', ...fields })
 }
 
@@ -223,11 +275,12 @@ function copyToggle(
     'Toggle Item',
   )
   const fields = copyInteractiveFields(record, 'Toggle Item')
-  registerId(ids, fields.id, 'Toggle Item')
-  if (typeof record['value'] !== 'boolean') {
+  registerId(ids, fields.id)
+  const value = requireOwn(record, 'value', `Toggle Item ${fields.id} value`)
+  if (typeof value !== 'boolean') {
     throw new TypeError(`Toggle Item ${fields.id} value must be a boolean`)
   }
-  return Object.freeze({ type: 'toggle', ...fields, value: record['value'] })
+  return Object.freeze({ type: 'toggle', ...fields, value })
 }
 
 function copyChoiceGroup(
@@ -241,20 +294,31 @@ function copyChoiceGroup(
   )
   const id = registerId(
     ids,
-    requireNonEmptyString(record['id'], 'Choice Group id'),
-    'Choice Group',
+    requireNonEmptyString(
+      requireOwn(record, 'id', 'Choice Group id'),
+      'Choice Group id',
+    ),
   )
-  const label = requireNonEmptyString(record['label'], `Choice Group ${id} label`)
+  const label = requireNonEmptyString(
+    requireOwn(record, 'label', `Choice Group ${id} label`),
+    `Choice Group ${id} label`,
+  )
   const selectedValue = copyChoiceValue(
-    record['selectedValue'],
+    requireOwn(
+      record,
+      'selectedValue',
+      `Choice Group ${id} selectedValue`,
+    ),
     `Choice Group ${id} selectedValue`,
   )
-  if (!Array.isArray(record['options']) || record['options'].length === 0) {
-    throw new TypeError(`Choice Group ${id} options must be a non-empty array`)
+  const rawOptions = requireOwn(record, 'options', `Choice Group ${id} options`)
+  assertPortableArray(rawOptions, `Choice Group ${id} options`)
+  if (rawOptions.length === 0) {
+    throw new TypeError(`Choice Group ${id} options must be non-empty`)
   }
 
   const values: ChoiceValue[] = []
-  const options = record['options'].map((option, index) => {
+  const options = rawOptions.map((option, index) => {
     const name = `Choice Group ${id} option ${index}`
     assertRecord(option, name)
     assertKnownKeys(
@@ -263,8 +327,11 @@ function copyChoiceGroup(
       name,
     )
     const fields = copyInteractiveFields(option, name)
-    registerId(ids, fields.id, name)
-    const value = copyChoiceValue(option['value'], `${name} value`)
+    registerId(ids, fields.id)
+    const value = copyChoiceValue(
+      requireOwn(option, 'value', `${name} value`),
+      `${name} value`,
+    )
     if (values.some((existing) => existing === value)) {
       throw new TypeError(`Choice Group ${id} option values must be unique`)
     }
@@ -294,7 +361,7 @@ function copySeparator(
   assertKnownKeys(record, ['type', 'id', 'label'], 'Separator')
   const id = copyOptionalNonEmptyString(record, 'id', 'Separator id')
   const label = copyOptionalNonEmptyString(record, 'label', 'Separator label')
-  if (id !== undefined) registerId(ids, id, 'Separator')
+  if (id !== undefined) registerId(ids, id)
   return Object.freeze({
     type: 'separator',
     ...(id === undefined ? {} : { id }),
@@ -305,21 +372,36 @@ function copySeparator(
 /** Validate and deeply copy the v1 content portion of a Host Snapshot. */
 export function copyHostSnapshot(snapshot: HostSnapshot): HostSnapshot {
   assertRecord(snapshot, 'Host Snapshot')
-  if (snapshot['activationMode'] !== 'forced-open') {
+  assertKnownKeys(
+    snapshot,
+    ['activationMode', 'wrist', 'menuDefinition'],
+    'Host Snapshot',
+  )
+  const activationMode = requireOwn(
+    snapshot,
+    'activationMode',
+    'Host Snapshot activationMode',
+  )
+  if (activationMode !== 'forced-open') {
     throw new TypeError('Host Snapshot activationMode must be "forced-open"')
   }
-  if (snapshot['wrist'] !== 'left' && snapshot['wrist'] !== 'right') {
+  const wrist = requireOwn(snapshot, 'wrist', 'Host Snapshot wrist')
+  if (wrist !== 'left' && wrist !== 'right') {
     throw new TypeError('Host Snapshot wrist must be "left" or "right"')
   }
-  if (!Array.isArray(snapshot['menuDefinition'])) {
-    throw new TypeError('Host Snapshot menuDefinition must be an array')
-  }
+  const rawMenuDefinition = requireOwn(
+    snapshot,
+    'menuDefinition',
+    'Host Snapshot menuDefinition',
+  )
+  assertPortableArray(rawMenuDefinition, 'Menu Definition')
 
   const ids = new Set<string>()
-  const menuDefinition = snapshot['menuDefinition'].map((entry, index) => {
+  const menuDefinition = rawMenuDefinition.map((entry, index) => {
     const name = `Menu Definition entry ${index}`
     assertRecord(entry, name)
-    switch (entry['type']) {
+    const type = requireOwn(entry, 'type', `${name} type`)
+    switch (type) {
       case 'action':
         return copyAction(entry, ids)
       case 'toggle':
@@ -335,7 +417,7 @@ export function copyHostSnapshot(snapshot: HostSnapshot): HostSnapshot {
 
   return Object.freeze({
     activationMode: 'forced-open',
-    wrist: snapshot['wrist'],
+    wrist,
     menuDefinition: Object.freeze(menuDefinition),
   })
 }

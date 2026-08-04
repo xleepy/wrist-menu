@@ -35,6 +35,8 @@ test('Presentation Model preserves the complete Host-owned Menu Definition order
     disabled: false,
     interaction: 'idle',
   })
+  assert.equal(model.items[0].label, 'Reset workshop')
+  assert.equal(model.items[0].iconKey, 'reset')
   assert.deepEqual(model.items[3], {
     type: 'choice-group',
     id: 'primitive-shape',
@@ -127,6 +129,29 @@ test('content validation rejects unstable, non-portable, and ambiguous definitio
   callbackContent.menuDefinition[0].onSelect = () => undefined
   assert.throws(() => create(callbackContent), /unsupported field: onSelect/)
 
+  const symbolContent = structuredClone(hostControlledSnapshot)
+  symbolContent.menuDefinition[0][Symbol('onSelect')] = () => undefined
+  assert.throws(() => create(symbolContent), /unsupported field: Symbol\(onSelect\)/)
+
+  const hiddenContent = structuredClone(hostControlledSnapshot)
+  Object.defineProperty(hiddenContent.menuDefinition[0], 'onSelect', {
+    value: () => undefined,
+  })
+  assert.throws(() => create(hiddenContent), /unsupported field: onSelect/)
+
+  const accessorContent = structuredClone(hostControlledSnapshot)
+  Object.defineProperty(accessorContent.menuDefinition[0], 'label', {
+    enumerable: true,
+    get: () => 'Reset workshop',
+  })
+  assert.throws(() => create(accessorContent), /field label must be portable data/)
+
+  const callbackSnapshot = {
+    ...structuredClone(hostControlledSnapshot),
+    onEvent: () => undefined,
+  }
+  assert.throws(() => create(callbackSnapshot), /unsupported field: onEvent/)
+
   const nonFiniteValue = structuredClone(hostControlledSnapshot)
   nonFiniteValue.menuDefinition[3].options[0].value = Number.NaN
   assert.throws(() => create(nonFiniteValue), /string or finite number/)
@@ -136,6 +161,20 @@ test('content validation rejects unstable, non-portable, and ambiguous definitio
   assert.throws(
     () => create(unexplainedEnabledItem),
     /disabledReason requires disabled: true/,
+  )
+
+  const sparseDefinition = structuredClone(hostControlledSnapshot)
+  delete sparseDefinition.menuDefinition[1]
+  assert.throws(
+    () => create(sparseDefinition),
+    /Menu Definition must be a dense array/,
+  )
+
+  const sparseOptions = structuredClone(hostControlledSnapshot)
+  delete sparseOptions.menuDefinition[3].options[0]
+  assert.throws(
+    () => create(sparseOptions),
+    /Choice Group primitive-shape options must be a dense array/,
   )
 
   const empty = create({
@@ -209,6 +248,57 @@ test('a Host sync from an event callback waits for the next Frame Sample', () =>
   const followingFrame = runtime.step(controlledFrame(5), [])
   assert.equal(followingFrame.items[2].value, false)
   assert.equal(followingFrame.revision, 2)
+})
+
+test('a Host sync from a snapshot-cancellation callback waits another Frame Sample', () => {
+  const firstUpdate = structuredClone(hostControlledSnapshot)
+  firstUpdate.menuDefinition[2].value = false
+  const callbackUpdate = structuredClone(hostControlledSnapshot)
+  callbackUpdate.menuDefinition[2].label = 'Grid from callback'
+  let runtime
+  runtime = createWristMenuRuntime({
+    snapshot: hostControlledSnapshot,
+    onEvent: (event) => {
+      if (
+        event.type === 'selection-cancellation' &&
+        event.reason === 'host-snapshot-changed'
+      ) {
+        runtime.sync(callbackUpdate)
+      }
+    },
+  })
+  runtime.step(controlledFrame(1), [])
+  runtime.step(controlledFrame(2), [observe('show-grid')])
+  runtime.step(controlledFrame(3, true), [observe('show-grid')])
+  runtime.sync(firstUpdate)
+
+  const firstBoundary = runtime.step(controlledFrame(4, true), [])
+  assert.equal(firstBoundary.items[2].value, false)
+  assert.equal(firstBoundary.items[2].label, 'Show grid')
+  assert.equal(firstBoundary.revision, 2)
+
+  const secondBoundary = runtime.step(controlledFrame(5), [])
+  assert.equal(secondBoundary.items[2].value, true)
+  assert.equal(secondBoundary.items[2].label, 'Grid from callback')
+  assert.equal(secondBoundary.revision, 3)
+})
+
+test('a throwing disposal callback still leaves the Wrist Menu Instance disposed', () => {
+  const runtime = createWristMenuRuntime({
+    snapshot: hostControlledSnapshot,
+    onEvent: (event) => {
+      if (event.type === 'selection-cancellation' && event.reason === 'disposed') {
+        throw new Error('Host disposal callback failed')
+      }
+    },
+  })
+  runtime.step(controlledFrame(1), [])
+  runtime.step(controlledFrame(2), [observe('show-grid')])
+  runtime.step(controlledFrame(3, true), [observe('show-grid')])
+
+  assert.throws(() => runtime.dispose(), /Host disposal callback failed/)
+  assert.throws(() => runtime.step(controlledFrame(4), []), /disposed/)
+  assert.doesNotThrow(() => runtime.dispose())
 })
 
 test('disabled items can be observed but never arm, claim, or emit an intent', () => {

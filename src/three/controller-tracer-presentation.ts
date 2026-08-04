@@ -30,6 +30,7 @@ type PresentationRow =
       type: 'choice-group'
       id: string
       label: string
+      selectedValue: string | number
     }>
   | Readonly<{
       type: 'separator'
@@ -41,7 +42,12 @@ function rowsFor(items: readonly PresentationItem[]): readonly PresentationRow[]
   const rows: PresentationRow[] = []
   items.forEach((item, index) => {
     if (item.type === 'choice-group') {
-      rows.push({ type: 'choice-group', id: item.id, label: item.label })
+      rows.push({
+        type: 'choice-group',
+        id: item.id,
+        label: item.label,
+        selectedValue: item.selectedValue,
+      })
       rows.push(...item.options)
     } else if (item.type === 'separator') {
       rows.push({
@@ -110,6 +116,14 @@ export class ControllerTracerPresentation {
       row.raycast = decorativeRaycast
       row.userData['wristMenuItemType'] = item.type
       row.userData['wristMenuLabel'] = item.label
+      row.userData['wristMenuIconKey'] =
+        'iconKey' in item ? item.iconKey : undefined
+      row.userData['wristMenuValue'] =
+        item.type === 'toggle' || item.type === 'choice'
+          ? item.value
+          : item.type === 'choice-group'
+            ? item.selectedValue
+            : undefined
       this.group.add(row)
       this.rowMeshes.push(row)
       this.resources.push(rowGeometry, rowMaterial)
@@ -118,6 +132,8 @@ export class ControllerTracerPresentation {
 
       row.userData['wristMenuSelected'] =
         item.type === 'toggle' || item.type === 'choice' ? item.selected : false
+      row.userData['wristMenuValue'] =
+        item.type === 'toggle' || item.type === 'choice' ? item.value : undefined
       row.userData['wristMenuDisabledReason'] = item.disabledReason
 
       const hitGeometry = new BoxGeometry(0.176, 0.02, 0.008)
