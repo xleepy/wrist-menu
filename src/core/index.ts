@@ -1,27 +1,38 @@
+import {
+  copyHostSnapshot,
+  createPresentationItems,
+  findInteractiveItem,
+  type Handedness,
+  type HostSnapshot,
+  type PresentationItem,
+} from './host-snapshot.js'
+
+export type {
+  ActionItem,
+  ChoiceGroup,
+  ChoiceOption,
+  ChoiceValue,
+  Handedness,
+  HostSnapshot,
+  MenuDefinitionEntry,
+  MenuInteraction,
+  MenuValue,
+  PresentationActionItem,
+  PresentationChoiceGroup,
+  PresentationChoiceOption,
+  PresentationItem,
+  PresentationSeparatorItem,
+  PresentationToggleItem,
+  SeparatorItem,
+  ToggleItem,
+} from './host-snapshot.js'
+
 /** Session features a Host Application may request for Wrist Menu support. */
 export const wristMenuSessionFeatures = {
   optionalFeatures: ['hand-tracking', 'local-floor'],
 } as const
 
 export type WristMenuSessionFeatures = typeof wristMenuSessionFeatures
-
-export type Handedness = 'left' | 'right'
-
-export type ActionItem = Readonly<{
-  type: 'action'
-  id: string
-  label: string
-}>
-
-/**
- * Complete Host Application-owned input for the first controller tracer.
- * Later menu item families extend this portable data boundary.
- */
-export type HostSnapshot = Readonly<{
-  activationMode: 'forced-open'
-  wrist: Handedness
-  menuDefinition: readonly ActionItem[]
-}>
 
 export type ControllerSelectionSourceSample = Readonly<{
   id: string
@@ -47,10 +58,24 @@ export type TargetObservation = Readonly<{
   itemId: string
 }>
 
-export type SelectionIntent = Readonly<{
-  type: 'action'
-  itemId: string
-}>
+export type SelectionIntent =
+  | Readonly<{
+      type: 'action'
+      itemId: string
+    }>
+  | Readonly<{
+      type: 'toggle'
+      itemId: string
+      currentValue: boolean
+      proposedValue: boolean
+    }>
+  | Readonly<{
+      type: 'choice'
+      groupId: string
+      itemId: string
+      currentValue: string | number
+      proposedValue: string | number
+    }>
 
 export type WristMenuEvent =
   | Readonly<{
@@ -76,13 +101,6 @@ export type WristMenuEvent =
         | 'disposed'
       time: number
     }>
-
-export type PresentationItem = Readonly<{
-  type: 'action'
-  id: string
-  label: string
-  interaction: 'idle' | 'hovered' | 'armed'
-}>
 
 /** Read-only output consumed by Renderer Integrations. */
 export type PresentationModel = Readonly<{
@@ -112,44 +130,46 @@ type OwnedSelection = Readonly<{
   itemId: string
 }>
 
-function copySnapshot(snapshot: HostSnapshot): HostSnapshot {
-  if (snapshot.activationMode !== 'forced-open') {
-    throw new TypeError('Host Snapshot activationMode must be "forced-open"')
+function selectionIntentFor(
+  snapshot: HostSnapshot,
+  itemId: string,
+): SelectionIntent {
+  const located = findInteractiveItem(snapshot.menuDefinition, itemId)
+  if (located === undefined) {
+    throw new Error(`Selection-owned Menu Item disappeared: ${itemId}`)
   }
-  if (snapshot.wrist !== 'left' && snapshot.wrist !== 'right') {
-    throw new TypeError('Host Snapshot wrist must be "left" or "right"')
+  if (located.group !== undefined) {
+    const option = located.group.options.find(({ id }) => id === itemId)
+    if (option === undefined) {
+      throw new Error(`Selection-owned Choice Option disappeared: ${itemId}`)
+    }
+    return Object.freeze({
+      type: 'choice',
+      groupId: located.group.id,
+      itemId: option.id,
+      currentValue: located.group.selectedValue,
+      proposedValue: option.value,
+    })
   }
-  if (!Array.isArray(snapshot.menuDefinition)) {
-    throw new TypeError('Host Snapshot menuDefinition must be an array')
+  if ('type' in located.item && located.item.type === 'toggle') {
+    return Object.freeze({
+      type: 'toggle',
+      itemId: located.item.id,
+      currentValue: located.item.value,
+      proposedValue: !located.item.value,
+    })
   }
-
-  const ids = new Set<string>()
-  const menuDefinition = snapshot.menuDefinition.map((item) => {
-    if (item.type !== 'action') {
-      throw new TypeError('The controller tracer supports only Action Items')
-    }
-    if (item.id.trim() === '' || item.label.trim() === '') {
-      throw new TypeError('Action Items require non-empty ids and labels')
-    }
-    if (ids.has(item.id)) {
-      throw new TypeError(`Action Item id must be unique: ${item.id}`)
-    }
-    ids.add(item.id)
-    return Object.freeze({ type: 'action' as const, id: item.id, label: item.label })
-  })
-
-  return Object.freeze({
-    activationMode: 'forced-open' as const,
-    wrist: snapshot.wrist,
-    menuDefinition: Object.freeze(menuDefinition),
-  })
+  if ('type' in located.item && located.item.type === 'action') {
+    return Object.freeze({ type: 'action', itemId: located.item.id })
+  }
+  throw new Error(`Selection-owned Menu Item has no intent: ${itemId}`)
 }
 
 /** Create the framework-neutral behavior runtime used by every integration. */
 export function createWristMenuRuntime(
   options: CreateWristMenuRuntimeOptions,
 ): WristMenuRuntime {
-  let snapshot = copySnapshot(options.snapshot)
+  let snapshot = copyHostSnapshot(options.snapshot)
   let pendingSnapshot: HostSnapshot | undefined
   let disposed = false
   let revision = 1
@@ -183,7 +203,7 @@ export function createWristMenuRuntime(
   return Object.freeze({
     sync(nextSnapshot) {
       assertActive()
-      pendingSnapshot = copySnapshot(nextSnapshot)
+      pendingSnapshot = copyHostSnapshot(nextSnapshot)
     },
 
     step(frameSample, targetObservations) {
@@ -229,7 +249,6 @@ export function createWristMenuRuntime(
         cancelOwnership('lifecycle-interrupted', frameSample.time)
       }
 
-      const itemsById = new Map(snapshot.menuDefinition.map((item) => [item.id, item]))
       const observationsBySource = new Map<string, TargetObservation>()
       if (targetable) {
         for (const observation of targetObservations) {
@@ -238,7 +257,8 @@ export function createWristMenuRuntime(
             observation.kind === 'controller-target-ray' &&
             source !== undefined &&
             source.handedness !== snapshot.wrist &&
-            itemsById.has(observation.itemId) &&
+            findInteractiveItem(snapshot.menuDefinition, observation.itemId) !==
+              undefined &&
             !observationsBySource.has(observation.sourceId)
           ) {
             observationsBySource.set(observation.sourceId, observation)
@@ -251,6 +271,10 @@ export function createWristMenuRuntime(
         const wasPressed = previousPressed.get(source.id) ?? source.selectPressed
         const observation = observationsBySource.get(source.id)
         const eligible = source.handedness !== snapshot.wrist
+        const observedItem =
+          observation === undefined
+            ? undefined
+            : findInteractiveItem(snapshot.menuDefinition, observation.itemId)
 
         if (
           ownedSelection?.sourceId === source.id &&
@@ -265,7 +289,8 @@ export function createWristMenuRuntime(
           source.selectPressed &&
           eligible &&
           ownedSelection === undefined &&
-          observation !== undefined
+          observation !== undefined &&
+          observedItem?.item.disabled !== true
         ) {
           ownedSelection = Object.freeze({
             sourceId: source.id,
@@ -290,7 +315,7 @@ export function createWristMenuRuntime(
           } else if (observation?.itemId === committed.itemId) {
             options.onEvent({
               type: 'selection-intent',
-              intent: { type: 'action', itemId: committed.itemId },
+              intent: selectionIntentFor(snapshot, committed.itemId),
               source: { kind: 'controller', handedness: source.handedness },
               menuWrist: snapshot.wrist,
               time: frameSample.time,
@@ -316,18 +341,12 @@ export function createWristMenuRuntime(
         visible,
         targetable,
         revision,
-        items: Object.freeze(
-          snapshot.menuDefinition.map((item) =>
-            Object.freeze({
-              ...item,
-              interaction:
-                ownedSelection?.itemId === item.id
-                  ? ('armed' as const)
-                  : hoveredItemIds.has(item.id)
-                    ? ('hovered' as const)
-                    : ('idle' as const),
-            }),
-          ),
+        items: createPresentationItems(snapshot.menuDefinition, (itemId) =>
+          ownedSelection?.itemId === itemId
+            ? 'armed'
+            : hoveredItemIds.has(itemId)
+              ? 'hovered'
+              : 'idle',
         ),
       })
     },
