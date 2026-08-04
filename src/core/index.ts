@@ -46,6 +46,13 @@ import {
   type VisibilityChangeReason,
 } from './reveal-state.js'
 import {
+  createSelectionStateMachine,
+  type SelectionCancellation,
+  type SelectionCancellationReason,
+  type SelectionSourceSample,
+  type TargetObservation,
+} from './selection-state.js'
+import {
   resolveWristAnchor,
   selectWristSource,
   type PoseSample,
@@ -75,14 +82,15 @@ export {
   type WristSourceSample,
 } from './wrist-anchor.js'
 export type { RevealPhase, VisibilityChangeReason } from './reveal-state.js'
-export type ControllerSelectionSourceSample = Readonly<{
-  id: string
-  kind: 'controller'
-  handedness: Handedness
-  selectPressed: boolean
-  /** True only after this physical action emitted WebXR's successful `select`. */
-  selectCompleted: boolean
-}>
+export type {
+  ControllerSelectionSourceSample,
+  ControllerTargetObservation,
+  HandSelectionSourceSample,
+  HandTargetObservation,
+  SelectionCancellationReason,
+  SelectionSourceSample,
+  TargetObservation,
+} from './selection-state.js'
 
 /** One renderer-neutral sample of poses and input for the current XR frame. */
 export type FrameSample = Readonly<{
@@ -93,14 +101,7 @@ export type FrameSample = Readonly<{
   wristSources: readonly WristSourceSample[]
   /** Changes after session, reference-space, recenter, or attachment resets. */
   lifecycleRevision: number
-  selectionSources: readonly ControllerSelectionSourceSample[]
-}>
-
-/** Evidence that a controller target ray currently intersects a Menu Item. */
-export type TargetObservation = Readonly<{
-  sourceId: string
-  kind: 'controller-target-ray'
-  itemId: string
+  selectionSources: readonly SelectionSourceSample[]
 }>
 
 export type SelectionIntent =
@@ -127,7 +128,8 @@ export type WristMenuEvent =
       type: 'selection-intent'
       intent: SelectionIntent
       source: Readonly<{
-        kind: 'controller'
+        id: string
+        kind: 'hand' | 'controller'
         handedness: Handedness
       }>
       menuWrist: Handedness
@@ -143,13 +145,7 @@ export type WristMenuEvent =
       type: 'selection-cancellation'
       itemId: string
       sourceId: string
-      reason:
-        | 'released-away'
-        | 'action-cancelled'
-        | 'target-changed'
-        | 'host-snapshot-changed'
-        | 'lifecycle-interrupted'
-        | 'disposed'
+      reason: SelectionCancellationReason
       time: number
     }>
 
@@ -177,11 +173,6 @@ export type WristMenuRuntime = Readonly<{
 export type CreateWristMenuRuntimeOptions = Readonly<{
   snapshot: HostSnapshot
   onEvent: (event: WristMenuEvent) => void
-}>
-
-type OwnedSelection = Readonly<{
-  sourceId: string
-  itemId: string
 }>
 
 function selectionIntentFor(
@@ -229,34 +220,37 @@ export function createWristMenuRuntime(
   let disposed = false
   let revision = 1
   let targetableAfterSequence: number | undefined
-  let ownedSelection: OwnedSelection | undefined
   let lastTime = 0
   const revealState = createRevealState()
   let revealWasInteractive = false
   let lastReportedVisible = false
   let lastLifecycleRevision: number | undefined
-  const previousPressed = new Map<string, boolean>()
-  const claims = new Set<string>()
+  const selection = createSelectionStateMachine()
 
   const assertActive = () => {
     if (disposed) throw new Error('Wrist Menu Instance is disposed')
   }
 
-  const cancelOwnership = (
-    reason: Extract<WristMenuEvent, { type: 'selection-cancellation' }>['reason'],
+  const emitCancellation = (
+    cancellation: SelectionCancellation,
     time: number,
   ) => {
-    if (ownedSelection === undefined) return
-    const cancelled = ownedSelection
-    ownedSelection = undefined
-    claims.delete(cancelled.sourceId)
     options.onEvent({
       type: 'selection-cancellation',
-      itemId: cancelled.itemId,
-      sourceId: cancelled.sourceId,
-      reason,
+      itemId: cancellation.itemId,
+      sourceId: cancellation.sourceId,
+      reason: cancellation.reason,
       time,
     })
+  }
+
+  const cancelSelection = (
+    reason: SelectionCancellationReason,
+    time: number,
+  ) => {
+    for (const cancellation of selection.cancel(reason)) {
+      emitCancellation(cancellation, time)
+    }
   }
 
   return Object.freeze({
@@ -286,7 +280,7 @@ export function createWristMenuRuntime(
         revealConfiguration = resolveRevealConfiguration(snapshot.comfort)
         revision += 1
         targetableAfterSequence = frameSample.sequence
-        cancelOwnership('host-snapshot-changed', frameSample.time)
+        cancelSelection('host-snapshot-changed', frameSample.time)
       }
 
       if (!Array.isArray(frameSample.wristSources)) {
@@ -335,10 +329,7 @@ export function createWristMenuRuntime(
         frameSample.sequence > targetableAfterSequence
 
       if (!targetable) {
-        if (ownedSelection !== undefined) {
-          cancelOwnership('lifecycle-interrupted', frameSample.time)
-        }
-        claims.clear()
+        cancelSelection('lifecycle-interrupted', frameSample.time)
       }
 
       if (visible !== lastReportedVisible) {
@@ -351,106 +342,42 @@ export function createWristMenuRuntime(
         })
       }
 
-      const selectionSourcesById = new Map(
-        frameSample.selectionSources
-          .filter((source) => source.kind === 'controller')
-          .map((source) => [source.id, source]),
-      )
-      if (
-        ownedSelection !== undefined &&
-        !selectionSourcesById.has(ownedSelection.sourceId)
-      ) {
-        cancelOwnership('lifecycle-interrupted', frameSample.time)
-      }
-
-      const observationsBySource = new Map<string, TargetObservation>()
-      if (targetable) {
-        for (const observation of targetObservations) {
-          const source = selectionSourcesById.get(observation.sourceId)
-          if (
-            observation.kind === 'controller-target-ray' &&
-            source !== undefined &&
-            source.handedness !== snapshot.wrist &&
-            findInteractiveItem(snapshot.menuDefinition, observation.itemId) !==
-              undefined &&
-            !observationsBySource.has(observation.sourceId)
-          ) {
-            observationsBySource.set(observation.sourceId, observation)
-          }
+      const disabledItemIds = new Set<string>()
+      const validObservations = targetObservations.filter((observation) => {
+        const located = findInteractiveItem(
+          snapshot.menuDefinition,
+          observation.itemId,
+        )
+        if (located?.item.disabled === true) {
+          disabledItemIds.add(observation.itemId)
         }
-      }
-
-      for (const source of frameSample.selectionSources) {
-        if (source.kind !== 'controller') continue
-        const wasPressed = previousPressed.get(source.id) ?? source.selectPressed
-        const observation = observationsBySource.get(source.id)
-        const eligible = source.handedness !== snapshot.wrist
-        const observedItem =
-          observation === undefined
-            ? undefined
-            : findInteractiveItem(snapshot.menuDefinition, observation.itemId)
-
-        if (
-          ownedSelection?.sourceId === source.id &&
-          observation !== undefined &&
-          observation.itemId !== ownedSelection.itemId
-        ) {
-          cancelOwnership('target-changed', frameSample.time)
-        }
-
-        if (
-          !wasPressed &&
-          source.selectPressed &&
-          eligible &&
-          ownedSelection === undefined &&
-          observation !== undefined &&
-          observedItem?.item.disabled !== true
-        ) {
-          ownedSelection = Object.freeze({
-            sourceId: source.id,
-            itemId: observation.itemId,
+        return located !== undefined
+      })
+      const selectionResult = selection.step({
+        targetable,
+        menuWrist: snapshot.wrist,
+        sources: frameSample.selectionSources,
+        observations: validObservations,
+        disabledItemIds,
+      })
+      for (const transition of selectionResult.transitions) {
+        if (transition.type === 'cancel') {
+          emitCancellation(transition, frameSample.time)
+        } else {
+          options.onEvent({
+            type: 'selection-intent',
+            intent: selectionIntentFor(snapshot, transition.itemId),
+            source: {
+              id: transition.source.id,
+              kind: transition.source.kind,
+              handedness: transition.source.handedness,
+            },
+            menuWrist: snapshot.wrist,
+            time: frameSample.time,
           })
-          claims.add(source.id)
         }
-
-        if (wasPressed && !source.selectPressed && ownedSelection?.sourceId === source.id) {
-          const committed = ownedSelection
-          ownedSelection = undefined
-          claims.delete(source.id)
-
-          if (!source.selectCompleted) {
-            options.onEvent({
-              type: 'selection-cancellation',
-              itemId: committed.itemId,
-              sourceId: committed.sourceId,
-              reason: 'action-cancelled',
-              time: frameSample.time,
-            })
-          } else if (observation?.itemId === committed.itemId) {
-            options.onEvent({
-              type: 'selection-intent',
-              intent: selectionIntentFor(snapshot, committed.itemId),
-              source: { kind: 'controller', handedness: source.handedness },
-              menuWrist: snapshot.wrist,
-              time: frameSample.time,
-            })
-          } else {
-            options.onEvent({
-              type: 'selection-cancellation',
-              itemId: committed.itemId,
-              sourceId: committed.sourceId,
-              reason: 'released-away',
-              time: frameSample.time,
-            })
-          }
-        }
-
-        previousPressed.set(source.id, source.selectPressed)
       }
 
-      const hoveredItemIds = new Set(
-        [...observationsBySource.values()].map(({ itemId }) => itemId),
-      )
       return Object.freeze({
         visible,
         targetable,
@@ -459,9 +386,9 @@ export function createWristMenuRuntime(
         anchorPose: reveal.anchorPose,
         revision,
         items: createPresentationItems(snapshot.menuDefinition, (itemId) =>
-          ownedSelection?.itemId === itemId
+          selectionResult.armedItemId === itemId
             ? 'armed'
-            : hoveredItemIds.has(itemId)
+            : selectionResult.hoveredItemIds.has(itemId)
               ? 'hovered'
               : 'idle',
         ),
@@ -470,17 +397,16 @@ export function createWristMenuRuntime(
 
     blocksSceneInput(sourceId) {
       assertActive()
-      return claims.has(sourceId)
+      return selection.blocksSceneInput(sourceId)
     },
 
     dispose() {
       if (disposed) return
       disposed = true
       try {
-        cancelOwnership('disposed', lastTime)
+        cancelSelection('disposed', lastTime)
       } finally {
-        claims.clear()
-        previousPressed.clear()
+        selection.clear()
       }
     },
   })

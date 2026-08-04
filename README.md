@@ -5,8 +5,8 @@ Three Fiber entry points.
 
 The `0.0.0` implementation attaches a complete, Host-controlled version-1 Menu
 Definition to a tracked wrist or Controller Wrist Proxy, reveals it
-intentionally, and gives controller target rays the same selection semantics
-in vanilla Three.js and React Three Fiber.
+intentionally, and gives direct hands and controller target rays the same
+selection semantics in vanilla Three.js and React Three Fiber.
 
 ```ts
 import type { HostSnapshot } from '@xleepy/wrist-menu'
@@ -88,13 +88,23 @@ The core `createWristMenuRuntime` accepts only portable Frame Samples and Target
 Observations. A `FrameSample` contains current-frame viewer and wrist poses plus
 a `lifecycleRevision` that custom integrations increment after session,
 reference-space, recenter, or attachment resets. A controller arms on select
-start and commits on release over the same enabled Menu Item. Newly revealed,
-moved, or recreated presentation geometry becomes targetable only after a following
-Frame Sample. Tracking loss, source replacement, visibility interruption,
-reparenting, session end, and disposal cancel interaction and require fresh
-acquisition.
+start and commits on release over the same enabled Menu Item. A direct hand
+focuses with the index fingertip and commits when its reported fingertip sphere
+reaches the Hit Region's press plane. Both routes emit the same source-independent
+Selection Intent. Moving or leaving an owned item cancels without transfer;
+hands must withdraw beyond the hover volume and controllers must release before
+rearming. Disabled items can show unavailable hover feedback but never commit,
+claim scene input, or request haptics. Optional controller haptics are best-effort
+feedback and cannot affect event delivery.
 
-The event sink also receives source-independent `visibility-change` events with
+Newly revealed, moved, or recreated presentation geometry becomes targetable
+only after a following Frame Sample. Tracking loss, source replacement,
+visibility interruption, reparenting, session end, and disposal cancel
+interaction and require fresh acquisition.
+
+Selection Intent diagnostics identify the portable Selection Source ID, kind,
+and handedness without exposing raw XR objects. The event sink also receives
+source-independent `visibility-change` events with
 the authoritative automatic, Host Application, tracking, source-replacement,
 or XR lifecycle reason.
 

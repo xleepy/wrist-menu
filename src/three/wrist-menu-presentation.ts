@@ -7,6 +7,7 @@ import { BoxGeometry } from 'three/src/geometries/BoxGeometry.js'
 import { MeshBasicMaterial } from 'three/src/materials/MeshBasicMaterial.js'
 import { Group } from 'three/src/objects/Group.js'
 import { Mesh } from 'three/src/objects/Mesh.js'
+import { Vector3 } from 'three/src/math/Vector3.js'
 
 import type {
   PresentationActionItem,
@@ -14,6 +15,7 @@ import type {
   PresentationItem,
   PresentationModel,
   PresentationToggleItem,
+  HandTargetObservation,
 } from '../core/index.js'
 
 const decorativeRaycast: Mesh['raycast'] = () => undefined
@@ -75,6 +77,7 @@ export class WristMenuPresentation {
   private readonly resources: Array<{ dispose(): void }> = []
   private readonly rowMeshes: Mesh[] = []
   private readonly visualMaterials: MeshBasicMaterial[] = []
+  private readonly fingertipLocalPosition = new Vector3()
 
   constructor() {
     this.group.name = 'wrist-menu-attachment-root'
@@ -203,6 +206,44 @@ export class WristMenuPresentation {
   ): string | undefined {
     const itemId = intersection?.object.userData['wristMenuItemId']
     return typeof itemId === 'string' ? itemId : undefined
+  }
+
+  fingertipObservation(
+    worldPosition: Vector3,
+    radius: number,
+  ): Omit<HandTargetObservation, 'sourceId'> | undefined {
+    if (!Number.isFinite(radius) || radius <= 0) return undefined
+    for (const hitRegion of this.hitRegions) {
+      hitRegion.updateWorldMatrix(true, false)
+      this.fingertipLocalPosition.copy(worldPosition)
+      hitRegion.worldToLocal(this.fingertipLocalPosition)
+      const geometry = hitRegion.geometry as BoxGeometry
+      const halfWidth = geometry.parameters.width / 2
+      const halfHeight = geometry.parameters.height / 2
+      const halfDepth = geometry.parameters.depth / 2
+      if (
+        Math.abs(this.fingertipLocalPosition.x) > halfWidth + radius ||
+        Math.abs(this.fingertipLocalPosition.y) > halfHeight + radius
+      ) {
+        continue
+      }
+      const nearestSurface = this.fingertipLocalPosition.z - radius
+      const farthestSurface = this.fingertipLocalPosition.z + radius
+      if (
+        nearestSurface > halfDepth + 0.025 ||
+        farthestSurface < -halfDepth
+      ) {
+        continue
+      }
+      const itemId = hitRegion.userData['wristMenuItemId']
+      if (typeof itemId !== 'string') continue
+      return {
+        kind: 'hand-fingertip',
+        itemId,
+        phase: nearestSurface <= halfDepth + 1e-9 ? 'pressed' : 'hover',
+      }
+    }
+    return undefined
   }
 
   dispose() {

@@ -6,7 +6,10 @@ import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 
 import { WristMenu } from '@xleepy/wrist-menu/react'
-import { runPackedReactControllerJourney } from '../controller-action-journey.mjs'
+import {
+  runPackedReactControllerJourney,
+  runPackedReactHandJourney,
+} from '../controller-action-journey.mjs'
 
 const [fiber, xr] = await Promise.all([
   import('@react-three/fiber'),
@@ -37,3 +40,5 @@ await runPackedReactControllerJourney({
   three,
   xr,
 })
+
+await runPackedReactHandJourney({ React, WristMenu, fiber, iwer, three })

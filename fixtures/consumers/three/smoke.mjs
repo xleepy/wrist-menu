@@ -8,10 +8,14 @@ import {
   createThreeWristMenu,
   wristMenuSessionFeatures as threeFeatures,
 } from '@xleepy/wrist-menu/three'
-import { runPackedThreeControllerJourney } from '../controller-action-journey.mjs'
+import {
+  runPackedThreeControllerJourney,
+  runPackedThreeHandJourney,
+} from '../controller-action-journey.mjs'
 
 assert.deepEqual(rootFeatures.optionalFeatures, ['hand-tracking', 'local-floor'])
 assert.equal(coreFeatures, rootFeatures)
 assert.equal(threeFeatures, rootFeatures)
 
 await runPackedThreeControllerJourney({ createThreeWristMenu, iwer, three })
+await runPackedThreeHandJourney({ createThreeWristMenu, iwer, three })
