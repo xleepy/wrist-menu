@@ -39,6 +39,7 @@ test('controller commits one Action Item only after release over the owned targe
         itemId: 'spawn-cube',
       },
       source: {
+        id: 'right-controller',
         kind: 'controller',
         handedness: 'right',
       },

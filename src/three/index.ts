@@ -15,7 +15,7 @@ import {
   resolveWristAnchor,
   type ActivationMode,
   type ControllerWristConfiguration,
-  type ControllerSelectionSourceSample,
+  type SelectionSourceSample,
   type Handedness,
   type HostSnapshot,
   type PoseSample,
@@ -88,9 +88,50 @@ export function createThreeWristMenu(
   options: CreateThreeWristMenuOptions,
 ): ThreeWristMenu {
   const initialSnapshot = copyHostSnapshot(options.snapshot)
+  const inputSourceById = new Map<string, XRInputSource>()
+  const requestCommitHaptic = (inputSource: XRInputSource | undefined) => {
+    const gamepad = inputSource?.gamepad as
+      | (Gamepad & {
+          hapticActuators?: ReadonlyArray<{
+            pulse?(intensity: number, duration: number): unknown
+          }>
+          vibrationActuator?: {
+            playEffect?(effect: string, parameters: object): unknown
+          }
+        })
+      | undefined
+    const actuator = gamepad?.hapticActuators?.[0]
+    try {
+      const request =
+        typeof actuator?.pulse === 'function'
+          ? actuator.pulse(0.35, 20)
+          : gamepad?.vibrationActuator?.playEffect?.('dual-rumble', {
+              duration: 20,
+              startDelay: 0,
+              strongMagnitude: 0.35,
+              weakMagnitude: 0.35,
+            })
+      if (request !== undefined) {
+        void Promise.resolve(request).catch(() => undefined)
+      }
+    } catch {
+      // Haptics are optional feedback and never alter semantic delivery.
+    }
+  }
   const runtime = createWristMenuRuntime({
     snapshot: initialSnapshot,
-    onEvent: options.onEvent,
+    onEvent: (event) => {
+      try {
+        options.onEvent(event)
+      } finally {
+        if (
+          event.type === 'selection-intent' &&
+          event.source.kind === 'controller'
+        ) {
+          requestCommitHaptic(inputSourceById.get(event.source.id))
+        }
+      }
+    },
   })
   const presentation = new WristMenuPresentation()
   const raycaster = new Raycaster()
@@ -285,6 +326,7 @@ export function createThreeWristMenu(
       }
       const nextSession = options.renderer.xr.getSession()
       attachSession(nextSession)
+      inputSourceById.clear()
 
       const parent = presentation.group.parent
       if (observedParent && parent !== lastParent) interruptLifecycle()
@@ -294,10 +336,16 @@ export function createThreeWristMenu(
       const isGeometryTargetable = frameSequence > geometryBarrierThrough
       presentation.group.updateMatrixWorld(true)
 
-      const selectionSources: ControllerSelectionSourceSample[] = []
+      const selectionSources: SelectionSourceSample[] = []
       const wristSources: WristSourceSample[] = []
       const controllerSources: Array<
         Readonly<{ id: string; inputSource: XRInputSource }>
+      > = []
+      const handSources: Array<
+        Readonly<{
+          id: string
+          fingertipPose: XRJointPose
+        }>
       > = []
       const targetObservations: TargetObservation[] = []
       const nextReferenceSpace = options.renderer.xr.getReferenceSpace()
@@ -322,6 +370,7 @@ export function createThreeWristMenu(
           }
 
           const id = sourceId(inputSource)
+          inputSourceById.set(id, inputSource)
           if (inputSource.hand != null) {
             const wristSpace = inputSource.hand.get('wrist')
             const wristPose =
@@ -334,6 +383,24 @@ export function createThreeWristMenu(
               handedness: inputSource.handedness,
               pose: wristPose === null ? null : poseSample(wristPose),
             })
+            const fingertipSpace = inputSource.hand.get('index-finger-tip')
+            const fingertipPose =
+              fingertipSpace === undefined
+                ? null
+                : (frame.getJointPose?.(fingertipSpace, nextReferenceSpace) ??
+                  null)
+            if (
+              fingertipPose !== null &&
+              Number.isFinite(fingertipPose.radius) &&
+              (fingertipPose.radius ?? 0) > 0
+            ) {
+              selectionSources.push({
+                id,
+                kind: 'hand',
+                handedness: inputSource.handedness,
+              })
+              handSources.push({ id, fingertipPose })
+            }
             continue
           }
 
@@ -405,6 +472,21 @@ export function createThreeWristMenu(
             lastTargetBySource.delete(inputSource)
           }
         }
+
+        for (const { id, fingertipPose } of handSources) {
+          if (!isGeometryTargetable) continue
+          const observation = presentation.fingertipObservation(
+            new Vector3(
+              fingertipPose.transform.position.x,
+              fingertipPose.transform.position.y,
+              fingertipPose.transform.position.z,
+            ),
+            fingertipPose.radius!,
+          )
+          if (observation !== undefined) {
+            targetObservations.push({ sourceId: id, ...observation })
+          }
+        }
       }
 
       const model = runtime.step(
@@ -467,6 +549,7 @@ export function createThreeWristMenu(
           try {
             runtime.dispose()
           } finally {
+            inputSourceById.clear()
             presentation.dispose()
           }
         }

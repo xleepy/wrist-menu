@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 
 import { controllerActionSnapshot } from '../controller-action.mjs'
+import { crossInputSnapshot } from '../cross-input-selection.mjs'
 
 function installIwerNodePrimitives() {
   const names = [
@@ -110,6 +111,54 @@ async function createIwerControllerFixture(iwer) {
   }
 }
 
+async function createIwerHandFixture(iwer) {
+  const restoreGlobals = installIwerNodePrimitives()
+  const device = new iwer.XRDevice(iwer.metaQuest3, {
+    canvasContainer: { dataset: {}, style: {} },
+  })
+  device.primaryInputMode = 'hand'
+  const menuHand = device.hands.left
+  menuHand.position.set(-0.2, 1.2, -0.5)
+  menuHand.quaternion.set(0, 0, 0, 1)
+  const selectionHand = device.hands.right
+  selectionHand.position.set(0.5, 1.2, 0)
+  selectionHand.quaternion.set(0, 0, 0, 1)
+
+  const session = new iwer.XRSession(device, 'immersive-vr', [
+    'local-floor',
+    'hand-tracking',
+  ])
+  const referenceSpace = await session.requestReferenceSpace('local-floor')
+  session[iwer.P_SESSION].updateActiveInputSources()
+  let sequence = 0
+
+  const nextFrame = (time) => {
+    sequence += 1
+    const frame = new iwer.XRFrame(session, sequence, true, true, time)
+    device[iwer.P_DEVICE].onFrameStart(frame)
+    session[iwer.P_SESSION].updateActiveInputSources()
+    return frame
+  }
+
+  return {
+    inputSource: selectionHand.inputSource,
+    referenceSpace,
+    session,
+    nextFrame,
+    moveFingertipTo(frame, target) {
+      const fingertipSpace = selectionHand.inputSource.hand.get('index-finger-tip')
+      const pose = frame.getJointPose(fingertipSpace, referenceSpace)
+      assert.ok(pose)
+      selectionHand.position.set(
+        selectionHand.position.x + target.x - pose.transform.position.x,
+        selectionHand.position.y + target.y - pose.transform.position.y,
+        selectionHand.position.z + target.z - pose.transform.position.z,
+      )
+    },
+    restoreGlobals,
+  }
+}
+
 export async function runPackedThreeControllerJourney({
   createThreeWristMenu,
   iwer,
@@ -167,6 +216,59 @@ export async function runPackedThreeControllerJourney({
     assert.equal(
       wristMenuEvents.filter(({ type }) => type === 'selection-intent').length,
       1,
+    )
+  } finally {
+    menu.dispose()
+    fixture.restoreGlobals()
+  }
+}
+
+export async function runPackedThreeHandJourney({
+  createThreeWristMenu,
+  iwer,
+  three,
+}) {
+  const fixture = await createIwerHandFixture(iwer)
+  const wristMenuEvents = []
+  let sceneActions = 0
+  const menu = createThreeWristMenu({
+    renderer: {
+      xr: {
+        getSession: () => fixture.session,
+        getReferenceSpace: () => fixture.referenceSpace,
+      },
+    },
+    snapshot: crossInputSnapshot,
+    onEvent: (event) => wristMenuEvents.push(event),
+  })
+  const scene = new three.Scene()
+  scene.add(menu.group)
+
+  try {
+    const initialFrame = fixture.nextFrame(16)
+    menu.update({ time: 16, frame: initialFrame })
+
+    const hoverTarget = menu.group.localToWorld(
+      new three.Vector3(0, 0.0225, 0.03),
+    )
+    fixture.moveFingertipTo(initialFrame, hoverTarget)
+    const hoverFrame = fixture.nextFrame(32)
+    menu.update({ time: 32, frame: hoverFrame })
+    assert.equal(menu.blocksSceneInput(fixture.inputSource), true)
+
+    const pressTarget = menu.group.localToWorld(
+      new three.Vector3(0, 0.0225, 0.008),
+    )
+    fixture.moveFingertipTo(hoverFrame, pressTarget)
+    menu.update({ time: 48, frame: fixture.nextFrame(48) })
+    if (!menu.blocksSceneInput(fixture.inputSource)) sceneActions += 1
+
+    assert.equal(sceneActions, 0)
+    assert.deepEqual(
+      wristMenuEvents
+        .filter(({ type }) => type === 'selection-intent')
+        .map(({ intent, source }) => [intent.itemId, source.kind]),
+      [['first', 'hand']],
     )
   } finally {
     menu.dispose()
@@ -421,6 +523,137 @@ export async function runPackedReactControllerJourney({
     behindGeometry.dispose()
     behindMaterial.dispose()
     xrStore.destroy()
+    fixture.restoreGlobals()
+    if (previousActEnvironment === undefined) {
+      delete globalThis.IS_REACT_ACT_ENVIRONMENT
+    } else {
+      globalThis.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+    }
+  }
+}
+
+export async function runPackedReactHandJourney({
+  React,
+  WristMenu,
+  fiber,
+  iwer,
+  three,
+}) {
+  const previousActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  const fixture = await createIwerHandFixture(iwer)
+  const canvas = createCanvas()
+  const xrManagerListeners = new Map()
+  const renderer = {
+    xr: {
+      enabled: false,
+      isPresenting: true,
+      getSession: () => fixture.session,
+      getReferenceSpace: () => fixture.referenceSpace,
+      setAnimationLoop: () => undefined,
+      addEventListener(type, listener) {
+        xrManagerListeners.set(type, listener)
+      },
+      removeEventListener(type) {
+        xrManagerListeners.delete(type)
+      },
+    },
+    render: () => undefined,
+    setPixelRatio: () => undefined,
+    setSize: () => undefined,
+    outputColorSpace: '',
+    toneMapping: 0,
+  }
+  const root = fiber.createRoot(canvas)
+  fiber.extend(three)
+  await root.configure({
+    gl: renderer,
+    events: fiber.events,
+    frameloop: 'never',
+    size: { width: 1, height: 1, top: 0, left: 0 },
+  })
+
+  const behindGeometry = new three.BoxGeometry(0.5, 0.5, 0.02)
+  const behindMaterial = new three.MeshBasicMaterial()
+  const behind = new three.Mesh(behindGeometry, behindMaterial)
+  let sceneActions = 0
+  const countSceneAction = () => {
+    sceneActions += 1
+  }
+  const wristMenuEvents = []
+  let store
+
+  try {
+    await fiber.act(async () => {
+      store = root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(WristMenu, {
+            snapshot: crossInputSnapshot,
+            onEvent: (event) => wristMenuEvents.push(event),
+          }),
+          React.createElement('primitive', {
+            object: behind,
+            onPointerDown: countSceneAction,
+            onPointerUp: countSceneAction,
+            onClick: countSceneAction,
+          }),
+        ),
+      )
+    })
+    const state = store.getState()
+    const initialFrame = fixture.nextFrame(16)
+    await fiber.act(async () => {
+      fiber.advance(16, true, state, initialFrame)
+    })
+    const menuGroup = state.scene.children.find(
+      ({ name }) => name === 'wrist-menu-attachment-root',
+    )
+    assert.ok(menuGroup)
+
+    state.camera.position.copy(
+      menuGroup.localToWorld(new three.Vector3(0, 0, 1)),
+    )
+    state.camera.quaternion.copy(menuGroup.quaternion)
+    state.camera.updateMatrixWorld(true)
+    behind.position.copy(
+      menuGroup.localToWorld(new three.Vector3(0, 0, -0.1)),
+    )
+    behind.quaternion.copy(menuGroup.quaternion)
+    behind.updateMatrixWorld(true)
+
+    const hoverTarget = menuGroup.localToWorld(
+      new three.Vector3(0, 0.0225, 0.03),
+    )
+    fixture.moveFingertipTo(initialFrame, hoverTarget)
+    const hoverFrame = fixture.nextFrame(32)
+    await fiber.act(async () => {
+      fiber.advance(32, true, state, hoverFrame)
+    })
+    canvas.dispatch('pointerdown')
+    canvas.dispatch('pointerup')
+    canvas.dispatch('click')
+
+    const pressTarget = menuGroup.localToWorld(
+      new three.Vector3(0, 0.0225, 0.008),
+    )
+    fixture.moveFingertipTo(hoverFrame, pressTarget)
+    await fiber.act(async () => {
+      fiber.advance(48, true, state, fixture.nextFrame(48))
+    })
+
+    assert.equal(sceneActions, 0)
+    assert.deepEqual(
+      wristMenuEvents
+        .filter(({ type }) => type === 'selection-intent')
+        .map(({ intent, source }) => [intent.itemId, source.kind]),
+      [['first', 'hand']],
+    )
+  } finally {
+    await fiber.act(async () => root.unmount())
+    behindGeometry.dispose()
+    behindMaterial.dispose()
     fixture.restoreGlobals()
     if (previousActEnvironment === undefined) {
       delete globalThis.IS_REACT_ACT_ENVIRONMENT

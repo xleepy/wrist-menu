@@ -7,7 +7,7 @@ declared dependency has merged to `main`, and base it on that updated `main`.
 
 ## Active
 
-- [#17 Controller Action Item tracer](https://github.com/xleepy/wrist-menu/issues/17)
+- [#20 Cross-input selection parity](https://github.com/xleepy/wrist-menu/issues/20)
 
 ## Dependency order
 
@@ -25,9 +25,6 @@ declared dependency has merged to `main`, and base it on that updated `main`.
 
 | Issue | Blocked by |
 | --- | --- |
-| [#18 Host-controlled Menu Definition](https://github.com/xleepy/wrist-menu/issues/18) | #17 |
-| [#19 Wrist anchoring and intentional reveal](https://github.com/xleepy/wrist-menu/issues/19) | #17 |
-| [#20 Cross-input selection parity](https://github.com/xleepy/wrist-menu/issues/20) | #18, #19 |
 | [#21 Reach presentation and continuous scrolling](https://github.com/xleepy/wrist-menu/issues/21) | #18, #20 |
 | [#22 Theming and presentation replacement](https://github.com/xleepy/wrist-menu/issues/22) | #21 |
 | [#23 Primitive Workshop happy path](https://github.com/xleepy/wrist-menu/issues/23) | #21 |

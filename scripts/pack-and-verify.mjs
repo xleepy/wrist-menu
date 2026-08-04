@@ -35,6 +35,8 @@ const expectedFiles = [
   'dist/core/host-snapshot.js',
   'dist/core/reveal-state.d.ts',
   'dist/core/reveal-state.js',
+  'dist/core/selection-state.d.ts',
+  'dist/core/selection-state.js',
   'dist/core/wrist-anchor.d.ts',
   'dist/core/wrist-anchor.js',
   'dist/react/index.d.ts',
