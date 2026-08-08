@@ -56,7 +56,9 @@ local-floor features when available.
 The desktop **Spawn at cursor** button is a non-XR convenience. Package-owned
 menu hit regions still shield the React scene, and the vanilla variant checks
 the package Scene Input Claim before applying a controller action to scene
-content. Both variants allocate one physical-action identity at XR select start
-and carry it through scene and menu delivery. The Workshop Model retains the 64
-most recently transitioned identities, so delayed duplicate delivery cannot
-advance it again while memory remains explicitly bounded.
+content. Both variants key XR physical-action identities by the originating
+`XRInputSource` and carry them through scene and menu delivery. Instantaneous
+hand and menu-only identities expire after a bounded correlation lifetime, even
+when no XR `selectend` arrives. The Workshop Model retains the 64 most recently
+transitioned identities, so delayed duplicate delivery cannot advance it again
+while memory remains explicitly bounded.

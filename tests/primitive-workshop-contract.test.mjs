@@ -8,6 +8,27 @@ async function text(relativePath) {
   return readFile(new URL(relativePath, exampleRoot), 'utf8')
 }
 
+function selectionIntentEvent(source) {
+  return {
+    type: 'selection-intent',
+    intent: { type: 'action', itemId: 'spawn-primitive' },
+    source,
+    menuWrist: 'left',
+    time: 100,
+  }
+}
+
+const variantPhysicalActionFactories = [
+  [
+    'vanilla',
+    () => import('../examples/primitive-workshop/vanilla/physical-actions.js'),
+  ],
+  [
+    'react',
+    () => import('../examples/primitive-workshop/react/physical-actions.js'),
+  ],
+]
+
 test('both Example Variants consume the packed public package exports', async () => {
   const [manifestText, vanillaSource, reactSource] = await Promise.all([
     text('package.json'),
@@ -29,21 +50,85 @@ test('both Example Variants consume the packed public package exports', async ()
   assert.match(manifest.scripts.build, /build:react/)
 })
 
-test('both Example Variants thread one XR physical-action identity through scene and menu paths', async () => {
-  const [vanillaSource, reactSource] = await Promise.all([
-    text('vanilla/main.ts'),
-    text('react/main.tsx'),
-  ])
+for (const [variant, loadModule] of variantPhysicalActionFactories) {
+  test(`${variant} keeps overlapping XR input sources independent`, async () => {
+    let now = 10
+    const module = await loadModule()
+    const physicalActions = module.createPhysicalActions({
+      lifetimeMs: 25,
+      now: () => now,
+    })
+    const firstSource = {}
+    const secondSource = {}
+    const firstDescriptor = { kind: 'controller', handedness: 'left' }
+    const secondDescriptor = { kind: 'controller', handedness: 'right' }
+    const first = physicalActions.selectStart(firstSource, firstDescriptor)
+    const second = physicalActions.selectStart(secondSource, secondDescriptor)
 
-  for (const source of [vanillaSource, reactSource]) {
-    assert.match(source, /createPhysicalActionIdentitySource/)
-    assert.match(source, /selectstart/)
-    assert.match(
-      source,
-      /reduceWorkshopMenuEvent\(\s*(?:model|current),\s*event,\s*xrPhysicalAction/,
+    physicalActions.selectEnd(firstSource)
+    now += 26
+
+    assert.equal(
+      physicalActions.sceneAction(secondSource, secondDescriptor),
+      second,
     )
-  }
-})
+    assert.notEqual(
+      physicalActions.sceneAction(firstSource, firstDescriptor),
+      first,
+    )
+  })
+
+  test(`${variant} shares controller identities across menu and scene paths`, async () => {
+    const module = await loadModule()
+    const physicalActions = module.createPhysicalActions()
+    const source = {}
+    const descriptor = { kind: 'controller', handedness: 'right' }
+    const started = physicalActions.selectStart(source, descriptor)
+    const menu = physicalActions.menuAction(
+      selectionIntentEvent({
+        id: 'right-controller',
+        kind: 'controller',
+        handedness: 'right',
+      }),
+    )
+
+    assert.equal(menu, started)
+    assert.equal(physicalActions.sceneAction(source, descriptor), started)
+  })
+
+  test(`${variant} expires direct-hand identities without XR selectend`, async () => {
+    let now = 500
+    const module = await loadModule()
+    const physicalActions = module.createPhysicalActions({
+      lifetimeMs: 30,
+      now: () => now,
+    })
+    const handEvent = selectionIntentEvent({
+      id: 'right-hand',
+      kind: 'hand',
+      handedness: 'right',
+    })
+    const first = physicalActions.menuAction(handEvent)
+    const sceneSource = {}
+
+    assert.equal(physicalActions.menuAction(handEvent), first)
+    assert.equal(
+      physicalActions.sceneAction(sceneSource, {
+        kind: 'hand',
+        handedness: 'right',
+      }),
+      first,
+    )
+
+    now += 31
+    const laterScene = physicalActions.sceneAction(sceneSource, {
+      kind: 'hand',
+      handedness: 'right',
+    })
+    assert.notEqual(laterScene, first)
+    assert.equal(physicalActions.menuAction(handEvent), laterScene)
+  })
+}
 
 test('the local link and unlink workflow preserves packed-export consumption', async () => {
   const rootManifest = JSON.parse(

@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import {
   PROCESSED_PHYSICAL_ACTION_CAPACITY,
-  createPhysicalActionIdentitySource,
+  createPhysicalActionCoordinator,
   createWorkshopModel,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
@@ -175,8 +175,12 @@ test('semantic Wrist Menu intents cause one Host-controlled transition', () => {
 })
 
 test('menu and scene delivery paths can share one physical action identity', () => {
-  const identitySource = createPhysicalActionIdentitySource('controller')
-  const sharedActionId = identitySource.begin()
+  const inputSource = {}
+  const descriptor = { kind: 'controller', handedness: 'right' }
+  const physicalActions = createPhysicalActionCoordinator({
+    prefix: 'controller',
+  })
+  const sharedActionId = physicalActions.selectStart(inputSource, descriptor)
   const menuEvent = {
     type: 'selection-intent',
     intent: {
@@ -198,22 +202,51 @@ test('menu and scene delivery paths can share one physical action identity', () 
   )
   const afterScene = transition(afterMenu, { type: 'spawn' }, sharedActionId)
 
-  assert.equal(identitySource.current(), sharedActionId)
+  assert.equal(
+    physicalActions.sceneAction(inputSource, descriptor),
+    sharedActionId,
+  )
   assert.equal(afterScene, afterMenu)
   assert.equal(afterScene.selectedPrimitive, 'cylinder')
   assert.equal(afterScene.objects.length, 0)
   assert.equal(afterScene.revision, 1)
 })
 
-test('a physical action identity source ends only the matching current identity', () => {
-  const identitySource = createPhysicalActionIdentitySource('xr')
-  const first = identitySource.begin()
-  const second = identitySource.begin()
+test('overlapping XR input sources retain independent physical actions', () => {
+  let now = 100
+  const physicalActions = createPhysicalActionCoordinator({
+    prefix: 'xr',
+    lifetimeMs: 20,
+    now: () => now,
+  })
+  const leftSource = {}
+  const rightSource = {}
+  const left = physicalActions.selectStart(leftSource, {
+    kind: 'controller',
+    handedness: 'left',
+  })
+  const right = physicalActions.selectStart(rightSource, {
+    kind: 'controller',
+    handedness: 'right',
+  })
 
-  identitySource.end(first)
-  assert.equal(identitySource.current(), second)
-  identitySource.end(second)
-  assert.equal(identitySource.current(), null)
+  physicalActions.selectEnd(leftSource)
+  now += 21
+
+  assert.equal(
+    physicalActions.sceneAction(rightSource, {
+      kind: 'controller',
+      handedness: 'right',
+    }),
+    right,
+  )
+  assert.notEqual(
+    physicalActions.sceneAction(leftSource, {
+      kind: 'controller',
+      handedness: 'left',
+    }),
+    left,
+  )
 })
 
 test('selection, removal, grid visibility, and both menu wrists stay Host-controlled', () => {

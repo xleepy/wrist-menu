@@ -50,18 +50,44 @@
 /**
  * @typedef {Readonly<{actionId: string, action: WorkshopAction}>} WorkshopCommand
  */
+/** @typedef {'controller' | 'hand'} PhysicalActionKind */
 /**
  * @typedef {Readonly<{
- *   begin(): string,
- *   current(): string | null,
- *   end(identity: string): void,
- * }>} PhysicalActionIdentitySource
+ *   kind: PhysicalActionKind,
+ *   handedness: 'left' | 'right',
+ * }>} PhysicalActionDescriptor
+ */
+/**
+ * @typedef {{
+ *   identity: string,
+ *   descriptor: PhysicalActionDescriptor,
+ *   expiresAt: number,
+ * }} PhysicalActionRecord
+ */
+/**
+ * @typedef {Readonly<{
+ *   prefix?: string,
+ *   lifetimeMs?: number,
+ *   now?: () => number,
+ * }>} PhysicalActionCoordinatorOptions
+ */
+/**
+ * @typedef {Readonly<{
+ *   selectStart(source: object, descriptor: PhysicalActionDescriptor): string,
+ *   sceneAction(source: object, descriptor: PhysicalActionDescriptor): string,
+ *   selectEnd(source: object): void,
+ *   menuAction(event: WristMenuEvent): string | undefined,
+ *   removeSource(source: object): void,
+ *   clear(): void,
+ * }>} PhysicalActionCoordinator
  */
 
 export const WORKSHOP_BOUNDS_METERS = 1
 export const GRID_STEP_METERS = 0.25
 /** Processed identities expire after this many later successful transitions. */
 export const PROCESSED_PHYSICAL_ACTION_CAPACITY = 64
+/** Correlation lifetime for instantaneous menu/scene input deliveries. */
+export const PHYSICAL_ACTION_IDENTITY_LIFETIME_MS = 250
 
 /** @type {ReadonlySet<WorkshopPrimitive>} */
 const primitiveTypes = new Set(['cube', 'sphere', 'cylinder'])
@@ -133,31 +159,153 @@ export function createWorkshopModel() {
 }
 
 /**
- * Create identities at the physical input boundary so menu and scene delivery
- * paths can carry the same identity into the Workshop Model.
- * @param {string} [prefix]
- * @returns {PhysicalActionIdentitySource}
+ * Coordinate identities at the physical input boundary. Raw XR activity is
+ * keyed by XRInputSource object identity, while semantic menu-only activity is
+ * bounded by a short correlation lifetime. Hand activity is bounded even if a
+ * runtime omits selectend.
+ * @param {PhysicalActionCoordinatorOptions} [options]
+ * @returns {PhysicalActionCoordinator}
  */
-export function createPhysicalActionIdentitySource(
-  prefix = 'physical-action',
-) {
+export function createPhysicalActionCoordinator(options = {}) {
+  const prefix = options.prefix ?? 'physical-action'
+  const lifetimeMs =
+    options.lifetimeMs ?? PHYSICAL_ACTION_IDENTITY_LIFETIME_MS
+  const now = options.now ?? Date.now
   if (typeof prefix !== 'string' || prefix.length === 0) {
     throw new TypeError('Physical action identity prefix must be non-empty')
   }
+  if (!Number.isFinite(lifetimeMs) || lifetimeMs <= 0) {
+    throw new TypeError('Physical action identity lifetime must be positive')
+  }
+  if (typeof now !== 'function') {
+    throw new TypeError('Physical action clock must be a function')
+  }
+
   let sequence = 0
-  /** @type {string | null} */
-  let currentIdentity = null
+  /** @type {Map<object, PhysicalActionRecord>} */
+  const sourceRecords = new Map()
+  /** @type {Map<string, PhysicalActionRecord>} */
+  const menuRecords = new Map()
+
+  function readTime() {
+    const time = now()
+    if (!Number.isFinite(time)) {
+      throw new TypeError('Physical action clock must return a finite number')
+    }
+    return time
+  }
+
+  /** @param {number} time */
+  function pruneExpired(time) {
+    for (const [source, record] of sourceRecords) {
+      if (record.expiresAt <= time) sourceRecords.delete(source)
+    }
+    for (const [key, record] of menuRecords) {
+      if (record.expiresAt <= time) menuRecords.delete(key)
+    }
+  }
+
+  /** @param {PhysicalActionDescriptor} descriptor */
+  function assertDescriptor(descriptor) {
+    if (
+      (descriptor.kind !== 'controller' && descriptor.kind !== 'hand') ||
+      (descriptor.handedness !== 'left' && descriptor.handedness !== 'right')
+    ) {
+      throw new TypeError('Physical action descriptor must identify kind and hand')
+    }
+  }
+
+  /**
+   * @param {PhysicalActionDescriptor} descriptor
+   * @param {number} expiresAt
+   * @returns {PhysicalActionRecord}
+   */
+  function allocate(descriptor, expiresAt) {
+    sequence += 1
+    return {
+      identity: `${prefix}:${sequence}`,
+      descriptor: Object.freeze({ ...descriptor }),
+      expiresAt,
+    }
+  }
+
+  /**
+   * @param {PhysicalActionDescriptor} first
+   * @param {PhysicalActionDescriptor} second
+   */
+  function sameDescriptor(first, second) {
+    return (
+      first.kind === second.kind && first.handedness === second.handedness
+    )
+  }
+
   return Object.freeze({
-    begin() {
-      sequence += 1
-      currentIdentity = `${prefix}:${sequence}`
-      return currentIdentity
+    selectStart(source, descriptor) {
+      assertDescriptor(descriptor)
+      const time = readTime()
+      pruneExpired(time)
+      const record = allocate(
+        descriptor,
+        descriptor.kind === 'hand'
+          ? time + lifetimeMs
+          : Number.POSITIVE_INFINITY,
+      )
+      sourceRecords.set(source, record)
+      return record.identity
     },
-    current() {
-      return currentIdentity
+    sceneAction(source, descriptor) {
+      assertDescriptor(descriptor)
+      const time = readTime()
+      pruneExpired(time)
+      const current = sourceRecords.get(source)
+      if (
+        current !== undefined &&
+        sameDescriptor(current.descriptor, descriptor)
+      ) {
+        return current.identity
+      }
+      const matchingMenuRecords = [...menuRecords.values()].filter((record) =>
+        sameDescriptor(record.descriptor, descriptor),
+      )
+      if (matchingMenuRecords.length === 1) {
+        const matchingMenuRecord = matchingMenuRecords[0]
+        sourceRecords.set(source, matchingMenuRecord)
+        return matchingMenuRecord.identity
+      }
+      const record = allocate(descriptor, time + lifetimeMs)
+      sourceRecords.set(source, record)
+      return record.identity
     },
-    end(identity) {
-      if (currentIdentity === identity) currentIdentity = null
+    selectEnd(source) {
+      const time = readTime()
+      pruneExpired(time)
+      const current = sourceRecords.get(source)
+      if (current !== undefined) current.expiresAt = time + lifetimeMs
+    },
+    menuAction(event) {
+      if (event.type !== 'selection-intent') return undefined
+      const descriptor = event.source
+      assertDescriptor(descriptor)
+      const time = readTime()
+      pruneExpired(time)
+      const matchingSources = [...sourceRecords.values()].filter((record) =>
+        sameDescriptor(record.descriptor, descriptor),
+      )
+      if (matchingSources.length === 1) return matchingSources[0].identity
+
+      const menuKey = `${descriptor.kind}:${descriptor.handedness}:${event.source.id}`
+      const current = menuRecords.get(menuKey)
+      if (current !== undefined) return current.identity
+      const record = allocate(descriptor, time + lifetimeMs)
+      menuRecords.set(menuKey, record)
+      return record.identity
+    },
+    removeSource(source) {
+      sourceRecords.delete(source)
+    },
+    clear() {
+      sourceRecords.clear()
+      menuRecords.clear()
     },
   })
 }

@@ -36,7 +36,6 @@ import {
 
 import {
   WORKSHOP_BOUNDS_METERS,
-  createPhysicalActionIdentitySource,
   createWorkshopModel,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
@@ -45,6 +44,7 @@ import {
   type WorkshopModel,
   type WorkshopObject,
 } from '../shared/workshop-model.js'
+import { createPhysicalActions } from './physical-actions.js'
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector)
@@ -103,11 +103,21 @@ workshopRoot.add(cursor)
 const objectsRoot = new Group()
 workshopRoot.add(objectsRoot)
 const objectMeshes = new Map<string, Mesh>()
-const XR_ACTION_IDENTITY_GRACE_MS = 250
 
 let model: WorkshopModel = createWorkshopModel()
 let actionSequence = 0
-const xrPhysicalActions = createPhysicalActionIdentitySource('vanilla-xr')
+const physicalActions = createPhysicalActions()
+
+function physicalActionDescriptor(inputSource: XRInputSource) {
+  if (inputSource.handedness === 'none') return null
+  return {
+    kind:
+      inputSource.hand === undefined
+        ? ('controller' as const)
+        : ('hand' as const),
+    handedness: inputSource.handedness,
+  }
+}
 
 const menu = createThreeWristMenuState({
   renderer,
@@ -184,13 +194,9 @@ function dispatch(action: WorkshopAction, physicalActionId?: string): void {
 }
 
 function handleWristMenuEvent(event: WristMenuEvent): void {
-  const xrPhysicalAction =
-    event.type !== 'selection-intent'
-      ? undefined
-      : event.source.kind === 'controller'
-      ? (xrPhysicalActions.current() ?? xrPhysicalActions.begin())
-      : xrPhysicalActions.begin()
-  applyModel(reduceWorkshopMenuEvent(model, event, xrPhysicalAction))
+  applyModel(
+    reduceWorkshopMenuEvent(model, event, physicalActions.menuAction(event)),
+  )
 }
 
 const pointer = new Vector2()
@@ -275,26 +281,30 @@ async function enterVr(): Promise<void> {
     const session = await navigator.xr.requestSession('immersive-vr', {
       optionalFeatures: [...wristMenuSessionFeatures.optionalFeatures],
     })
-    session.addEventListener('selectstart', () => {
-      xrPhysicalActions.begin()
+    session.addEventListener('selectstart', (event) => {
+      const descriptor = physicalActionDescriptor(event.inputSource)
+      if (descriptor !== null) {
+        physicalActions.selectStart(event.inputSource, descriptor)
+      }
     })
     session.addEventListener('select', (event) => {
-      const xrPhysicalAction =
-        xrPhysicalActions.current() ?? xrPhysicalActions.begin()
+      const descriptor = physicalActionDescriptor(event.inputSource)
+      if (descriptor === null) return
       interactFromController(
         event.inputSource,
-        xrPhysicalAction,
+        physicalActions.sceneAction(event.inputSource, descriptor),
       )
     })
-    session.addEventListener('selectend', () => {
-      const completedAction = xrPhysicalActions.current()
-      if (completedAction === null) return
-      window.setTimeout(
-        () => xrPhysicalActions.end(completedAction),
-        XR_ACTION_IDENTITY_GRACE_MS,
-      )
+    session.addEventListener('selectend', (event) => {
+      physicalActions.selectEnd(event.inputSource)
+    })
+    session.addEventListener('inputsourceschange', (event) => {
+      for (const inputSource of event.removed) {
+        physicalActions.removeSource(inputSource)
+      }
     })
     session.addEventListener('end', () => {
+      physicalActions.clear()
       enterVrButton.textContent = 'Enter VR'
     })
     await renderer.xr.setSession(session)
@@ -323,6 +333,7 @@ renderer.setAnimationLoop((time, frame) => {
 })
 
 window.addEventListener('pagehide', () => {
+  physicalActions.clear()
   disposeThreeWristMenu(menu)
   renderer.dispose()
 })
