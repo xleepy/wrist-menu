@@ -14,15 +14,15 @@ import {
 
 import {
   allocationDelta,
+  evaluateConstructionInvariants,
   inventoryThreeScene,
   listenerInventory,
   sampleThreeAllocationOrdinals,
 } from '../fixtures/consumers/runtime-evidence.mjs'
 import { verifyImportSafety } from '../fixtures/consumers/import-safety.mjs'
-import * as core from '../dist/core/index.js'
 import {
   assertCompleteJourneyCoverage,
-  runCandidateJourneyCoverage,
+  buildRendererJourneyCoverage,
 } from '../fixtures/consumers/journey-evidence.mjs'
 
 test('Three allocation evidence observes transient resource construction by ordinal', () => {
@@ -76,12 +76,38 @@ test('scene inventory derives lines, program signatures, uploads, and identities
   assert.equal(inventory.counts.programSignatures, 2)
   assert.equal(inventory.counts.textureUploadVersions, 1)
   assert.equal(inventory.counts.textureBytes, 24)
+  assert.deepEqual(inventory.textureDimensions, [
+    { width: 2, height: 3, depth: 1, bytes: 24, uploadVersion: 1 },
+  ])
 
   meshGeometry.dispose()
   meshMaterial.map.dispose()
   meshMaterial.dispose()
   lineGeometry.dispose()
   lineMaterial.dispose()
+})
+
+test('construction invariants fail closed on a stable but wrong atlas and pool', () => {
+  const root = new Group()
+  const inventory = inventoryThreeScene(root)
+  const report = evaluateConstructionInvariants(inventory, {
+    geometries: 27,
+    materials: 27,
+    textures: 1,
+    programSignatures: 1,
+    poolSlots: 12,
+    atlas: {
+      count: 1,
+      widthMax: 1024,
+      heightMax: 2048,
+      bytesMax: 8 * 1024 * 1024,
+      uploadVersions: 1,
+    },
+  })
+
+  assert.equal(report.status, 'failed')
+  assert.ok(report.failures.includes('atlas-count'))
+  assert.ok(report.failures.includes('poolSlots'))
 })
 
 test('listener inventory records every listener type instead of only a total', () => {
@@ -143,27 +169,66 @@ test('import evidence fails closed with observed resources, listeners, and rende
   }
 })
 
-for (const sourceKind of ['hand', 'controller']) {
-  test(`candidate ${sourceKind} journey evidence dynamically covers the release matrix`, () => {
-    const coverage = runCandidateJourneyCoverage({ core, sourceKind })
+test('renderer journey evidence rejects Core-only samples and inferred shield booleans', () => {
+  const semanticCases = [
+    'fresh-reveal-hide-dwell',
+    'both-wrists',
+    'scrolling',
+    'invalid-disabled',
+    'tracking-loss',
+    'input-switching',
+    'visibility-session-reentry',
+    'empty-unavailable',
+  ].map((id) => ({
+    id,
+    status: 'passed',
+    observations: { iwerFrames: 1, rendererFrames: 1 },
+  }))
+  const sceneEventShield = {
+    status: 'passed',
+    actionTypes: ['pointerdown', 'pointerup', 'click', 'dblclick', 'contextmenu'],
+    cases: ['commit', 'cancel', 'hold', 'leave-before-release', 'rapid-actions']
+      .map((id) => ({
+        id,
+        status: 'passed',
+        observations: {
+          dispatchPath: 'react-event-manager',
+          dispatches: ['pointerdown', 'pointerup', 'click', 'dblclick', 'contextmenu']
+            .map((type) => ({ type, behindTargetDeliveries: 0 })),
+          recoveryDispatches: ['pointerdown', 'pointerup', 'click', 'dblclick', 'contextmenu']
+            .map((type) => ({ type, behindTargetDeliveries: 1 })),
+        },
+      })),
+  }
 
-    assert.equal(coverage.status, 'passed')
-    assertCompleteJourneyCoverage(coverage)
-    assert.deepEqual(
-      coverage.semanticCases.map(({ id }) => id),
-      [
-        'both-wrists',
-        'scrolling',
-        'invalid-disabled',
-        'tracking-loss',
-        'input-switching',
-        'visibility-session-reentry',
-        'empty-unavailable',
-      ],
-    )
-    assert.deepEqual(
-      coverage.sceneEventShield.cases.map(({ id }) => id),
-      ['commit', 'cancel', 'hold', 'leave-before-release', 'rapid-actions'],
-    )
+  assert.throws(
+    () => buildRendererJourneyCoverage({
+      driver: 'candidate-public-core-with-IWER-source-metadata',
+      sourceKind: 'hand',
+      semanticCases,
+      sceneEventShield,
+    }),
+    /production renderer\/XR seam/,
+  )
+  const coverage = buildRendererJourneyCoverage({
+    driver: 'packed-react-renderer-xr',
+    sourceKind: 'hand',
+    semanticCases,
+    sceneEventShield,
   })
-}
+  assertCompleteJourneyCoverage(coverage)
+
+  const inferred = structuredClone(sceneEventShield)
+  inferred.cases[0].observations = {
+    sceneActions: inferred.actionTypes.map((type) => ({ type, blocked: true })),
+  }
+  assert.throws(
+    () => buildRendererJourneyCoverage({
+      driver: 'packed-react-renderer-xr',
+      sourceKind: 'hand',
+      semanticCases,
+      sceneEventShield: inferred,
+    }),
+    /actual behind-target dispatch/,
+  )
+})

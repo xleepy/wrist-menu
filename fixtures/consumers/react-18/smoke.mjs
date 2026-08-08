@@ -6,7 +6,6 @@ import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 
 import { WristMenu } from '@xleepy/wrist-menu/react'
-import * as core from '@xleepy/wrist-menu/react'
 import {
   runPackedReactControllerJourney,
   runPackedReactHandJourney,
@@ -42,7 +41,6 @@ const controllerJourney = await runPackedReactControllerJourney({
   iwer,
   three,
   xr,
-  core,
 })
 
 const handJourney = await runPackedReactHandJourney({
@@ -51,7 +49,6 @@ const handJourney = await runPackedReactHandJourney({
   fiber,
   iwer,
   three,
-  core,
 })
 
 await writeLaneReport('react-18-xr-iwer-lanes.json', {

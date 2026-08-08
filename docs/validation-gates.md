@@ -81,6 +81,11 @@ Every rule below has a named trace. Percentage coverage is not a substitute.
 Threshold behavior is exercised immediately below, exactly at, and immediately
 above the boundary. Time-based traces produce the same Wrist Menu Events at 60,
 72, 90, and 120 Hz and under a deterministic irregular-frame sequence.
+Retained reports contain the complete public events, including their absolute
+timestamps, plus a named semantic projection that removes only `time` for the
+cross-schedule comparison. Each schedule separately proves finite, monotonic
+event times bounded by its final Frame Sample, so timing drift remains visible
+and fails closed even when the semantic projection still matches.
 
 - Automatic reveal enters at or below 35 degrees and exits only above 50
   degrees.

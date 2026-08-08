@@ -52,6 +52,7 @@ const instrumentationPaths = [
   baselinePath,
 ]
 const journeyCaseIds = [
+  'fresh-reveal-hide-dwell',
   'both-wrists',
   'scrolling',
   'invalid-disabled',
@@ -244,22 +245,31 @@ function journeyCombinationPassed(report, integration, sourceKind) {
   const shield = journey?.sceneEventShield
   const semanticCases = coverage?.semanticCases
   const shieldCases = shield?.cases
-  const actualIntegrationPassed =
-    integration === 'three'
-      ? journey?.blockedSceneActions === 0
-      : shield?.actualFiberCommit?.blockedSceneActions === 0 &&
-        (sourceKind !== 'controller' ||
-          shield.actualFiberCommit.behindTargetLiveAfterUnmount === true)
+  const expectedDriver = integration === 'three'
+    ? 'packed-three-renderer-xr'
+    : 'packed-react-renderer-xr'
+  const expectedDispatchPath = integration === 'three'
+    ? 'three-host-shield'
+    : 'react-event-manager'
 
   return (
     report?.status === 'passed' &&
     journey?.status === 'passed' &&
     coverage?.status === 'passed' &&
+    coverage?.driver === expectedDriver &&
+    coverage?.sourceKind === sourceKind &&
     sameOrderedValues(
       semanticCases?.map(({ id }) => id),
       journeyCaseIds,
     ) &&
-    semanticCases.every(({ status }) => status === 'passed') &&
+    semanticCases.every(
+      ({ status, observations }) =>
+        status === 'passed' &&
+        Number.isInteger(observations?.iwerFrames) &&
+        observations.iwerFrames > 0 &&
+        Number.isInteger(observations?.rendererFrames) &&
+        observations.rendererFrames > 0,
+    ) &&
     shield?.status === 'passed' &&
     sameOrderedValues(shield.actionTypes, sceneActionTypes) &&
     sameOrderedValues(
@@ -269,13 +279,22 @@ function journeyCombinationPassed(report, integration, sourceKind) {
     shieldCases.every(
       ({ status, observations }) =>
         status === 'passed' &&
+        observations?.dispatchPath === expectedDispatchPath &&
         sameOrderedValues(
-          observations?.sceneActions?.map(({ type }) => type),
+          observations?.dispatches?.map(({ type }) => type),
           sceneActionTypes,
         ) &&
-        observations.sceneActions.every(({ blocked }) => blocked === true),
-    ) &&
-    actualIntegrationPassed
+        observations.dispatches.every(
+          ({ behindTargetDeliveries }) => behindTargetDeliveries === 0,
+        ) &&
+        sameOrderedValues(
+          observations?.recoveryDispatches?.map(({ type }) => type),
+          sceneActionTypes,
+        ) &&
+        observations.recoveryDispatches.every(
+          ({ behindTargetDeliveries }) => behindTargetDeliveries > 0,
+        ),
+    )
   )
 }
 

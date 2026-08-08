@@ -11,6 +11,7 @@ import {
   defaultThreeWristMenuPresentationFactory,
   disposeThreeWristMenu,
   replaceThreeWristMenuPresentation,
+  syncThreeWristMenu,
   updateThreeWristMenu,
 } from '@xleepy/wrist-menu/three'
 import { reachScrollSnapshot } from '../../reach-scroll.mjs'
@@ -18,13 +19,14 @@ import { createWristXrFixture } from '../../wrist-reveal-xr.mjs'
 import { writeLaneReport } from '../evidence-report.mjs'
 import {
   allocationDelta,
+  evaluateConstructionInvariants,
   identityGrowth,
   inventoryThreeScene,
   listenerInventory,
   sampleThreeAllocationOrdinals,
 } from '../runtime-evidence.mjs'
 
-const { Matrix4 } = three
+const { Matrix4, Quaternion, Vector3 } = three
 const instrumentedThree = {
   BufferGeometry: InstrumentedBufferGeometry,
   Group: InstrumentedGroup,
@@ -129,6 +131,57 @@ function withinBaseline(measurement, baseline) {
     ([measurementName, baselineName]) =>
       measurement[measurementName] <= baseline[baselineName],
   )
+}
+
+function measurePhaseWorkload(phase) {
+  const { fixture, menu } = createMenu()
+  const activeScroll = phase === 'activeScroll'
+  const driveFrame = (index, time) => {
+    if (activeScroll) {
+      const origin = menu.presentation.group.localToWorld(
+        new Vector3(0.09, -0.03 * ((index % 20) / 20), 1),
+      )
+      const orientation = menu.presentation.group.getWorldQuaternion(
+        new Quaternion(),
+      )
+      fixture.setTargetRayMatrix(
+        new Matrix4().compose(origin, orientation, new Vector3(1, 1, 1)),
+      )
+    } else {
+      fixture.setTargetRayMatrix(new Matrix4().makeTranslation(2, 2, 1))
+    }
+    updateThreeWristMenu(menu, { time, frame: fixture.frame })
+  }
+  try {
+    syncThreeWristMenu(menu, {
+      ...reachScrollSnapshot,
+      activationMode: phase === 'hidden' ? 'forced-closed' : 'forced-open',
+    })
+    driveFrame(0, 2)
+    driveFrame(1, 3)
+    const warmupFrames = 1_000
+    for (let index = 0; index < warmupFrames; index += 1) {
+      driveFrame(index, 4 + index)
+    }
+    const timings = []
+    for (let index = 0; index < 10_000; index += 1) {
+      const started = performance.now()
+      driveFrame(index, 4 + warmupFrames + index)
+      timings.push(performance.now() - started)
+    }
+    return {
+      ...sceneCounters(menu.presentation.group),
+      packageUpdateP95Ms: percentile(timings, 0.95),
+      workload: phase,
+      warmupFrames,
+      measuredFrames: timings.length,
+      menuVisible: menu.presentation.group.visible,
+      scrollOwnerActive: menu.runtime.scrollState.ownerSourceId !== null,
+      scrollOffset: menu.runtime.scrollState.offset,
+    }
+  } finally {
+    disposeThreeWristMenu(menu)
+  }
 }
 
 function createMenu() {
@@ -303,13 +356,14 @@ const baselines = JSON.parse(
 )
 const { fixture, menu, rendererPolicyCalls } = createMenu()
 const constructed = inventory(menu.presentation.group)
+const constructionGate = evaluateConstructionInvariants(
+  constructed,
+  baselines.construction,
+)
 const allocationStart = resourceCounts(menu.presentation.group)
 const allocationOrdinalsStart = sampleThreeAllocationOrdinals(instrumentedThree)
-const timings = []
 for (let index = 0; index < 10_000; index += 1) {
-  const started = performance.now()
   updateThreeWristMenu(menu, { time: 1, frame: fixture.frame })
-  timings.push(performance.now() - started)
 }
 const allocationEnd = resourceCounts(menu.presentation.group)
 const allocationOrdinalsEnd = sampleThreeAllocationOrdinals(instrumentedThree)
@@ -364,6 +418,7 @@ const resourceCountDelta = Object.fromEntries(
 )
 const resourceGrowthGate = {
   status:
+    constructionGate.status === 'passed' &&
     Object.values(growth).every(({ added, removed }) => added === 0 && removed === 0) &&
     Object.values(scrollAllocations).every((count) => count === 0) &&
     Object.values(resourceCountDelta).every((count) => count === 0) &&
@@ -375,6 +430,7 @@ const resourceGrowthGate = {
       ? 'passed'
       : 'failed',
   frames: 1_000,
+  construction: constructionGate,
   before: beforeScrollCounts,
   after: afterScrollCounts,
   identityGrowth: growth,
@@ -396,26 +452,18 @@ const resourceGrowthGate = {
   },
 }
 
-const visibleIdle = {
-  ...sceneCounters(menu.presentation.group),
-  packageUpdateP95Ms: percentile(timings, 0.95),
-}
-const activeScroll = {
-  ...sceneCounters(menu.presentation.group),
-  packageUpdateP95Ms: percentile(timings, 0.95),
-}
-menu.presentation.group.visible = false
-const hidden = {
-  ...sceneCounters(menu.presentation.group),
-  packageUpdateP95Ms: percentile(timings, 0.95),
-}
-menu.presentation.group.visible = true
+const hidden = measurePhaseWorkload('hidden')
+const visibleIdle = measurePhaseWorkload('visibleIdle')
+const activeScroll = measurePhaseWorkload('activeScroll')
 
 const measurements = { hidden, visibleIdle, activeScroll }
 const performanceVariants = {
   vanilla: {
     status: Object.entries(measurements).every(([phase, measurement]) =>
-      withinBaseline(measurement, baselines.variants.vanilla[phase]),
+      withinBaseline(measurement, baselines.variants.vanilla[phase]) &&
+      (phase === 'hidden' ? !measurement.menuVisible : measurement.menuVisible) &&
+      (phase !== 'activeScroll' ||
+        (measurement.scrollOwnerActive && measurement.scrollOffset > 0)),
     )
       ? 'passed'
       : 'failed',

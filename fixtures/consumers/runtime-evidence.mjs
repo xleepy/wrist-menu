@@ -18,6 +18,23 @@ function collectMaterialTextures(material, textures) {
   }
 }
 
+function textureObservation(texture) {
+  const image = texture.image
+  const width = Number.isFinite(image?.width) ? image.width : 0
+  const height = Number.isFinite(image?.height) ? image.height : 0
+  const depth = Number.isFinite(image?.depth) ? image.depth : 1
+  const bytes = ArrayBuffer.isView(image?.data)
+    ? image.data.byteLength
+    : width * height * depth * 4
+  return {
+    width,
+    height,
+    depth,
+    bytes,
+    uploadVersion: texture.version,
+  }
+}
+
 export function inventoryThreeScene(root) {
   const objects = new Set()
   const geometries = new Set()
@@ -41,6 +58,7 @@ export function inventoryThreeScene(root) {
     if (object.userData?.wristMenuItemId !== undefined) poolSlots.add(object)
   })
 
+  const textureDimensions = [...textures].map(textureObservation)
   return {
     identities: {
       objects,
@@ -62,14 +80,53 @@ export function inventoryThreeScene(root) {
         (total, texture) => total + texture.version,
         0,
       ),
-      textureBytes: [...textures].reduce((total, texture) => {
-        const image = texture.image
-        if (ArrayBuffer.isView(image?.data)) return total + image.data.byteLength
-        const width = Number.isFinite(image?.width) ? image.width : 0
-        const height = Number.isFinite(image?.height) ? image.height : 0
-        const depth = Number.isFinite(image?.depth) ? image.depth : 1
-        return total + width * height * depth * 4
-      }, 0),
+      textureBytes: textureDimensions.reduce(
+        (total, texture) => total + texture.bytes,
+        0,
+      ),
+    },
+    textureDimensions,
+  }
+}
+
+export function evaluateConstructionInvariants(inventory, expected) {
+  const failures = []
+  for (const name of [
+    'geometries',
+    'materials',
+    'textures',
+    'programSignatures',
+    'poolSlots',
+  ]) {
+    if (inventory.counts[name] !== expected[name]) failures.push(name)
+  }
+  const atlas = inventory.textureDimensions
+  if (atlas.length !== expected.atlas.count) failures.push('atlas-count')
+  if (
+    atlas.some(
+      ({ width, height, bytes }) =>
+        width <= 0 ||
+        height <= 0 ||
+        width > expected.atlas.widthMax ||
+        height > expected.atlas.heightMax ||
+        bytes > expected.atlas.bytesMax,
+    )
+  ) {
+    failures.push('atlas-dimensions')
+  }
+  if (
+    inventory.counts.textureUploadVersions !==
+    expected.atlas.uploadVersions
+  ) {
+    failures.push('atlas-upload-versions')
+  }
+  return {
+    status: failures.length === 0 ? 'passed' : 'failed',
+    failures,
+    expected,
+    observed: {
+      counts: inventory.counts,
+      atlas,
     },
   }
 }

@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict'
 import * as iwer from 'iwer'
 import * as three from 'three'
-import * as core from '@xleepy/wrist-menu/three'
-
 import { wristMenuSessionFeatures as rootFeatures } from '@xleepy/wrist-menu'
 import { wristMenuSessionFeatures as coreFeatures } from '@xleepy/wrist-menu/core'
 import {
   createThreeWristMenuState,
   disposeThreeWristMenu,
+  syncThreeWristMenu,
   threeWristMenuBlocksSceneInput,
   updateThreeWristMenu,
   wristMenuSessionFeatures as threeFeatures,
@@ -29,7 +28,7 @@ const controllerJourney = await runPackedThreeControllerJourney({
   updateThreeWristMenu,
   iwer,
   three,
-  core,
+  syncThreeWristMenu,
 })
 const handJourney = await runPackedThreeHandJourney({
   createThreeWristMenuState,
@@ -38,7 +37,7 @@ const handJourney = await runPackedThreeHandJourney({
   updateThreeWristMenu,
   iwer,
   three,
-  core,
+  syncThreeWristMenu,
 })
 
 await writeLaneReport('three-iwer-lanes.json', {

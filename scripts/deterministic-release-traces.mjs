@@ -52,8 +52,27 @@ function createRuntime(snapshot) {
   return runtime
 }
 
-function canonicalEvents(runtime) {
-  return runtimeEvents.get(runtime).map(({ time: _time, ...event }) => event)
+function eventEvidence(runtime, lastFrameTime) {
+  const fullEvents = runtimeEvents.get(runtime).map((event) => ({ ...event }))
+  const semanticEvents = fullEvents.map(({ time: _time, ...event }) => event)
+  const eventTimes = fullEvents.map(({ time }) => time)
+  const finite = eventTimes.every(Number.isFinite)
+  const monotonic = eventTimes.every(
+    (time, index) => index === 0 || time >= eventTimes[index - 1],
+  )
+  const notAfterLastFrame = eventTimes.every((time) => time <= lastFrameTime)
+  return {
+    fullEvents,
+    semanticEvents,
+    timingInvariants: {
+      finite,
+      monotonic,
+      notAfterLastFrame,
+      lastFrameTime,
+      status:
+        finite && monotonic && notAfterLastFrame ? 'passed' : 'failed',
+    },
+  }
 }
 
 function runFrames(runtime, times, frame) {
@@ -78,7 +97,7 @@ function revealObservation(trace, schedule) {
       return {
         phase: model.revealPhase,
         visible: model.visible,
-        events: canonicalEvents(runtime),
+        ...eventEvidence(runtime, 100),
       }
     }
 
@@ -101,7 +120,7 @@ function revealObservation(trace, schedule) {
       return {
         phase: model.revealPhase,
         visible: model.visible,
-        events: canonicalEvents(runtime),
+        ...eventEvidence(runtime, 500),
       }
     }
     if (trace.boundary === 'tracking-grace-250-ms') {
@@ -110,7 +129,7 @@ function revealObservation(trace, schedule) {
       return {
         phase: model.revealPhase,
         visible: model.visible,
-        events: canonicalEvents(runtime),
+        ...eventEvidence(runtime, 500 + trace.value),
       }
     }
     if (trace.boundary === 'reacquire-dwell-200-ms') {
@@ -121,7 +140,7 @@ function revealObservation(trace, schedule) {
       return {
         phase: model.revealPhase,
         visible: model.visible,
-        events: canonicalEvents(runtime),
+        ...eventEvidence(runtime, 800 + trace.value),
       }
     }
   } finally {
@@ -150,7 +169,7 @@ function freshRevealObservation(trace, schedule) {
       phase: model.revealPhase,
       visible: model.visible,
       opacity: Number(model.opacity.toFixed(6)),
-      events: canonicalEvents(runtime),
+      ...eventEvidence(runtime, end),
     }
   } finally {
     disposeWristMenuRuntime(runtime)
@@ -243,7 +262,7 @@ function scrollObservation(trace, schedule) {
     return {
       scrollOwned: runtime.scrollState.ownerSourceId !== null,
       offset: Number(model.scrollOffset.toFixed(6)),
-      events: canonicalEvents(runtime),
+      ...eventEvidence(runtime, 100),
     }
   } finally {
     disposeWristMenuRuntime(runtime)
@@ -333,12 +352,24 @@ export async function runDeterministicReleaseTraces(protocolUrl = new URL(
       const observed = observe(trace, schedule)
       reference ??= observed
       const expected = expectedObservation(trace)
-      const { events, ...semanticObservation } = observed
-      const { events: referenceEvents, ...referenceObservation } = reference
+      const {
+        fullEvents: _fullEvents,
+        semanticEvents,
+        timingInvariants,
+        ...semanticObservation
+      } = observed
+      const {
+        fullEvents: _referenceFullEvents,
+        semanticEvents: referenceSemanticEvents,
+        timingInvariants: _referenceTimingInvariants,
+        ...referenceObservation
+      } = reference
       const status =
         JSON.stringify(semanticObservation) ===
           JSON.stringify(referenceObservation) &&
-        JSON.stringify(events) === JSON.stringify(referenceEvents) &&
+        JSON.stringify(semanticEvents) ===
+          JSON.stringify(referenceSemanticEvents) &&
+        timingInvariants.status === 'passed' &&
         (expected === undefined ||
           JSON.stringify(semanticObservation) === JSON.stringify(expected))
           ? 'passed'
