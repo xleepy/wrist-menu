@@ -180,7 +180,11 @@ test('menu and scene delivery paths can share one physical action identity', () 
   const physicalActions = createPhysicalActionCoordinator({
     prefix: 'controller',
   })
-  const sharedActionId = physicalActions.selectStart(inputSource, descriptor)
+  const sharedActionId = physicalActions.selectStart(
+    inputSource,
+    descriptor,
+    {},
+  )
   const menuEvent = {
     type: 'selection-intent',
     intent: {
@@ -194,18 +198,25 @@ test('menu and scene delivery paths can share one physical action identity', () 
     menuWrist: 'left',
     time: 120,
   }
+  physicalActions.bindMenuSource(
+    menuEvent.source.id,
+    inputSource,
+    descriptor,
+  )
 
   const afterMenu = reduceWorkshopMenuEvent(
     createWorkshopModel(),
     menuEvent,
-    sharedActionId,
+    physicalActions.menuAction(menuEvent),
   )
-  const afterScene = transition(afterMenu, { type: 'spawn' }, sharedActionId)
+  const sceneActionId = physicalActions.sceneAction(
+    inputSource,
+    descriptor,
+    {},
+  )
+  const afterScene = transition(afterMenu, { type: 'spawn' }, sceneActionId)
 
-  assert.equal(
-    physicalActions.sceneAction(inputSource, descriptor),
-    sharedActionId,
-  )
+  assert.equal(sceneActionId, sharedActionId)
   assert.equal(afterScene, afterMenu)
   assert.equal(afterScene.selectedPrimitive, 'cylinder')
   assert.equal(afterScene.objects.length, 0)
@@ -221,32 +232,48 @@ test('overlapping XR input sources retain independent physical actions', () => {
   })
   const leftSource = {}
   const rightSource = {}
-  const left = physicalActions.selectStart(leftSource, {
-    kind: 'controller',
-    handedness: 'left',
-  })
-  const right = physicalActions.selectStart(rightSource, {
-    kind: 'controller',
-    handedness: 'right',
-  })
+  const descriptor = { kind: 'controller', handedness: 'right' }
+  const left = physicalActions.selectStart(leftSource, descriptor, {})
+  const right = physicalActions.selectStart(rightSource, descriptor, {})
 
   physicalActions.selectEnd(leftSource)
   now += 21
 
   assert.equal(
-    physicalActions.sceneAction(rightSource, {
-      kind: 'controller',
-      handedness: 'right',
-    }),
+    physicalActions.sceneAction(rightSource, descriptor, {}),
     right,
   )
   assert.notEqual(
-    physicalActions.sceneAction(leftSource, {
-      kind: 'controller',
-      handedness: 'left',
-    }),
+    physicalActions.sceneAction(leftSource, descriptor, {}),
     left,
   )
+})
+
+test('distinct menu commit occurrences stay distinct inside the correlation lifetime', () => {
+  const physicalActions = createPhysicalActionCoordinator({
+    prefix: 'hand',
+    lifetimeMs: 250,
+    now: () => 100,
+  })
+  const inputSource = {}
+  const descriptor = { kind: 'hand', handedness: 'right' }
+  const source = { id: 'hand-source', ...descriptor }
+  const firstEvent = {
+    type: 'selection-intent',
+    intent: { type: 'action', itemId: 'spawn-primitive' },
+    source,
+    menuWrist: 'left',
+    time: 100,
+  }
+  const secondEvent = { ...firstEvent, time: 101 }
+  physicalActions.bindMenuSource(source.id, inputSource, descriptor)
+
+  const first = physicalActions.menuAction(firstEvent)
+  const duplicate = physicalActions.menuAction(firstEvent)
+  const second = physicalActions.menuAction(secondEvent)
+
+  assert.equal(duplicate, first)
+  assert.notEqual(second, first)
 })
 
 test('selection, removal, grid visibility, and both menu wrists stay Host-controlled', () => {

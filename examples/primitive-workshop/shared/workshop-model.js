@@ -62,7 +62,15 @@
  *   identity: string,
  *   descriptor: PhysicalActionDescriptor,
  *   expiresAt: number,
+ *   menuConsumed: boolean,
+ *   sceneConsumed: boolean,
  * }} PhysicalActionRecord
+ */
+/**
+ * @typedef {Readonly<{
+ *   source: object,
+ *   descriptor: PhysicalActionDescriptor,
+ * }>} PhysicalActionBinding
  */
 /**
  * @typedef {Readonly<{
@@ -73,8 +81,9 @@
  */
 /**
  * @typedef {Readonly<{
- *   selectStart(source: object, descriptor: PhysicalActionDescriptor): string,
- *   sceneAction(source: object, descriptor: PhysicalActionDescriptor): string,
+ *   bindMenuSource(sourceId: string, source: object, descriptor: PhysicalActionDescriptor): void,
+ *   selectStart(source: object, descriptor: PhysicalActionDescriptor, occurrence: object): string,
+ *   sceneAction(source: object, descriptor: PhysicalActionDescriptor, occurrence: object): string,
  *   selectEnd(source: object): void,
  *   menuAction(event: WristMenuEvent): string | undefined,
  *   removeSource(source: object): void,
@@ -160,9 +169,10 @@ export function createWorkshopModel() {
 
 /**
  * Coordinate identities at the physical input boundary. Raw XR activity is
- * keyed by XRInputSource object identity, while semantic menu-only activity is
- * bounded by a short correlation lifetime. Hand activity is bounded even if a
- * runtime omits selectend.
+ * keyed by XRInputSource object identity. Each Renderer Integration explicitly
+ * binds its opaque Wrist Menu source ID to that raw identity. Exact event-object
+ * redispatch is deduplicated, while a distinct event consumes a distinct side
+ * of the current action. Instantaneous activity has a bounded lifetime.
  * @param {PhysicalActionCoordinatorOptions} [options]
  * @returns {PhysicalActionCoordinator}
  */
@@ -184,8 +194,14 @@ export function createPhysicalActionCoordinator(options = {}) {
   let sequence = 0
   /** @type {Map<object, PhysicalActionRecord>} */
   const sourceRecords = new Map()
-  /** @type {Map<string, PhysicalActionRecord>} */
-  const menuRecords = new Map()
+  /** @type {Map<string, PhysicalActionBinding>} */
+  const menuSourceBindings = new Map()
+  /** @type {WeakMap<object, string>} */
+  let selectStartOccurrences = new WeakMap()
+  /** @type {WeakMap<object, string>} */
+  let sceneOccurrences = new WeakMap()
+  /** @type {WeakMap<object, string>} */
+  let menuOccurrences = new WeakMap()
 
   function readTime() {
     const time = now()
@@ -200,9 +216,6 @@ export function createPhysicalActionCoordinator(options = {}) {
     for (const [source, record] of sourceRecords) {
       if (record.expiresAt <= time) sourceRecords.delete(source)
     }
-    for (const [key, record] of menuRecords) {
-      if (record.expiresAt <= time) menuRecords.delete(key)
-    }
   }
 
   /** @param {PhysicalActionDescriptor} descriptor */
@@ -212,6 +225,13 @@ export function createPhysicalActionCoordinator(options = {}) {
       (descriptor.handedness !== 'left' && descriptor.handedness !== 'right')
     ) {
       throw new TypeError('Physical action descriptor must identify kind and hand')
+    }
+  }
+
+  /** @param {unknown} occurrence */
+  function assertOccurrence(occurrence) {
+    if (typeof occurrence !== 'object' || occurrence === null) {
+      throw new TypeError('Physical action occurrence must be an object')
     }
   }
 
@@ -226,6 +246,8 @@ export function createPhysicalActionCoordinator(options = {}) {
       identity: `${prefix}:${sequence}`,
       descriptor: Object.freeze({ ...descriptor }),
       expiresAt,
+      menuConsumed: false,
+      sceneConsumed: false,
     }
   }
 
@@ -239,8 +261,41 @@ export function createPhysicalActionCoordinator(options = {}) {
     )
   }
 
+  /**
+   * @param {object} source
+   * @param {PhysicalActionDescriptor} descriptor
+   * @param {'menuConsumed' | 'sceneConsumed'} side
+   * @param {number} time
+   */
+  function consume(source, descriptor, side, time) {
+    let record = sourceRecords.get(source)
+    if (
+      record === undefined ||
+      !sameDescriptor(record.descriptor, descriptor) ||
+      record[side]
+    ) {
+      record = allocate(descriptor, time + lifetimeMs)
+      sourceRecords.set(source, record)
+    }
+    record[side] = true
+    return record.identity
+  }
+
   return Object.freeze({
-    selectStart(source, descriptor) {
+    bindMenuSource(sourceId, source, descriptor) {
+      if (typeof sourceId !== 'string' || sourceId.length === 0) {
+        throw new TypeError('Wrist Menu source ID must be non-empty')
+      }
+      assertDescriptor(descriptor)
+      menuSourceBindings.set(
+        sourceId,
+        Object.freeze({ source, descriptor: Object.freeze({ ...descriptor }) }),
+      )
+    },
+    selectStart(source, descriptor, occurrence) {
+      assertOccurrence(occurrence)
+      const existing = selectStartOccurrences.get(occurrence)
+      if (existing !== undefined) return existing
       assertDescriptor(descriptor)
       const time = readTime()
       pruneExpired(time)
@@ -251,30 +306,19 @@ export function createPhysicalActionCoordinator(options = {}) {
           : Number.POSITIVE_INFINITY,
       )
       sourceRecords.set(source, record)
+      selectStartOccurrences.set(occurrence, record.identity)
       return record.identity
     },
-    sceneAction(source, descriptor) {
+    sceneAction(source, descriptor, occurrence) {
+      assertOccurrence(occurrence)
+      const existing = sceneOccurrences.get(occurrence)
+      if (existing !== undefined) return existing
       assertDescriptor(descriptor)
       const time = readTime()
       pruneExpired(time)
-      const current = sourceRecords.get(source)
-      if (
-        current !== undefined &&
-        sameDescriptor(current.descriptor, descriptor)
-      ) {
-        return current.identity
-      }
-      const matchingMenuRecords = [...menuRecords.values()].filter((record) =>
-        sameDescriptor(record.descriptor, descriptor),
-      )
-      if (matchingMenuRecords.length === 1) {
-        const matchingMenuRecord = matchingMenuRecords[0]
-        sourceRecords.set(source, matchingMenuRecord)
-        return matchingMenuRecord.identity
-      }
-      const record = allocate(descriptor, time + lifetimeMs)
-      sourceRecords.set(source, record)
-      return record.identity
+      const identity = consume(source, descriptor, 'sceneConsumed', time)
+      sceneOccurrences.set(occurrence, identity)
+      return identity
     },
     selectEnd(source) {
       const time = readTime()
@@ -284,28 +328,33 @@ export function createPhysicalActionCoordinator(options = {}) {
     },
     menuAction(event) {
       if (event.type !== 'selection-intent') return undefined
+      const existing = menuOccurrences.get(event)
+      if (existing !== undefined) return existing
       const descriptor = event.source
       assertDescriptor(descriptor)
       const time = readTime()
       pruneExpired(time)
-      const matchingSources = [...sourceRecords.values()].filter((record) =>
-        sameDescriptor(record.descriptor, descriptor),
-      )
-      if (matchingSources.length === 1) return matchingSources[0].identity
-
-      const menuKey = `${descriptor.kind}:${descriptor.handedness}:${event.source.id}`
-      const current = menuRecords.get(menuKey)
-      if (current !== undefined) return current.identity
-      const record = allocate(descriptor, time + lifetimeMs)
-      menuRecords.set(menuKey, record)
-      return record.identity
+      const binding = menuSourceBindings.get(event.source.id)
+      const identity =
+        binding !== undefined &&
+        sameDescriptor(binding.descriptor, descriptor)
+          ? consume(binding.source, descriptor, 'menuConsumed', time)
+          : allocate(descriptor, time + lifetimeMs).identity
+      menuOccurrences.set(event, identity)
+      return identity
     },
     removeSource(source) {
       sourceRecords.delete(source)
+      for (const [sourceId, binding] of menuSourceBindings) {
+        if (binding.source === source) menuSourceBindings.delete(sourceId)
+      }
     },
     clear() {
       sourceRecords.clear()
-      menuRecords.clear()
+      menuSourceBindings.clear()
+      selectStartOccurrences = new WeakMap()
+      sceneOccurrences = new WeakMap()
+      menuOccurrences = new WeakMap()
     },
   })
 }

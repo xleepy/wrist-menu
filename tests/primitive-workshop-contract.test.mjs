@@ -8,25 +8,81 @@ async function text(relativePath) {
   return readFile(new URL(relativePath, exampleRoot), 'utf8')
 }
 
-function selectionIntentEvent(source) {
+function selectionIntentEvent(
+  id,
+  { kind = 'hand', handedness = 'right', time = 100 } = {},
+) {
   return {
     type: 'selection-intent',
     intent: { type: 'action', itemId: 'spawn-primitive' },
-    source,
+    source: { id, kind, handedness },
     menuWrist: 'left',
-    time: 100,
+    time,
   }
 }
 
-const variantPhysicalActionFactories = [
-  [
-    'vanilla',
-    () => import('../examples/primitive-workshop/vanilla/physical-actions.js'),
-  ],
-  [
-    'react',
-    () => import('../examples/primitive-workshop/react/physical-actions.js'),
-  ],
+class FakeSession {
+  listeners = new Map()
+
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) ?? new Set()
+    listeners.add(listener)
+    this.listeners.set(type, listeners)
+  }
+
+  removeEventListener(type, listener) {
+    this.listeners.get(type)?.delete(listener)
+  }
+
+  dispatch(type, inputSource, additions = {}) {
+    const event = { type, inputSource, ...additions }
+    for (const listener of this.listeners.get(type) ?? []) listener(event)
+    return event
+  }
+}
+
+const variantHarnesses = [
+  {
+    name: 'vanilla',
+    load: () =>
+      import('../examples/primitive-workshop/vanilla/physical-actions.js'),
+    create(module, options) {
+      const menuSources = new Map()
+      const actions = module.createPhysicalActions({
+        ...options,
+        inputSourceForMenuSourceId: (sourceId) =>
+          menuSources.get(sourceId) ?? null,
+      })
+      return {
+        actions,
+        menu(event, inputSource) {
+          menuSources.set(event.source.id, inputSource)
+          return actions.menuAction(event)
+        },
+        scene(inputSource, occurrence = {}) {
+          return actions.sceneAction({ ...occurrence, inputSource })
+        },
+      }
+    },
+  },
+  {
+    name: 'react',
+    load: () =>
+      import('../examples/primitive-workshop/react/physical-actions.js'),
+    create(module, options) {
+      const actions = module.createPhysicalActions(options)
+      return {
+        actions,
+        menu: (event, inputSource) => actions.menuAction(event, inputSource),
+        scene(inputSource, occurrence = {}) {
+          return actions.sceneAction({
+            ...occurrence,
+            pointerState: { inputSource },
+          })
+        },
+      }
+    },
+  },
 ]
 
 test('both Example Variants consume the packed public package exports', async () => {
@@ -41,8 +97,14 @@ test('both Example Variants consume the packed public package exports', async ()
     manifest.dependencies['@xleepy/wrist-menu'],
     'file:../../artifacts/xleepy-wrist-menu-0.0.0.tgz',
   )
-  assert.match(vanillaSource, /from ['"]@xleepy\/wrist-menu\/three['"]/)
-  assert.match(reactSource, /from ['"]@xleepy\/wrist-menu\/react['"]/)
+  assert.match(
+    vanillaSource,
+    /from ['"]@xleepy\/wrist-menu\/three['"]/,
+  )
+  assert.match(
+    reactSource,
+    /from ['"]@xleepy\/wrist-menu\/react['"]/,
+  )
   assert.doesNotMatch(`${vanillaSource}\n${reactSource}`, /(?:\.\.\/)+src\//)
   assert.equal(typeof manifest.scripts['build:vanilla'], 'string')
   assert.equal(typeof manifest.scripts['build:react'], 'string')
@@ -50,83 +112,104 @@ test('both Example Variants consume the packed public package exports', async ()
   assert.match(manifest.scripts.build, /build:react/)
 })
 
-for (const [variant, loadModule] of variantPhysicalActionFactories) {
-  test(`${variant} keeps overlapping XR input sources independent`, async () => {
-    let now = 10
-    const module = await loadModule()
-    const physicalActions = module.createPhysicalActions({
-      lifetimeMs: 25,
-      now: () => now,
-    })
-    const firstSource = {}
-    const secondSource = {}
-    const firstDescriptor = { kind: 'controller', handedness: 'left' }
-    const secondDescriptor = { kind: 'controller', handedness: 'right' }
-    const first = physicalActions.selectStart(firstSource, firstDescriptor)
-    const second = physicalActions.selectStart(secondSource, secondDescriptor)
+test('the Example Variants share only the portable Workshop Model', async () => {
+  const sources = await Promise.all([
+    text('vanilla/main.ts'),
+    text('vanilla/physical-actions.js'),
+    text('react/main.tsx'),
+    text('react/physical-actions.js'),
+  ])
 
-    physicalActions.selectEnd(firstSource)
-    now += 26
-
-    assert.equal(
-      physicalActions.sceneAction(secondSource, secondDescriptor),
-      second,
+  for (const source of sources) {
+    const sharedImports = [
+      ...source.matchAll(/from ['"](\.\.\/shared\/[^'"]+)['"]/g),
+    ].map((match) => match[1])
+    assert.deepEqual(
+      [...new Set(sharedImports)],
+      ['../shared/workshop-model.js'],
     )
-    assert.notEqual(
-      physicalActions.sceneAction(firstSource, firstDescriptor),
-      first,
-    )
-  })
+  }
+})
 
-  test(`${variant} shares controller identities across menu and scene paths`, async () => {
-    const module = await loadModule()
-    const physicalActions = module.createPhysicalActions()
-    const source = {}
+for (const harness of variantHarnesses) {
+  test(`${harness.name} listener wiring isolates same-descriptor XR sources`, async () => {
+    const module = await harness.load()
+    const fixture = harness.create(module, {})
+    const session = new FakeSession()
+    fixture.actions.attachSession(session)
     const descriptor = { kind: 'controller', handedness: 'right' }
-    const started = physicalActions.selectStart(source, descriptor)
-    const menu = physicalActions.menuAction(
-      selectionIntentEvent({
-        id: 'right-controller',
-        kind: 'controller',
-        handedness: 'right',
-      }),
+    const firstSource = { handedness: 'right' }
+    const secondSource = { handedness: 'right' }
+    session.dispatch('selectstart', firstSource)
+    session.dispatch('selectstart', secondSource)
+
+    const secondMenu = fixture.menu(
+      selectionIntentEvent('source-b', descriptor),
+      secondSource,
+    )
+    const firstMenu = fixture.menu(
+      selectionIntentEvent('source-a', descriptor),
+      firstSource,
     )
 
-    assert.equal(menu, started)
-    assert.equal(physicalActions.sceneAction(source, descriptor), started)
+    assert.notEqual(firstMenu, secondMenu)
+    assert.match(firstMenu, /:1$/)
+    assert.match(secondMenu, /:2$/)
+    assert.equal(fixture.scene(firstSource), firstMenu)
+    assert.equal(fixture.scene(secondSource), secondMenu)
+    fixture.actions.dispose()
   })
 
-  test(`${variant} expires direct-hand identities without XR selectend`, async () => {
-    let now = 500
-    const module = await loadModule()
-    const physicalActions = module.createPhysicalActions({
-      lifetimeMs: 30,
+  test(`${harness.name} gives rapid distinct hand commits distinct identities`, async () => {
+    const module = await harness.load()
+    const fixture = harness.create(module, { lifetimeMs: 250, now: () => 100 })
+    const source = { handedness: 'right', hand: {} }
+    const firstEvent = selectionIntentEvent('hand-source', { time: 100 })
+    const secondEvent = selectionIntentEvent('hand-source', { time: 101 })
+
+    const first = fixture.menu(firstEvent, source)
+    assert.equal(fixture.menu(firstEvent, source), first)
+    assert.notEqual(fixture.menu(secondEvent, source), first)
+    fixture.actions.dispose()
+  })
+
+  test(`${harness.name} expires an unmatched direct-hand menu occurrence`, async () => {
+    let now = 100
+    const module = await harness.load()
+    const fixture = harness.create(module, {
+      lifetimeMs: 250,
       now: () => now,
     })
-    const handEvent = selectionIntentEvent({
-      id: 'right-hand',
-      kind: 'hand',
-      handedness: 'right',
-    })
-    const first = physicalActions.menuAction(handEvent)
-    const sceneSource = {}
+    const source = { handedness: 'right', hand: {} }
+    const menu = fixture.menu(selectionIntentEvent('expiring-hand'), source)
 
-    assert.equal(physicalActions.menuAction(handEvent), first)
+    now += 251
+
+    assert.notEqual(fixture.scene(source), menu)
+    fixture.actions.dispose()
+  })
+
+  test(`${harness.name} correlates menu then scene by actual source`, async () => {
+    const module = await harness.load()
+    const fixture = harness.create(module, {})
+    const source = { handedness: 'right', hand: {} }
+    const menu = fixture.menu(selectionIntentEvent('menu-first'), source)
+
+    assert.equal(fixture.scene(source), menu)
+    fixture.actions.dispose()
+  })
+
+  test(`${harness.name} correlates scene then menu by actual source`, async () => {
+    const module = await harness.load()
+    const fixture = harness.create(module, {})
+    const source = { handedness: 'right', hand: {} }
+    const scene = fixture.scene(source)
+
     assert.equal(
-      physicalActions.sceneAction(sceneSource, {
-        kind: 'hand',
-        handedness: 'right',
-      }),
-      first,
+      fixture.menu(selectionIntentEvent('scene-first'), source),
+      scene,
     )
-
-    now += 31
-    const laterScene = physicalActions.sceneAction(sceneSource, {
-      kind: 'hand',
-      handedness: 'right',
-    })
-    assert.notEqual(laterScene, first)
-    assert.equal(physicalActions.menuAction(handEvent), laterScene)
+    fixture.actions.dispose()
   })
 }
 
@@ -158,6 +241,8 @@ test('strict checkJs validates the Workshop Model runtime as its type source', a
   assert.equal(config.compilerOptions.allowJs, true)
   assert.equal(config.compilerOptions.checkJs, true)
   assert.ok(config.include.includes('shared/**/*.js'))
+  assert.ok(config.include.includes('vanilla/physical-actions.js'))
+  assert.ok(config.include.includes('react/physical-actions.js'))
   await assert.rejects(text('shared/workshop-model.d.ts'), { code: 'ENOENT' })
 })
 

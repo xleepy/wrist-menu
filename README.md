@@ -78,6 +78,8 @@ Before handling a scene action, call
 cannot also affect content behind the menu. React hosts mount
 `<WristMenu snapshot={snapshot} onEvent={onEvent} />` inside their R3F tree; its
 managed Scene Event Shield stops synthetic events behind active Hit Regions.
+The React `onEvent` callback also receives a context whose `inputSource` maps a
+semantic selection back to the originating raw `XRInputSource`.
 
 Advanced hosts can pass the same synchronous `presentationFactory` to
 `createThreeWristMenuState` or `<WristMenu>`. The factory receives only the

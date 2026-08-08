@@ -16,6 +16,7 @@ import {
   updateThreeWristMenu,
   type HostSnapshot,
   type ThreeWristMenuPresentationFactory,
+  type ThreeWristMenuState,
   type WristMenuEvent,
 } from '../three/index.js'
 
@@ -28,9 +29,13 @@ export {
   type ThreeWristMenuViewport,
 } from '../three/index.js'
 
+export type WristMenuEventContext = Readonly<{
+  inputSource: XRInputSource | null
+}>
+
 export type WristMenuProps = Readonly<{
   snapshot: HostSnapshot
-  onEvent: (event: WristMenuEvent) => void
+  onEvent: (event: WristMenuEvent, context: WristMenuEventContext) => void
   presentationFactory?: ThreeWristMenuPresentationFactory
 }>
 
@@ -55,14 +60,24 @@ function MountedWristMenu({
   const initialSnapshotRef = useRef(snapshot)
   const lastSnapshotRef = useRef(snapshot)
   const lastPresentationFactoryRef = useRef(presentationFactory)
-  const [menuState] = useState(() =>
-    createThreeWristMenuState({
+  const menuStateRef = useRef<ThreeWristMenuState | null>(null)
+  const [menuState] = useState(() => {
+    const state = createThreeWristMenuState({
       renderer,
       snapshot: initialSnapshotRef.current,
-      onEvent: (event) => onEventRef.current(event),
+      onEvent: (event) => {
+        const currentState = menuStateRef.current
+        const inputSource =
+          event.type === 'selection-intent' && currentState !== null
+            ? (currentState.inputSourceById.get(event.source.id) ?? null)
+            : null
+        onEventRef.current(event, Object.freeze({ inputSource }))
+      },
       ...(presentationFactory === undefined ? {} : { presentationFactory }),
-    }),
-  )
+    })
+    menuStateRef.current = state
+    return state
+  })
 
   useEffect(() => {
     if (lastSnapshotRef.current !== snapshot) {

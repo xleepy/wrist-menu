@@ -126,6 +126,7 @@ function createReactXrFixture() {
 
 test('React integration mounts the Three instance and shields its active Hit Region', async () => {
   const wristMenuEvents = []
+  const wristMenuEventContexts = []
   const { canvas, frame, inputSource, renderer, session } = createReactXrFixture()
   const root = createRoot(canvas)
   await root.configure({
@@ -152,7 +153,10 @@ test('React integration mounts the Three instance and shields its active Hit Reg
         null,
         createElement(WristMenu, {
           snapshot: controllerActionSnapshot,
-          onEvent: (event) => wristMenuEvents.push(event),
+          onEvent: (event, context) => {
+            wristMenuEvents.push(event)
+            wristMenuEventContexts.push(context)
+          },
         }),
         createElement('primitive', {
           object: behindMenu,
@@ -201,6 +205,10 @@ test('React integration mounts the Three instance and shields its active Hit Reg
     wristMenuEvents.filter(({ type }) => type === 'selection-intent').length,
     1,
   )
+  const selectionIndex = wristMenuEvents.findIndex(
+    ({ type }) => type === 'selection-intent',
+  )
+  assert.equal(wristMenuEventContexts[selectionIndex].inputSource, inputSource)
 
   await act(async () => root.unmount())
   assert.equal(menuGroup.children.length, 0)

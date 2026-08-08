@@ -7,6 +7,7 @@ import {
   WristMenu,
   wristMenuSessionFeatures,
   type WristMenuEvent,
+  type WristMenuEventContext,
 } from '@xleepy/wrist-menu/react'
 
 import {
@@ -33,32 +34,6 @@ const physicalActions = createPhysicalActions()
 type SceneEvent = (ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>) &
   Readonly<{ pointerState?: unknown }>
 
-function physicalActionDescriptor(inputSource: XRInputSource) {
-  if (inputSource.handedness === 'none') return null
-  return {
-    kind:
-      inputSource.hand === undefined
-        ? ('controller' as const)
-        : ('hand' as const),
-    handedness: inputSource.handedness,
-  }
-}
-
-function xrInputSource(event: SceneEvent): XRInputSource | null {
-  const pointerState = event.pointerState
-  if (
-    typeof pointerState !== 'object' ||
-    pointerState === null ||
-    !('inputSource' in pointerState)
-  ) {
-    return null
-  }
-  const inputSource = pointerState.inputSource
-  return typeof inputSource === 'object' && inputSource !== null
-    ? (inputSource as XRInputSource)
-    : null
-}
-
 function eventActionId(prefix: string, event: SceneEvent): string {
   return `${prefix}:${event.nativeEvent.timeStamp}`
 }
@@ -67,42 +42,17 @@ function committedActionId(prefix: string, event: SceneEvent): string {
   if (xrStore.getState().session === undefined) {
     return eventActionId(prefix, event)
   }
-  const inputSource = xrInputSource(event)
-  if (inputSource === null) return eventActionId(prefix, event)
-  const descriptor = physicalActionDescriptor(inputSource)
-  return descriptor === null
-    ? eventActionId(prefix, event)
-    : physicalActions.sceneAction(inputSource, descriptor)
+  return physicalActions.sceneAction(event) ?? eventActionId(prefix, event)
 }
 
 function XrPhysicalActionCapture() {
   const session = useXR((state) => state.session)
   useEffect(() => {
     if (session === undefined) return undefined
-    const beginPhysicalAction = (event: XRInputSourceEvent) => {
-      const descriptor = physicalActionDescriptor(event.inputSource)
-      if (descriptor !== null) {
-        physicalActions.selectStart(event.inputSource, descriptor)
-      }
-    }
-    const endPhysicalAction = (event: XRInputSourceEvent) => {
-      physicalActions.selectEnd(event.inputSource)
-    }
-    const removeInputSources = (event: XRInputSourcesChangeEvent) => {
-      for (const inputSource of event.removed) {
-        physicalActions.removeSource(inputSource)
-      }
-    }
-    const clearPhysicalActions = () => physicalActions.clear()
-    session.addEventListener('selectstart', beginPhysicalAction)
-    session.addEventListener('selectend', endPhysicalAction)
-    session.addEventListener('inputsourceschange', removeInputSources)
-    session.addEventListener('end', clearPhysicalActions)
+    const detach = physicalActions.attachSession(session)
     return () => {
-      session.removeEventListener('selectstart', beginPhysicalAction)
-      session.removeEventListener('selectend', endPhysicalAction)
-      session.removeEventListener('inputsourceschange', removeInputSources)
-      session.removeEventListener('end', clearPhysicalActions)
+      detach()
+      physicalActions.dispose()
     }
   }, [session])
   return null
@@ -155,7 +105,10 @@ function WorkshopScene({
 }: Readonly<{
   model: WorkshopModel
   dispatch: (action: WorkshopAction, actionId: string) => void
-  onMenuEvent: (event: WristMenuEvent) => void
+  onMenuEvent: (
+    event: WristMenuEvent,
+    context: WristMenuEventContext,
+  ) => void
 }>) {
   const snapshot = useMemo(() => workshopHostSnapshot(model), [model])
 
@@ -225,11 +178,18 @@ function App() {
   const dispatch = useCallback((action: WorkshopAction, actionId: string) => {
     setModel((current) => reduceWorkshop(current, { actionId, action }))
   }, [])
-  const onMenuEvent = useCallback((event: WristMenuEvent) => {
-    setModel((current) =>
-      reduceWorkshopMenuEvent(current, event, physicalActions.menuAction(event)),
-    )
-  }, [])
+  const onMenuEvent = useCallback(
+    (event: WristMenuEvent, context: WristMenuEventContext) => {
+      setModel((current) =>
+        reduceWorkshopMenuEvent(
+          current,
+          event,
+          physicalActions.menuAction(event, context.inputSource),
+        ),
+      )
+    },
+    [],
+  )
 
   const enterVr = async () => {
     try {
