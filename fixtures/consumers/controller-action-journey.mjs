@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 
 import { controllerActionSnapshot } from '../controller-action.mjs'
 import { crossInputSnapshot } from '../cross-input-selection.mjs'
+import {
+  assertCompleteJourneyCoverage,
+  runCandidateJourneyCoverage,
+} from './journey-evidence.mjs'
 
 function installIwerNodePrimitives() {
   const names = [
@@ -166,6 +170,7 @@ export async function runPackedThreeControllerJourney({
   updateThreeWristMenu,
   iwer,
   three,
+  core,
 }) {
   const fixture = await createIwerControllerFixture(iwer)
   const wristMenuEvents = []
@@ -220,11 +225,31 @@ export async function runPackedThreeControllerJourney({
       wristMenuEvents.filter(({ type }) => type === 'selection-intent').length,
       1,
     )
+    const coverage = runCandidateJourneyCoverage({
+      core,
+      sourceKind: 'controller',
+    })
+    assertCompleteJourneyCoverage(coverage)
+    const selectionIntents = wristMenuEvents.filter(
+      ({ type }) => type === 'selection-intent',
+    ).length
+    const sceneEventShield = {
+      ...coverage.sceneEventShield,
+      rendererIntegration: 'three',
+      selectionSourceKind: 'controller',
+    }
     return {
       id: 'iwer-vanilla-controller',
-      status: 'passed',
-      selectionIntents: 1,
+      status:
+        selectionIntents === 1 &&
+        sceneActions === 0 &&
+        coverage.status === 'passed'
+          ? 'passed'
+          : 'failed',
+      selectionIntents,
       blockedSceneActions: sceneActions,
+      coverage,
+      sceneEventShield,
     }
   } finally {
     disposeThreeWristMenu(menu)
@@ -239,6 +264,7 @@ export async function runPackedThreeHandJourney({
   updateThreeWristMenu,
   iwer,
   three,
+  core,
 }) {
   const fixture = await createIwerHandFixture(iwer)
   const wristMenuEvents = []
@@ -282,11 +308,28 @@ export async function runPackedThreeHandJourney({
         .map(({ intent, source }) => [intent.itemId, source.kind]),
       [['first', 'hand']],
     )
+    const coverage = runCandidateJourneyCoverage({ core, sourceKind: 'hand' })
+    assertCompleteJourneyCoverage(coverage)
+    const selectionIntents = wristMenuEvents.filter(
+      ({ type }) => type === 'selection-intent',
+    ).length
+    const sceneEventShield = {
+      ...coverage.sceneEventShield,
+      rendererIntegration: 'three',
+      selectionSourceKind: 'hand',
+    }
     return {
       id: 'iwer-vanilla-hand',
-      status: 'passed',
-      selectionIntents: 1,
+      status:
+        selectionIntents === 1 &&
+        sceneActions === 0 &&
+        coverage.status === 'passed'
+          ? 'passed'
+          : 'failed',
+      selectionIntents,
       blockedSceneActions: sceneActions,
+      coverage,
+      sceneEventShield,
     }
   } finally {
     disposeThreeWristMenu(menu)
@@ -336,6 +379,7 @@ export async function runPackedReactControllerJourney({
   iwer,
   three,
   xr,
+  core,
 }) {
   const previousActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -395,6 +439,8 @@ export async function runPackedReactControllerJourney({
   behindMenu.addEventListener('pointerdown', countSceneAction)
   behindMenu.addEventListener('pointerup', countSceneAction)
   behindMenu.addEventListener('click', countSceneAction)
+  behindMenu.addEventListener('dblclick', countSceneAction)
+  behindMenu.addEventListener('contextmenu', countSceneAction)
   const wristMenuEvents = []
   const xrStore = xr.createXRStore({
     baseAssetPath: 'https://fixtures.invalid/webxr-input-profiles/',
@@ -429,6 +475,8 @@ export async function runPackedReactControllerJourney({
             onPointerDown: countSceneAction,
             onPointerUp: countSceneAction,
             onClick: countSceneAction,
+            onDoubleClick: countSceneAction,
+            onContextMenu: countSceneAction,
           }),
         ),
       )
@@ -473,6 +521,16 @@ export async function runPackedReactControllerJourney({
       fiber.advance(32, true, state, fixture.nextFrame(32))
     })
     assert.ok(ray.intersectObject(menuGroup, true).length > 0)
+    state.camera.position.copy(
+      menuGroup.localToWorld(new three.Vector3(0, 0, 1)),
+    )
+    state.camera.quaternion.copy(menuGroup.quaternion)
+    state.camera.updateMatrixWorld(true)
+    behindMenu.position.copy(
+      menuGroup.localToWorld(new three.Vector3(0, 0, -0.1)),
+    )
+    behindMenu.quaternion.copy(menuGroup.quaternion)
+    behindMenu.updateMatrixWorld(true)
     await fiber.act(async () => {
       fiber.advance(33, true, state, fixture.nextFrame(33))
     })
@@ -485,6 +543,16 @@ export async function runPackedReactControllerJourney({
     await fiber.act(async () => {
       fiber.advance(48, true, state, pressedFrame)
     })
+    for (const type of [
+      'pointerdown',
+      'pointerup',
+      'click',
+      'dblclick',
+      'contextmenu',
+    ]) {
+      canvas.dispatch(type)
+    }
+    assert.equal(sceneActions, 0)
 
     let releasedFrame
     await fiber.act(async () => {
@@ -498,6 +566,7 @@ export async function runPackedReactControllerJourney({
       wristMenuEvents.filter(({ type }) => type === 'selection-intent').length,
       1,
     )
+    const blockedWhileMenuActions = sceneActions
 
     // Prove the XR pointer path is live by removing only the wrist menu and
     // driving the same IWER controller through the same XR store and target.
@@ -512,6 +581,8 @@ export async function runPackedReactControllerJourney({
             onPointerDown: countSceneAction,
             onPointerUp: countSceneAction,
             onClick: countSceneAction,
+            onDoubleClick: countSceneAction,
+            onContextMenu: countSceneAction,
           }),
         ),
       )
@@ -532,14 +603,39 @@ export async function runPackedReactControllerJourney({
     await fiber.act(async () => {
       fixture.release(112)
     })
-    return {
-      id: 'iwer-react-controller',
-      status: 'passed',
-      selectionIntents: 1,
-      sceneShield: {
-        blockedWhileMenuOwned: true,
+    const coverage = runCandidateJourneyCoverage({
+      core,
+      sourceKind: 'controller',
+    })
+    assertCompleteJourneyCoverage(coverage)
+    const selectionIntents = wristMenuEvents.filter(
+      ({ type }) => type === 'selection-intent',
+    ).length
+    const sceneEventShield = {
+      ...coverage.sceneEventShield,
+      rendererIntegration: 'react',
+      selectionSourceKind: 'controller',
+      actualFiberCommit: {
+        blockedSceneActions: blockedWhileMenuActions,
         behindTargetLiveAfterUnmount: sceneActions > 0,
       },
+    }
+    return {
+      id: 'iwer-react-controller',
+      status:
+        selectionIntents === 1 &&
+        blockedWhileMenuActions === 0 &&
+        sceneActions > 0 &&
+        coverage.status === 'passed'
+          ? 'passed'
+          : 'failed',
+      selectionIntents,
+      sceneShield: {
+        blockedWhileMenuOwned: blockedWhileMenuActions === 0,
+        behindTargetLiveAfterUnmount: sceneActions > 0,
+      },
+      coverage,
+      sceneEventShield,
     }
   } finally {
     await fiber.act(async () => root.unmount())
@@ -547,6 +643,8 @@ export async function runPackedReactControllerJourney({
     behindMenu.removeEventListener('pointerdown', countSceneAction)
     behindMenu.removeEventListener('pointerup', countSceneAction)
     behindMenu.removeEventListener('click', countSceneAction)
+    behindMenu.removeEventListener('dblclick', countSceneAction)
+    behindMenu.removeEventListener('contextmenu', countSceneAction)
     behindGeometry.dispose()
     behindMaterial.dispose()
     xrStore.destroy()
@@ -565,6 +663,7 @@ export async function runPackedReactHandJourney({
   fiber,
   iwer,
   three,
+  core,
 }) {
   const previousActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -625,6 +724,8 @@ export async function runPackedReactHandJourney({
             onPointerDown: countSceneAction,
             onPointerUp: countSceneAction,
             onClick: countSceneAction,
+            onDoubleClick: countSceneAction,
+            onContextMenu: countSceneAction,
           }),
         ),
       )
@@ -661,6 +762,8 @@ export async function runPackedReactHandJourney({
     canvas.dispatch('pointerdown')
     canvas.dispatch('pointerup')
     canvas.dispatch('click')
+    canvas.dispatch('dblclick')
+    canvas.dispatch('contextmenu')
 
     const pressTarget = menuGroup.localToWorld(
       new three.Vector3(0, 0.0225, 0.008),
@@ -677,11 +780,29 @@ export async function runPackedReactHandJourney({
         .map(({ intent, source }) => [intent.itemId, source.kind]),
       [['first', 'hand']],
     )
+    const coverage = runCandidateJourneyCoverage({ core, sourceKind: 'hand' })
+    assertCompleteJourneyCoverage(coverage)
+    const selectionIntents = wristMenuEvents.filter(
+      ({ type }) => type === 'selection-intent',
+    ).length
+    const sceneEventShield = {
+      ...coverage.sceneEventShield,
+      rendererIntegration: 'react',
+      selectionSourceKind: 'hand',
+      actualFiberCommit: { blockedSceneActions: sceneActions },
+    }
     return {
       id: 'iwer-react-hand',
-      status: 'passed',
-      selectionIntents: 1,
+      status:
+        selectionIntents === 1 &&
+        sceneActions === 0 &&
+        coverage.status === 'passed'
+          ? 'passed'
+          : 'failed',
+      selectionIntents,
       blockedSceneActions: sceneActions,
+      coverage,
+      sceneEventShield,
     }
   } finally {
     await fiber.act(async () => root.unmount())

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import * as iwer from 'iwer'
 import * as three from 'three'
+import * as core from '@xleepy/wrist-menu/three'
 
 import { wristMenuSessionFeatures as rootFeatures } from '@xleepy/wrist-menu'
 import { wristMenuSessionFeatures as coreFeatures } from '@xleepy/wrist-menu/core'
@@ -28,6 +29,7 @@ const controllerJourney = await runPackedThreeControllerJourney({
   updateThreeWristMenu,
   iwer,
   three,
+  core,
 })
 const handJourney = await runPackedThreeHandJourney({
   createThreeWristMenuState,
@@ -36,11 +38,16 @@ const handJourney = await runPackedThreeHandJourney({
   updateThreeWristMenu,
   iwer,
   three,
+  core,
 })
 
 await writeLaneReport('three-iwer-lanes.json', {
   candidateSha256: process.env.WRIST_MENU_CANDIDATE_SHA256,
-  status: 'passed',
+  status: [handJourney, controllerJourney].every(
+    ({ status }) => status === 'passed',
+  )
+    ? 'passed'
+    : 'failed',
   testedLanes: ['three-0.185.1', handJourney.id, controllerJourney.id],
   versions: {
     three: await installedVersion('three', import.meta.url),

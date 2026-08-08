@@ -6,6 +6,7 @@ import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 
 import { WristMenu } from '@xleepy/wrist-menu/react'
+import * as core from '@xleepy/wrist-menu/react'
 import {
   runPackedReactControllerJourney,
   runPackedReactHandJourney,
@@ -41,6 +42,7 @@ const controllerJourney = await runPackedReactControllerJourney({
   iwer,
   three,
   xr,
+  core,
 })
 
 const handJourney = await runPackedReactHandJourney({
@@ -49,11 +51,16 @@ const handJourney = await runPackedReactHandJourney({
   fiber,
   iwer,
   three,
+  core,
 })
 
 await writeLaneReport('react-19-xr-iwer-lanes.json', {
   candidateSha256: process.env.WRIST_MENU_CANDIDATE_SHA256,
-  status: 'passed',
+  status: [handJourney, controllerJourney].every(
+    ({ status }) => status === 'passed',
+  )
+    ? 'passed'
+    : 'failed',
   testedLanes: [
     'react-19.2.7-r3f-9.6.1',
     'react-xr-6.6.30',

@@ -13,4 +13,41 @@ test('every named boundary trace converges across fixed and irregular frames', a
     [...new Set(report.results.map(({ schedule }) => schedule))],
     ['60hz', '72hz', '90hz', '120hz', 'irregular'],
   )
+  assert.ok(
+    report.results.every(({ observed }) => Array.isArray(observed.events)),
+  )
+  for (const trace of new Set(report.results.map(({ trace }) => trace))) {
+    const eventSequences = report.results
+      .filter(({ trace: candidate }) => candidate === trace)
+      .map(({ observed }) => observed.events)
+    assert.ok(
+      eventSequences.every(
+        (events) => JSON.stringify(events) === JSON.stringify(eventSequences[0]),
+      ),
+      `${trace} produced schedule-dependent Wrist Menu Events`,
+    )
+  }
+  for (const kind of ['hand', 'controller']) {
+    const below = report.results.find(
+      ({ trace }) => trace === `${kind}-scroll-below`,
+    )
+    assert.equal(below.observed.scrollOwned, false)
+    assert.equal(
+      below.observed.events.some(
+        ({ type }) => type === 'selection-cancellation',
+      ),
+      false,
+    )
+    for (const position of ['at', 'above']) {
+      const acquired = report.results.find(
+        ({ trace }) => trace === `${kind}-scroll-${position}`,
+      )
+      assert.equal(acquired.observed.scrollOwned, true)
+      assert.ok(
+        acquired.observed.events.some(
+          ({ type }) => type === 'selection-cancellation',
+        ),
+      )
+    }
+  }
 })

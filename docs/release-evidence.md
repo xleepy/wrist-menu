@@ -21,9 +21,18 @@ Run `npm run evidence` only from a clean, committed worktree. The command:
 
 The record identity includes the candidate digest, source and in-repository
 Example App commits, every participating lockfile, protocol, instrumentation,
-and baseline. A rerun may reuse an identity only when the canonical record is
-byte-for-byte identical. Missing reports and unmeasurable requirements fail
-closed; the failed record is retained and the command exits nonzero.
+baseline, Tested Lanes, Validation Combinations, gate results, resolved-policy
+digest, and a byte manifest of every raw report. A rerun may reuse an identity
+only when every retained file is byte-for-byte identical. Honest wall-clock and
+performance observations may therefore produce a new content-addressed record
+for the same source commit. Verify any retained bundle without rerunning its
+instrumentation with
+`npm run evidence -- --verify <immutable-record-id>`.
+
+Missing reports and unmeasurable requirements fail closed; the failed record is
+retained and the command exits nonzero. Build, typecheck, test, pack, or
+candidate-digest failure produces a `candidate-unavailable` record with the
+available raw logs and no invented tarball digest.
 The normal clean task preserves `artifacts/release-evidence/` while removing
 rebuildable package archives, so a later run can verify rather than overwrite a
 record with the same identity.

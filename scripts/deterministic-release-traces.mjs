@@ -20,6 +20,7 @@ const FRAME_INTERVALS = Object.freeze({
   '120hz': Object.freeze([1000 / 120]),
   irregular: Object.freeze([7, 23, 11, 41, 5, 19, 31]),
 })
+const runtimeEvents = new WeakMap()
 
 function scheduledTimes(start, end, schedule) {
   if (end <= start) return [end]
@@ -42,7 +43,17 @@ function viewerAtAngle(degrees) {
 }
 
 function createRuntime(snapshot) {
-  return createWristMenuRuntimeState({ snapshot, onEvent: () => undefined })
+  const events = []
+  const runtime = createWristMenuRuntimeState({
+    snapshot,
+    onEvent: (event) => events.push(event),
+  })
+  runtimeEvents.set(runtime, events)
+  return runtime
+}
+
+function canonicalEvents(runtime) {
+  return runtimeEvents.get(runtime).map(({ time: _time, ...event }) => event)
 }
 
 function runFrames(runtime, times, frame) {
@@ -64,7 +75,11 @@ function revealObservation(trace, schedule) {
           viewerPosition: viewerAtAngle(trace.value),
         }),
       )
-      return { phase: model.revealPhase, visible: model.visible }
+      return {
+        phase: model.revealPhase,
+        visible: model.visible,
+        events: canonicalEvents(runtime),
+      }
     }
 
     const step = (sequence, time, overrides = {}) =>
@@ -83,19 +98,31 @@ function revealObservation(trace, schedule) {
       const model = advance(500, {
         viewerPosition: viewerAtAngle(trace.value),
       })
-      return { phase: model.revealPhase, visible: model.visible }
+      return {
+        phase: model.revealPhase,
+        visible: model.visible,
+        events: canonicalEvents(runtime),
+      }
     }
     if (trace.boundary === 'tracking-grace-250-ms') {
       advance(500, { pose: null })
       const model = advance(500 + trace.value, { pose: null })
-      return { phase: model.revealPhase, visible: model.visible }
+      return {
+        phase: model.revealPhase,
+        visible: model.visible,
+        events: canonicalEvents(runtime),
+      }
     }
     if (trace.boundary === 'reacquire-dwell-200-ms') {
       advance(500, { pose: null })
       advance(750, { pose: null })
       advance(800)
       const model = advance(800 + trace.value)
-      return { phase: model.revealPhase, visible: model.visible }
+      return {
+        phase: model.revealPhase,
+        visible: model.visible,
+        events: canonicalEvents(runtime),
+      }
     }
   } finally {
     disposeWristMenuRuntime(runtime)
@@ -123,6 +150,7 @@ function freshRevealObservation(trace, schedule) {
       phase: model.revealPhase,
       visible: model.visible,
       opacity: Number(model.opacity.toFixed(6)),
+      events: canonicalEvents(runtime),
     }
   } finally {
     disposeWristMenuRuntime(runtime)
@@ -132,30 +160,90 @@ function freshRevealObservation(trace, schedule) {
 function scrollObservation(trace, schedule) {
   const runtime = createRuntime(reachScrollSnapshot)
   try {
+    const kind = trace.boundary.startsWith('hand-') ? 'hand' : 'controller'
+    const sourceId = `${kind}-scroll-source`
+    const selectionSource =
+      kind === 'hand'
+        ? { id: sourceId, kind, handedness: 'right' }
+        : {
+            id: sourceId,
+            kind,
+            handedness: 'right',
+            selectPressed: true,
+            selectCompleted: false,
+          }
+    const targetObservation = {
+      sourceId,
+      kind: kind === 'hand' ? 'hand-fingertip' : 'controller-target-ray',
+      itemId: 'row-0',
+      ...(kind === 'hand' ? { phase: 'hover' } : {}),
+    }
+    const wristSources = [
+      {
+        id: 'left-menu-controller',
+        kind: 'controller',
+        handedness: 'left',
+        pose: {
+          position: [0, 0, 0],
+          orientation: [0, -Math.SQRT1_2, 0, Math.SQRT1_2],
+          emulatedPosition: false,
+        },
+      },
+    ]
     let sequence = 0
     for (const time of scheduledTimes(0, 100, schedule).slice(0, -1)) {
       stepWristMenuRuntime(
         runtime,
-        { ...scrollFrame(++sequence, [scrollSource()]), time },
+        { ...scrollFrame(++sequence), time, wristSources },
         [],
       )
     }
+    stepWristMenuRuntime(
+      runtime,
+      {
+        ...scrollFrame(++sequence),
+        time: 99.9,
+        selectionSources: [
+          kind === 'hand'
+            ? selectionSource
+            : { ...selectionSource, selectPressed: false },
+        ],
+        wristSources,
+      },
+      [],
+    )
+    stepWristMenuRuntime(
+      runtime,
+      {
+        ...scrollFrame(++sequence, [
+          scrollSource({ id: sourceId, kind, positionY: 0 }),
+        ]),
+        time: 99.9999,
+        selectionSources: [selectionSource],
+        wristSources,
+      },
+      [targetObservation],
+    )
     const model = stepWristMenuRuntime(
       runtime,
       {
         ...scrollFrame(++sequence, [
           scrollSource({
-            kind: trace.boundary.startsWith('hand-') ? 'hand' : 'controller',
+            id: sourceId,
+            kind,
             positionY: -trace.value,
           }),
         ]),
         time: 100,
+        selectionSources: [selectionSource],
+        wristSources,
       },
-      [],
+      [targetObservation],
     )
     return {
       scrollOwned: runtime.scrollState.ownerSourceId !== null,
       offset: Number(model.scrollOffset.toFixed(6)),
+      events: canonicalEvents(runtime),
     }
   } finally {
     disposeWristMenuRuntime(runtime)
@@ -209,8 +297,11 @@ function expectedObservation(trace) {
     trace.boundary === 'controller-scroll-13-mm'
   ) {
     return {
-      scrollOwned: true,
-      offset: Number((trace.value / 0.0225).toFixed(6)),
+      scrollOwned: trace.position !== 'below',
+      offset:
+        trace.position === 'below'
+          ? 0
+          : Number((trace.value / 0.0225).toFixed(6)),
     }
   }
   return undefined
@@ -242,9 +333,14 @@ export async function runDeterministicReleaseTraces(protocolUrl = new URL(
       const observed = observe(trace, schedule)
       reference ??= observed
       const expected = expectedObservation(trace)
+      const { events, ...semanticObservation } = observed
+      const { events: referenceEvents, ...referenceObservation } = reference
       const status =
-        JSON.stringify(observed) === JSON.stringify(reference) &&
-        (expected === undefined || JSON.stringify(observed) === JSON.stringify(expected))
+        JSON.stringify(semanticObservation) ===
+          JSON.stringify(referenceObservation) &&
+        JSON.stringify(events) === JSON.stringify(referenceEvents) &&
+        (expected === undefined ||
+          JSON.stringify(semanticObservation) === JSON.stringify(expected))
           ? 'passed'
           : 'failed'
       results.push({ trace: trace.id, schedule, status, observed })

@@ -1,6 +1,10 @@
 import { performance } from 'node:perf_hooks'
 import { readFile } from 'node:fs/promises'
-import { Matrix4 } from 'three'
+import * as three from 'three'
+import { BufferGeometry as InstrumentedBufferGeometry } from 'three/src/core/BufferGeometry.js'
+import { Group as InstrumentedGroup } from 'three/src/objects/Group.js'
+import { Material as InstrumentedMaterial } from 'three/src/materials/Material.js'
+import { Texture as InstrumentedTexture } from 'three/src/textures/Texture.js'
 
 import {
   createThreeWristMenuState,
@@ -12,38 +16,28 @@ import {
 import { reachScrollSnapshot } from '../../reach-scroll.mjs'
 import { createWristXrFixture } from '../../wrist-reveal-xr.mjs'
 import { writeLaneReport } from '../evidence-report.mjs'
+import {
+  allocationDelta,
+  identityGrowth,
+  inventoryThreeScene,
+  listenerInventory,
+  sampleThreeAllocationOrdinals,
+} from '../runtime-evidence.mjs'
+
+const { Matrix4 } = three
+const instrumentedThree = {
+  BufferGeometry: InstrumentedBufferGeometry,
+  Group: InstrumentedGroup,
+  Material: InstrumentedMaterial,
+  Texture: InstrumentedTexture,
+}
 
 function inventory(root) {
-  const geometries = new Set()
-  const materials = new Set()
-  const textures = new Set()
-  let poolSlots = 0
-  root.traverse((object) => {
-    if (object.geometry !== undefined) geometries.add(object.geometry)
-    const objectMaterials = Array.isArray(object.material)
-      ? object.material
-      : object.material === undefined
-        ? []
-        : [object.material]
-    for (const material of objectMaterials) {
-      materials.add(material)
-      for (const value of Object.values(material)) {
-        if (value?.isTexture === true) textures.add(value)
-      }
-    }
-    if (object.userData?.wristMenuItemId !== undefined) poolSlots += 1
-  })
-  return { geometries, materials, textures, poolSlots }
+  return inventoryThreeScene(root)
 }
 
 function resourceCounts(root) {
-  const resources = inventory(root)
-  return {
-    geometries: resources.geometries.size,
-    materials: resources.materials.size,
-    textures: resources.textures.size,
-    poolSlots: resources.poolSlots,
-  }
+  return inventory(root).counts
 }
 
 function sceneCounters(root) {
@@ -51,27 +45,68 @@ function sceneCounters(root) {
   let drawCalls = 0
   let triangles = 0
   let lines = 0
-  const visibleMaterials = new Set()
+  const visiblePrograms = new Set()
   root.traverseVisible((object) => {
-    if (object.isMesh !== true || object.material?.visible === false) return
+    if (
+      (object.isMesh !== true && object.isLine !== true) ||
+      object.material?.visible === false
+    ) return
     drawCalls += 1
     const geometry = object.geometry
     const count = geometry?.index?.count ?? geometry?.attributes?.position?.count ?? 0
-    triangles += count / 3
+    if (object.isLine === true) lines += Math.max(0, count - 1)
+    else triangles += count / 3
     const objectMaterials = Array.isArray(object.material)
       ? object.material
       : [object.material]
-    for (const material of objectMaterials) visibleMaterials.add(material.type)
+    for (const material of objectMaterials) {
+      visiblePrograms.add(`${material.type}:${material.customProgramCacheKey()}`)
+    }
   })
   return {
     drawCalls,
     triangles,
     lines,
-    geometries: resources.geometries.size,
-    textures: resources.textures.size,
-    programs: visibleMaterials.size,
-    atlasUploads: 0,
+    geometries: resources.counts.geometries,
+    textures: resources.counts.textures,
+    programs: visiblePrograms.size,
+    atlasUploads: resources.counts.textureUploadVersions,
   }
+}
+
+function rendererPolicyProbe(fixture) {
+  const calls = {
+    renderLoops: 0,
+    sessionChanges: 0,
+    referenceSpaceChanges: 0,
+    framebufferChanges: 0,
+    foveationChanges: 0,
+    subscriptions: 0,
+  }
+  Object.assign(fixture.renderer, {
+    setAnimationLoop() {
+      calls.renderLoops += 1
+    },
+    setRenderTarget() {
+      calls.framebufferChanges += 1
+    },
+  })
+  Object.assign(fixture.renderer.xr, {
+    setSession() {
+      calls.sessionChanges += 1
+    },
+    setReferenceSpace() {
+      calls.referenceSpaceChanges += 1
+    },
+    setFoveation() {
+      calls.foveationChanges += 1
+    },
+    subscribe() {
+      calls.subscriptions += 1
+      return () => undefined
+    },
+  })
+  return calls
 }
 
 function percentile(values, fraction) {
@@ -98,7 +133,12 @@ function withinBaseline(measurement, baseline) {
 
 function createMenu() {
   const fixture = createWristXrFixture({ menuKind: 'controller' })
+  const rendererPolicyCalls = rendererPolicyProbe(fixture)
   fixture.setWristMatrix(new Matrix4())
+  return { fixture, rendererPolicyCalls, menu: mountMenu(fixture) }
+}
+
+function mountMenu(fixture) {
   const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: reachScrollSnapshot,
@@ -106,7 +146,7 @@ function createMenu() {
   })
   updateThreeWristMenu(menu, { time: 0, frame: fixture.frame })
   updateThreeWristMenu(menu, { time: 1, frame: fixture.frame })
-  return { fixture, menu }
+  return menu
 }
 
 function mutationProbe(menu, fixture) {
@@ -140,81 +180,131 @@ function mutationProbe(menu, fixture) {
   }
 }
 
-function lifecycleProbe() {
-  const failures = []
-  for (let cycle = 0; cycle < 20; cycle += 1) {
-    const { fixture, menu } = createMenu()
-    const firstResources = inventory(menu.presentation.group)
-    const firstExpectedDisposals =
-      firstResources.geometries.size + firstResources.materials.size + firstResources.textures.size
-    let firstDisposals = 0
-    for (const resource of [
-      ...firstResources.geometries,
-      ...firstResources.materials,
-      ...firstResources.textures,
-    ]) {
+function observeDisposals(resources) {
+  const expected = {
+    geometries: resources.identities.geometries.size,
+    materials: resources.identities.materials.size,
+    textures: resources.identities.textures.size,
+  }
+  const observed = { geometries: 0, materials: 0, textures: 0 }
+  for (const type of Object.keys(observed)) {
+    for (const resource of resources.identities[type]) {
       resource.addEventListener('dispose', () => {
-        firstDisposals += 1
+        observed[type] += 1
       })
     }
+  }
+  return { expected, observed }
+}
+
+function disposalProbePassed(probe) {
+  return Object.keys(probe.expected).every(
+    (type) => probe.observed[type] === probe.expected[type],
+  )
+}
+
+function lifecycleProbe() {
+  const failures = []
+  const measurements = []
+  for (let cycle = 0; cycle < 20; cycle += 1) {
+    const fixture = createWristXrFixture({ menuKind: 'controller' })
+    const rendererPolicyCalls = rendererPolicyProbe(fixture)
+    fixture.setWristMatrix(new Matrix4())
+    const baseline = {
+      sessionListeners: listenerInventory(fixture.session),
+      referenceSpaceListeners: listenerInventory(fixture.referenceSpace),
+      rendererPolicyCalls: { ...rendererPolicyCalls },
+      allocationOrdinals: sampleThreeAllocationOrdinals(instrumentedThree),
+    }
+    const menu = mountMenu(fixture)
+    const firstResources = inventory(menu.presentation.group)
+    const mountedListeners = {
+      session: listenerInventory(fixture.session),
+      referenceSpace: listenerInventory(fixture.referenceSpace),
+    }
+    const firstDisposalProbe = observeDisposals(firstResources)
     replaceThreeWristMenuPresentation(
       menu,
       defaultThreeWristMenuPresentationFactory,
     )
     updateThreeWristMenu(menu, { time: 2, frame: fixture.frame })
     const replacementResources = inventory(menu.presentation.group)
-    const replacementExpectedDisposals =
-      replacementResources.geometries.size +
-      replacementResources.materials.size +
-      replacementResources.textures.size
-    let replacementDisposals = 0
-    for (const resource of [
-      ...replacementResources.geometries,
-      ...replacementResources.materials,
-      ...replacementResources.textures,
-    ]) {
-      resource.addEventListener('dispose', () => {
-        replacementDisposals += 1
-      })
-    }
+    const replacementDisposalProbe = observeDisposals(replacementResources)
     const group = menu.presentation.group
     disposeThreeWristMenu(menu)
-    const sessionListeners = [...fixture.session.listeners.values()].reduce(
-      (count, listeners) => count + listeners.size,
-      0,
-    )
-    const referenceListeners = [...fixture.referenceSpace.listeners.values()].reduce(
-      (count, listeners) => count + listeners.size,
-      0,
-    )
-    if (
-      group.children.length !== 0 ||
-      sessionListeners !== 0 ||
-      referenceListeners !== 0 ||
-      firstDisposals !== firstExpectedDisposals ||
-      replacementDisposals !== replacementExpectedDisposals
-    ) {
-      failures.push({
-        cycle,
-        children: group.children.length,
-        sessionListeners,
-        referenceListeners,
-        firstDisposals,
-        firstExpectedDisposals,
-        replacementDisposals,
-        replacementExpectedDisposals,
-      })
+    const retainedResources = inventory(group)
+    const final = {
+      sessionListeners: listenerInventory(fixture.session),
+      referenceSpaceListeners: listenerInventory(fixture.referenceSpace),
+      rendererPolicyCalls: { ...rendererPolicyCalls },
+      allocationOrdinals: sampleThreeAllocationOrdinals(instrumentedThree),
     }
+    const observation = {
+      cycle,
+      baseline,
+      mounted: {
+        resources: firstResources.counts,
+        sessionListeners: mountedListeners.session,
+        referenceSpaceListeners: mountedListeners.referenceSpace,
+      },
+      replacement: {
+        resources: replacementResources.counts,
+        disposedPriorPresentation: firstDisposalProbe.observed,
+        expectedPriorPresentationDisposals: firstDisposalProbe.expected,
+      },
+      final: {
+        ...final,
+        groupChildren: group.children.length,
+        disposed: menu.runtime.disposed,
+        selectionClaims: menu.runtime.selectionState.claims.size,
+        selectionOwnership: menu.runtime.selectionState.ownership ?? null,
+        scrollOwnership: menu.runtime.scrollState.ownerSourceId,
+        allocatedThreeResources: allocationDelta(
+          baseline.allocationOrdinals,
+          final.allocationOrdinals,
+        ),
+        disposedReplacementPresentation: replacementDisposalProbe.observed,
+        expectedReplacementPresentationDisposals: replacementDisposalProbe.expected,
+        retainedResources: retainedResources.counts,
+      },
+    }
+    measurements.push(observation)
+    const passed =
+      group.children.length !== 0 ||
+      final.sessionListeners.total !== baseline.sessionListeners.total ||
+      final.referenceSpaceListeners.total !== baseline.referenceSpaceListeners.total ||
+      Object.values(final.rendererPolicyCalls).some((count) => count !== 0) ||
+      !disposalProbePassed(firstDisposalProbe) ||
+      !disposalProbePassed(replacementDisposalProbe) ||
+      retainedResources.counts.geometries !== 0 ||
+      retainedResources.counts.materials !== 0 ||
+      retainedResources.counts.textures !== 0 ||
+      retainedResources.counts.programSignatures !== 0 ||
+      retainedResources.counts.textureUploadVersions !== 0 ||
+      retainedResources.counts.poolSlots !== 0 ||
+      !menu.runtime.disposed ||
+      menu.runtime.selectionState.claims.size !== 0 ||
+      menu.runtime.selectionState.ownership !== undefined ||
+      menu.runtime.scrollState.ownerSourceId !== null
+        ? false
+        : true
+    if (!passed) failures.push(observation)
   }
-  return { status: failures.length === 0 ? 'passed' : 'failed', cycles: 20, failures }
+  return {
+    status: failures.length === 0 ? 'passed' : 'failed',
+    cycles: measurements.length,
+    measurements,
+    failures,
+  }
 }
 
 const baselines = JSON.parse(
   await readFile(new URL('../../../evidence/baselines/performance-v1.json', import.meta.url), 'utf8'),
 )
-const { fixture, menu } = createMenu()
+const { fixture, menu, rendererPolicyCalls } = createMenu()
 const constructed = inventory(menu.presentation.group)
 const allocationStart = resourceCounts(menu.presentation.group)
+const allocationOrdinalsStart = sampleThreeAllocationOrdinals(instrumentedThree)
 const timings = []
 for (let index = 0; index < 10_000; index += 1) {
   const started = performance.now()
@@ -222,6 +312,7 @@ for (let index = 0; index < 10_000; index += 1) {
   timings.push(performance.now() - started)
 }
 const allocationEnd = resourceCounts(menu.presentation.group)
+const allocationOrdinalsEnd = sampleThreeAllocationOrdinals(instrumentedThree)
 const allocationGate = {
   status: 'failed',
   reason: 'exact JavaScript object-allocation instrumentation is unavailable in the Node lane',
@@ -229,11 +320,19 @@ const allocationGate = {
   packageOwnedResourceDelta: Object.fromEntries(
     Object.keys(allocationStart).map((key) => [key, allocationEnd[key] - allocationStart[key]]),
   ),
+  threeResourceAllocations: allocationDelta(
+    allocationOrdinalsStart,
+    allocationOrdinalsEnd,
+  ),
 }
 const identicalMutationGate = mutationProbe(menu, fixture)
 
 const beforeScroll = inventory(menu.presentation.group)
 const beforeScrollCounts = resourceCounts(menu.presentation.group)
+const beforeScrollOrdinals = sampleThreeAllocationOrdinals(instrumentedThree)
+const beforeScrollSessionListeners = listenerInventory(fixture.session)
+const beforeScrollReferenceListeners = listenerInventory(fixture.referenceSpace)
+const beforeScrollRendererPolicy = { ...rendererPolicyCalls }
 for (let index = 0; index < 1_000; index += 1) {
   fixture.setTargetRayMatrix(
     new Matrix4().makeTranslation(0, -0.03 * ((index % 20) / 20), 1),
@@ -241,19 +340,60 @@ for (let index = 0; index < 1_000; index += 1) {
   updateThreeWristMenu(menu, { time: index + 2, frame: fixture.frame })
 }
 const afterScroll = inventory(menu.presentation.group)
-const sameIdentities = (before, after) =>
-  before.size === after.size && [...before].every((value) => after.has(value))
+const afterScrollCounts = resourceCounts(menu.presentation.group)
+const afterScrollOrdinals = sampleThreeAllocationOrdinals(instrumentedThree)
+const growth = identityGrowth(beforeScroll, afterScroll)
+const scrollAllocations = allocationDelta(beforeScrollOrdinals, afterScrollOrdinals)
+const afterScrollSessionListeners = listenerInventory(fixture.session)
+const afterScrollReferenceListeners = listenerInventory(fixture.referenceSpace)
+const afterScrollRendererPolicy = { ...rendererPolicyCalls }
+const resourceCountNames = [
+  'geometries',
+  'materials',
+  'textures',
+  'programSignatures',
+  'textureUploadVersions',
+  'textureBytes',
+  'poolSlots',
+]
+const resourceCountDelta = Object.fromEntries(
+  resourceCountNames.map((name) => [
+    name,
+    afterScrollCounts[name] - beforeScrollCounts[name],
+  ]),
+)
 const resourceGrowthGate = {
   status:
-    sameIdentities(beforeScroll.geometries, afterScroll.geometries) &&
-    sameIdentities(beforeScroll.materials, afterScroll.materials) &&
-    sameIdentities(beforeScroll.textures, afterScroll.textures) &&
-    beforeScroll.poolSlots === afterScroll.poolSlots
+    Object.values(growth).every(({ added, removed }) => added === 0 && removed === 0) &&
+    Object.values(scrollAllocations).every((count) => count === 0) &&
+    Object.values(resourceCountDelta).every((count) => count === 0) &&
+    afterScrollSessionListeners.total === beforeScrollSessionListeners.total &&
+    afterScrollReferenceListeners.total === beforeScrollReferenceListeners.total &&
+    Object.keys(afterScrollRendererPolicy).every(
+      (name) => afterScrollRendererPolicy[name] === beforeScrollRendererPolicy[name],
+    )
       ? 'passed'
       : 'failed',
   frames: 1_000,
   before: beforeScrollCounts,
-  after: resourceCounts(menu.presentation.group),
+  after: afterScrollCounts,
+  identityGrowth: growth,
+  allocations: scrollAllocations,
+  countDelta: resourceCountDelta,
+  listenerGrowth: {
+    session: {
+      before: beforeScrollSessionListeners,
+      after: afterScrollSessionListeners,
+    },
+    referenceSpace: {
+      before: beforeScrollReferenceListeners,
+      after: afterScrollReferenceListeners,
+    },
+  },
+  rendererPolicyCalls: {
+    before: beforeScrollRendererPolicy,
+    after: afterScrollRendererPolicy,
+  },
 }
 
 const visibleIdle = {
@@ -291,7 +431,7 @@ const performanceVariants = {
 
 disposeThreeWristMenu(menu)
 const report = {
-  instrumentation: 'node-three-scene-counters-v1',
+  instrumentation: 'node-three-scene-counters-v2',
   candidate: '@xleepy/wrist-menu/three',
   gates: {
     allocation: allocationGate,
@@ -308,8 +448,10 @@ const report = {
     },
   },
   invariants: {
-    atlasBytes: 0,
-    poolSlots: constructed.poolSlots,
+    atlasTextureCount: constructed.counts.textures,
+    atlasBytes: constructed.counts.textureBytes,
+    atlasUploadVersions: constructed.counts.textureUploadVersions,
+    poolSlots: constructed.counts.poolSlots,
   },
 }
 

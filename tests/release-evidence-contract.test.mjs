@@ -4,6 +4,8 @@ import test from 'node:test'
 
 import {
   buildAutomatedEvidenceRecord,
+  buildCandidateUnavailableEvidenceRecord,
+  consumerLanePassed,
   evidenceInvalidationReasons,
   validateCompatibilityManifest,
 } from '../scripts/release-evidence-lib.mjs'
@@ -81,6 +83,12 @@ test('an automated Evidence Record is reproducible and fails closed', () => {
     ],
     testedLanes: ['core-import'],
     validationCombinations: [],
+    resolvedCompatibilitySha256: '3'.repeat(64),
+    bundleManifest: [
+      { path: 'raw/a.json', bytes: 2, sha256: 'f'.repeat(64) },
+      { path: 'raw/b.json', bytes: 2, sha256: '1'.repeat(64) },
+      { path: 'raw/command.json', bytes: 2, sha256: '2'.repeat(64) },
+    ],
   }
 
   const first = buildAutomatedEvidenceRecord(input)
@@ -89,6 +97,34 @@ test('an automated Evidence Record is reproducible and fails closed', () => {
   assert.equal(first.result, 'passed')
   assert.match(first.recordId, /^automated-release-[a-f0-9]{16}$/)
   assert.ok(Object.isFrozen(first))
+
+  for (const changed of [
+    { testedLanes: ['core-import', 'three-0.185.1'] },
+    { validationCombinations: ['quest-3-react-hand-left-90hz'] },
+    {
+      bundleManifest: input.bundleManifest.map((file, index) =>
+        index === 2 ? { ...file, sha256: '3'.repeat(64) } : file,
+      ),
+    },
+    { resolvedCompatibilitySha256: '4'.repeat(64) },
+  ]) {
+    assert.notEqual(
+      buildAutomatedEvidenceRecord({ ...input, ...changed }).recordId,
+      first.recordId,
+    )
+  }
+
+  assert.throws(
+    () =>
+      buildAutomatedEvidenceRecord({
+        ...input,
+        bundleManifest: [
+          ...input.bundleManifest,
+          { path: 'evidence-record.json', bytes: 2, sha256: '4'.repeat(64) },
+        ],
+      }),
+    /must contain only retained raw reports/,
+  )
 
   assert.throws(
     () =>
@@ -122,6 +158,82 @@ test('an automated Evidence Record is reproducible and fails closed', () => {
       ),
     }).result,
     'failed',
+  )
+})
+
+test('a packed consumer lane fails when its enclosing subprocess fails', () => {
+  const report = {
+    status: 'passed',
+    candidateSha256: 'a'.repeat(64),
+    testedLanes: ['three-0.185.1'],
+  }
+
+  assert.equal(
+    consumerLanePassed({ status: 'failed' }, report, 'three-0.185.1', 'a'.repeat(64)),
+    false,
+  )
+  assert.equal(
+    consumerLanePassed({ status: 'passed' }, report, 'three-0.185.1', 'a'.repeat(64)),
+    true,
+  )
+})
+
+test('a prerequisite failure has immutable candidate-unavailable identity without an invented digest', () => {
+  const input = {
+    candidate: {
+      package: '@xleepy/wrist-menu',
+      version: '0.0.0',
+      availability: 'unavailable',
+    },
+    source: {
+      commit: 'b'.repeat(40),
+      exampleCommit: 'b'.repeat(40),
+      committedAt: '2026-08-08T00:00:00Z',
+    },
+    lockfiles: [{ path: 'package-lock.json', sha256: 'c'.repeat(64) }],
+    protocol: { id: 'automated-release', version: 1, sha256: 'd'.repeat(64) },
+    instrumentation: {
+      id: 'node-iwer-three-counters',
+      version: 1,
+      sha256: 'e'.repeat(64),
+    },
+    testedLanes: ['core-import'],
+    validationCombinations: [],
+    resolvedCompatibilitySha256: '2'.repeat(64),
+    bundleManifest: [
+      { path: 'raw/prerequisite-2.json', bytes: 42, sha256: 'f'.repeat(64) },
+    ],
+    rawReportDirectory: 'RAW_DIRECTORY_PLACEHOLDER',
+    failure: {
+      stage: 'build',
+      command: 'npm run build',
+      exitCode: 1,
+      report: 'raw/prerequisite-2.json',
+    },
+  }
+
+  const first = buildCandidateUnavailableEvidenceRecord(input)
+  const second = buildCandidateUnavailableEvidenceRecord(structuredClone(input))
+  assert.deepEqual(first, second)
+  assert.equal(first.result, 'failed')
+  assert.equal(first.kind, 'candidate-unavailable')
+  assert.equal('sha256' in first.candidate, false)
+  assert.match(first.recordId, /^candidate-unavailable-[a-f0-9]{16}$/)
+  assert.ok(Object.isFrozen(first))
+  assert.notEqual(
+    buildCandidateUnavailableEvidenceRecord({
+      ...input,
+      bundleManifest: [{ ...input.bundleManifest[0], sha256: '1'.repeat(64) }],
+    }).recordId,
+    first.recordId,
+  )
+  assert.throws(
+    () =>
+      buildCandidateUnavailableEvidenceRecord({
+        ...input,
+        candidate: { ...input.candidate, sha256: '0'.repeat(64) },
+      }),
+    /must not invent a digest/,
   )
 })
 
