@@ -13,6 +13,7 @@ import {
   createControllerHapticFixture,
   createHandXrFixture,
 } from '../fixtures/cross-input-xr.mjs'
+import { createEquivalentPresentationFactory } from '../fixtures/presentation-factory.mjs'
 
 test('vanilla integration samples an inclusive fingertip press plane and latches until withdrawal', () => {
   const events = []
@@ -53,13 +54,19 @@ test('vanilla integration samples an inclusive fingertip press plane and latches
   disposeThreeWristMenu(menu)
 })
 
-test('tracking loss cancels a direct-hand approach and reappearance inside cannot commit', () => {
+for (const presentationKind of ['default', 'custom']) {
+test(`${presentationKind} presentation cancels a direct-hand approach on tracking loss`, () => {
   const events = []
   const fixture = createHandXrFixture()
+  const presentationLog = { name: `tracking-loss-${presentationKind}` }
   const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: crossInputSnapshot,
     onEvent: (event) => events.push(event),
+    presentationFactory:
+      presentationKind === 'custom'
+        ? createEquivalentPresentationFactory(presentationLog)
+        : undefined,
   })
 
   updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
@@ -77,7 +84,11 @@ test('tracking loss cancels a direct-hand approach and reappearance inside canno
   updateThreeWristMenu(menu, { time: 40, frame: fixture.frame })
   assert.equal(events.some(({ type }) => type === 'selection-intent'), false)
   disposeThreeWristMenu(menu)
+  if (presentationKind === 'custom') {
+    assert.equal(presentationLog.disposals, 1)
+  }
 })
+}
 
 test('optional controller haptic rejection cannot prevent or duplicate semantic delivery', async () => {
   let requests = 0
@@ -159,7 +170,8 @@ test('Wrist Menu Events and controller haptics follow current instance state whe
   disposeThreeWristMenu(menu)
 })
 
-test('disabled controller targets never request haptics', () => {
+for (const presentationKind of ['default', 'custom']) {
+test(`${presentationKind} presentation disabled controller targets never request haptics`, () => {
   let requests = 0
   const fixture = createControllerHapticFixture({
     pulse() {
@@ -168,6 +180,7 @@ test('disabled controller targets never request haptics', () => {
     },
   })
   const events = []
+  const presentationLog = { name: `disabled-${presentationKind}` }
   const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: {
@@ -175,6 +188,10 @@ test('disabled controller targets never request haptics', () => {
       menuDefinition: [crossInputSnapshot.menuDefinition[2]],
     },
     onEvent: (event) => events.push(event),
+    presentationFactory:
+      presentationKind === 'custom'
+        ? createEquivalentPresentationFactory(presentationLog)
+        : undefined,
   })
 
   updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
@@ -188,4 +205,8 @@ test('disabled controller targets never request haptics', () => {
   assert.equal(requests, 0)
   assert.equal(events.some(({ type }) => type === 'selection-intent'), false)
   disposeThreeWristMenu(menu)
+  if (presentationKind === 'custom') {
+    assert.equal(presentationLog.disposals, 1)
+  }
 })
+}

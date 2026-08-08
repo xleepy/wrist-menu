@@ -3,7 +3,7 @@ import type {
   Object3DEventMap,
 } from 'three/src/core/Object3D.js'
 import type { Intersection } from 'three/src/core/Raycaster.js'
-import { BoxGeometry } from 'three/src/geometries/BoxGeometry.js'
+import type { BoxGeometry } from 'three/src/geometries/BoxGeometry.js'
 import { Vector3 } from 'three/src/math/Vector3.js'
 import { Mesh } from 'three/src/objects/Mesh.js'
 import { Group } from 'three/src/objects/Group.js'
@@ -12,6 +12,12 @@ import type {
   HandTargetObservation,
   PresentationModel,
 } from '../core/index.js'
+import {
+  createOrientedBoxScratch,
+  isOrientedBoxMesh,
+  observeFingertipInOrientedBox,
+  orientedBoxLocalY,
+} from './oriented-box.js'
 import { WristMenuPresentation } from './wrist-menu-presentation.js'
 
 const decorativeRaycast: Mesh['raycast'] = () => undefined
@@ -24,8 +30,8 @@ export type ThreeWristMenuHitRegion = Readonly<{
   object: Mesh<BoxGeometry>
 }>
 
-/** The oriented-box surface used to derive continuous scroll observations. */
-export type ThreeWristMenuScrollRegion = Readonly<{
+/** The oriented-box Menu Viewport used to derive scroll observations. */
+export type ThreeWristMenuViewport = Readonly<{
   /** Must be a Mesh backed by BoxGeometry; validated when created. */
   object: Mesh<BoxGeometry>
 }>
@@ -38,7 +44,7 @@ export type ThreeWristMenuScrollRegion = Readonly<{
 export type ThreeWristMenuPresentation = Readonly<{
   root: Object3D<Object3DEventMap>
   hitRegions: readonly ThreeWristMenuHitRegion[]
-  scrollRegion: ThreeWristMenuScrollRegion
+  menuViewport: ThreeWristMenuViewport
   update(model: PresentationModel): void
   dispose(): void
 }>
@@ -64,7 +70,7 @@ export const defaultThreeWristMenuPresentationFactory: ThreeWristMenuPresentatio
             : []
         })
       },
-      scrollRegion: {
+      menuViewport: {
         object: presentation.panelMesh as Mesh<BoxGeometry>,
       },
       update(model) {
@@ -81,28 +87,6 @@ function isObject3D(value: unknown): value is Object3D<Object3DEventMap> {
     typeof value === 'object' &&
     value !== null &&
     (value as { isObject3D?: unknown }).isObject3D === true
-  )
-}
-
-function isBoxMesh(value: unknown): value is Mesh<BoxGeometry> {
-  const geometry = (value as { geometry?: unknown } | null)?.geometry as
-    | {
-        type?: unknown
-        parameters?: { width?: unknown; height?: unknown; depth?: unknown }
-      }
-    | undefined
-  const dimensions = geometry?.parameters
-  return (
-    isObject3D(value) &&
-    (value as { isMesh?: unknown }).isMesh === true &&
-    geometry?.type === 'BoxGeometry' &&
-    dimensions !== undefined &&
-    [dimensions.width, dimensions.height, dimensions.depth].every(
-      (dimension) =>
-        typeof dimension === 'number' &&
-        Number.isFinite(dimension) &&
-        dimension > 0,
-    )
   )
 }
 
@@ -130,11 +114,13 @@ function assertPresentation(
   if (typeof value.update !== 'function' || typeof value.dispose !== 'function') {
     throw new TypeError('Presentation must provide update() and dispose()')
   }
-  if (!isBoxMesh(value.scrollRegion?.object)) {
-    throw new TypeError('Presentation scrollRegion must declare a BoxGeometry Mesh')
+  if (!isOrientedBoxMesh(value.menuViewport?.object)) {
+    throw new TypeError(
+      'Presentation Menu Viewport must declare a BoxGeometry Mesh',
+    )
   }
-  if (!isDescendant(value.scrollRegion.object, value.root)) {
-    throw new TypeError('Presentation scrollRegion must belong to its root')
+  if (!isDescendant(value.menuViewport.object, value.root)) {
+    throw new TypeError('Presentation Menu Viewport must belong to its root')
   }
   return value
 }
@@ -172,8 +158,7 @@ export class ManagedWristMenuPresentation {
   readonly group = new Group()
   private instance: ThreeWristMenuPresentation
   private declarations: readonly ThreeWristMenuHitRegion[] = []
-  private readonly fingertipLocalPosition = new Vector3()
-  private readonly worldScale = new Vector3()
+  private readonly orientedBoxScratch = createOrientedBoxScratch()
 
   constructor(
     initialModel: PresentationModel,
@@ -201,7 +186,7 @@ export class ManagedWristMenuPresentation {
   }
 
   get panelMesh(): Mesh<BoxGeometry> {
-    return this.instance.scrollRegion.object as Mesh<BoxGeometry>
+    return this.instance.menuViewport.object as Mesh<BoxGeometry>
   }
 
   private declarationsFor(
@@ -229,7 +214,7 @@ export class ManagedWristMenuPresentation {
           `Hit Region references an unknown Menu Item: ${declaration.itemId}`,
         )
       }
-      if (!isBoxMesh(declaration.object)) {
+      if (!isOrientedBoxMesh(declaration.object)) {
         throw new TypeError(
           `Hit Region ${declaration.itemId} must declare a BoxGeometry Mesh`,
         )
@@ -314,67 +299,35 @@ export class ManagedWristMenuPresentation {
   ): Omit<HandTargetObservation, 'sourceId'> | undefined {
     if (!Number.isFinite(radius) || radius <= 0) return undefined
     for (const { itemId, object } of this.declarations) {
-      if (!object.visible) continue
-      object.updateWorldMatrix(true, false)
-      object.getWorldScale(this.worldScale)
-      if (
-        this.worldScale.x === 0 ||
-        this.worldScale.y === 0 ||
-        this.worldScale.z === 0
-      ) {
-        continue
-      }
-      this.fingertipLocalPosition.copy(worldPosition)
-      object.worldToLocal(this.fingertipLocalPosition)
-      const { width, height, depth } = (object.geometry as BoxGeometry).parameters
-      const halfWidth = width / 2
-      const halfHeight = height / 2
-      const halfDepth = depth / 2
-      const localRadiusX = radius / Math.abs(this.worldScale.x)
-      const localRadiusY = radius / Math.abs(this.worldScale.y)
-      const localRadiusZ = radius / Math.abs(this.worldScale.z)
-      if (
-        Math.abs(this.fingertipLocalPosition.x) > halfWidth + localRadiusX ||
-        Math.abs(this.fingertipLocalPosition.y) > halfHeight + localRadiusY
-      ) {
-        continue
-      }
-      const nearestSurface = this.fingertipLocalPosition.z - localRadiusZ
-      const farthestSurface = this.fingertipLocalPosition.z + localRadiusZ
-      if (nearestSurface > halfDepth + 0.025 || farthestSurface < -halfDepth) {
-        continue
-      }
+      const phase = observeFingertipInOrientedBox(
+        object,
+        worldPosition,
+        radius,
+        this.orientedBoxScratch,
+      )
+      if (phase === undefined) continue
       return {
         kind: 'hand-fingertip',
         itemId,
-        phase: nearestSurface <= halfDepth + 1e-9 ? 'pressed' : 'hover',
+        phase,
       }
     }
     return undefined
   }
 
   panelLocalY(worldPosition: Vector3): number | null {
-    const panel = this.panelMesh
-    panel.updateWorldMatrix(true, false)
-    panel.getWorldScale(this.worldScale)
-    if (this.worldScale.x === 0 || this.worldScale.y === 0) return null
-    this.fingertipLocalPosition.copy(worldPosition)
-    panel.worldToLocal(this.fingertipLocalPosition)
-    const { width, height } = panel.geometry.parameters
-    if (
-      Math.abs(this.fingertipLocalPosition.x) >
-        width / 2 + 0.02 / Math.abs(this.worldScale.x) ||
-      Math.abs(this.fingertipLocalPosition.y) >
-        height / 2 + 0.02 / Math.abs(this.worldScale.y)
-    ) {
-      return null
-    }
-    return this.fingertipLocalPosition.y * Math.abs(this.worldScale.y)
+    return orientedBoxLocalY(
+      this.panelMesh,
+      worldPosition,
+      0.02,
+      this.orientedBoxScratch,
+    )
   }
 
   replace(
     factory: ThreeWristMenuPresentationFactory,
     model: PresentationModel,
+    beforeCommit: () => void,
   ): void {
     const next = createPresentation(factory, model)
     let nextDeclarations: readonly ThreeWristMenuHitRegion[]
@@ -391,6 +344,13 @@ export class ManagedWristMenuPresentation {
     }
     const previous = this.instance
     this.setTargetable(false)
+    this.group.visible = false
+    let beforeCommitError: unknown
+    try {
+      beforeCommit()
+    } catch (error) {
+      beforeCommitError = error
+    }
     previous.root.removeFromParent()
     this.instance = next
     this.declarations = nextDeclarations
@@ -400,6 +360,7 @@ export class ManagedWristMenuPresentation {
     } finally {
       this.configureTargetability(model, false)
     }
+    if (beforeCommitError !== undefined) throw beforeCommitError
   }
 
   dispose(): void {

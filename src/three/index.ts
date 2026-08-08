@@ -30,15 +30,10 @@ import {
   type WristMenuRuntimeState,
   type WristSourceSample,
   type WristMenuEvent,
-  VISIBLE_SLOTS,
-  resolveThemeTokens,
-  resetWristMenuRuntimeForPresentationReplacement,
 } from '../core/index.js'
-import {
-  copyHostSnapshot,
-  createPresentationItems,
-  type MenuDefinitionEntry,
-} from '../core/host-snapshot.js'
+import { copyHostSnapshot } from '../core/host-snapshot.js'
+import { createInitialPresentationModel } from '../core/presentation-model.js'
+import { resetRuntimeForPresentationReplacement } from '../core/runtime-internals.js'
 import { selectWristSource } from '../core/wrist-anchor.js'
 import {
   defaultThreeWristMenuPresentationFactory,
@@ -52,7 +47,7 @@ export {
   type ThreeWristMenuHitRegion,
   type ThreeWristMenuPresentation,
   type ThreeWristMenuPresentationFactory,
-  type ThreeWristMenuScrollRegion,
+  type ThreeWristMenuViewport,
 } from './presentation.js'
 
 export type ThreeWristMenuRenderer = Pick<WebGLRenderer, 'xr'>
@@ -124,37 +119,6 @@ export type ThreeWristMenuState = {
   lastParent: Object3D<Object3DEventMap> | null
   lastUpdateTime: number
   disposed: boolean
-}
-
-function countPresentationRows(
-  menuDefinition: readonly MenuDefinitionEntry[],
-): number {
-  return menuDefinition.reduce(
-    (count, entry) =>
-      count +
-      (entry.type === 'choice-group' ? entry.options.length + 1 : 1),
-    0,
-  )
-}
-
-function initialPresentationModel(
-  snapshot: HostSnapshot,
-  revision = 1,
-): PresentationModel {
-  return Object.freeze({
-    visible: false,
-    targetable: false,
-    opacity: 0,
-    revealPhase: 'hidden',
-    anchorPose: null,
-    revision,
-    items: createPresentationItems(snapshot.menuDefinition, () => 'idle'),
-    scrollOffset: 0,
-    totalRows: countPresentationRows(snapshot.menuDefinition),
-    visibleSlots: VISIBLE_SLOTS,
-    scrollBarrierActive: false,
-    theme: resolveThemeTokens(snapshot.theme),
-  })
 }
 
 function materializeAnchorSettings(snapshot: HostSnapshot): AnchorSettings {
@@ -427,7 +391,7 @@ export function createThreeWristMenuState(
   options: CreateThreeWristMenuOptions,
 ): ThreeWristMenuState {
   const initialSnapshot = copyHostSnapshot(options.snapshot)
-  const initialModel = initialPresentationModel(initialSnapshot)
+  const initialModel = createInitialPresentationModel(initialSnapshot, 1)
   const presentation = new ManagedWristMenuPresentation(
     initialModel,
     options.presentationFactory ?? defaultThreeWristMenuPresentationFactory,
@@ -507,18 +471,22 @@ export function replaceThreeWristMenuPresentation(
 ): void {
   assertActive(state)
   let resetError: unknown
-  try {
-    resetWristMenuRuntimeForPresentationReplacement(state.runtime)
-  } catch (error) {
-    resetError = error
-  } finally {
-    clearTransientInput(state)
-    const snapshot = state.runtime.pendingSnapshot ?? state.runtime.snapshot
-    const model = initialPresentationModel(snapshot, state.runtime.revision)
-    state.presentation.replace(presentationFactory, model)
+  const snapshot = state.runtime.pendingSnapshot ?? state.runtime.snapshot
+  const model = createInitialPresentationModel(
+    snapshot,
+    state.runtime.revision + 1,
+  )
+  state.presentation.replace(presentationFactory, model, () => {
+    try {
+      resetRuntimeForPresentationReplacement(state.runtime)
+    } catch (error) {
+      resetError = error
+    } finally {
+      clearTransientInput(state)
+    }
     state.presentationRevision = 0
     state.geometryBarrierThrough = state.frameSequence
-  }
+  })
   if (resetError !== undefined) throw resetError
 }
 

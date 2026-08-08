@@ -82,8 +82,8 @@ managed Scene Event Shield stops synthetic events behind active Hit Regions.
 Advanced hosts can pass the same synchronous `presentationFactory` to
 `createThreeWristMenuState` or `<WristMenu>`. The factory receives only the
 frozen, curated `PresentationModel` and returns one disposable Three.js content
-root, explicit `{ itemId, object }` Hit Regions, a `scrollRegion`, and an
-`update(model)` method. Every declared target and scroll surface must be a
+root, explicit `{ itemId, object }` Hit Regions, a `menuViewport`, and an
+`update(model)` method. Every declared Hit Region and Menu Viewport must be a
 descendant `Mesh` backed by `BoxGeometry`; visible presentation meshes are never
 implicit targets. Core behavior continues to own selection, scrolling, scene
 claims, and event delivery, so React does not need a parallel JSX behavior

@@ -9,7 +9,6 @@ import {
 } from '@react-three/fiber'
 import {
   BoxGeometry,
-  Group,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -24,6 +23,7 @@ import {
   FakeReferenceSpace,
   FakeXrSession,
 } from '../fixtures/controller-action.mjs'
+import { createEquivalentPresentationFactory } from '../fixtures/presentation-factory.mjs'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -219,41 +219,8 @@ test('React forwards the shared presentation factory without a JSX behavior path
     size: { width: 1, height: 1, top: 0, left: 0 },
   })
 
-  let factoryCalls = 0
-  let disposals = 0
-  const presentationFactory = (model) => {
-    factoryCalls += 1
-    assert.ok(Object.isFrozen(model))
-    const presentationRoot = new Group()
-    presentationRoot.name = 'shared-react-presentation'
-    const panelGeometry = new BoxGeometry(0.192, 0.27, 0.004)
-    const panelMaterial = new MeshBasicMaterial({ visible: false })
-    const panel = new Mesh(panelGeometry, panelMaterial)
-    panel.position.z = -0.004
-    presentationRoot.add(panel)
-    const hitGeometry = new BoxGeometry(0.176, 0.02, 0.008)
-    const hitMaterial = new MeshBasicMaterial({ visible: false })
-    const hit = new Mesh(hitGeometry, hitMaterial)
-    hit.position.z = 0.008
-    presentationRoot.add(hit)
-    return {
-      root: presentationRoot,
-      hitRegions: [{ itemId: 'spawn-cube', object: hit }],
-      scrollRegion: { object: panel },
-      update(nextModel) {
-        presentationRoot.visible = nextModel.visible
-        hit.visible = nextModel.items.some(({ id }) => id === 'spawn-cube')
-      },
-      dispose() {
-        disposals += 1
-        panelGeometry.dispose()
-        panelMaterial.dispose()
-        hitGeometry.dispose()
-        hitMaterial.dispose()
-        presentationRoot.clear()
-      },
-    }
-  }
+  const presentationLog = { name: 'shared-react' }
+  const presentationFactory = createEquivalentPresentationFactory(presentationLog)
 
   const behindGeometry = new BoxGeometry(0.5, 0.5, 0.02)
   const behindMaterial = new MeshBasicMaterial()
@@ -285,8 +252,9 @@ test('React forwards the shared presentation factory without a JSX behavior path
   const menuGroup = state.scene.children[0]
   assert.equal(
     menuGroup.children[0]?.name,
-    'shared-react-presentation',
+    'custom-presentation-shared-react',
   )
+  assert.ok(Object.isFrozen(presentationLog.factoryModels[0]))
   advance(16, true, state, frame)
   advance(32, true, state, frame)
   session.dispatch('selectstart', inputSource)
@@ -301,7 +269,7 @@ test('React forwards the shared presentation factory without a JSX behavior path
     1,
   )
 
-  const replacementFactory = (model) => presentationFactory(model)
+  const replacementFactory = createEquivalentPresentationFactory(presentationLog)
   await act(async () => {
     root.render(
       createElement(
@@ -321,12 +289,12 @@ test('React forwards the shared presentation factory without a JSX behavior path
       ),
     )
   })
-  assert.equal(factoryCalls, 2)
-  assert.equal(disposals, 1)
-  assert.equal(menuGroup.children[0]?.name, 'shared-react-presentation')
+  assert.equal(presentationLog.factoryModels.length, 2)
+  assert.equal(presentationLog.disposals, 1)
+  assert.equal(menuGroup.children[0]?.name, 'custom-presentation-shared-react')
 
   await act(async () => root.unmount())
-  assert.equal(disposals, 2)
+  assert.equal(presentationLog.disposals, 2)
   behindGeometry.dispose()
   behindMaterial.dispose()
 })

@@ -1,12 +1,9 @@
 import {
   anchoringSettingsEqual,
   copyHostSnapshot,
-  createPresentationItems,
   findInteractiveItem,
   type Handedness,
   type HostSnapshot,
-  type MenuDefinitionEntry,
-  type PresentationItem,
 } from './host-snapshot.js'
 
 export type {
@@ -40,7 +37,11 @@ import {
   resolveRevealConfiguration,
   type Vector3Tuple,
 } from './activation-config.js'
-import { resolveThemeTokens, type ThemeTokens } from './theme.js'
+import {
+  countMenuRows,
+  createPresentationModel,
+  type PresentationModel,
+} from './presentation-model.js'
 import {
   advanceRevealState,
   createRevealState,
@@ -54,7 +55,6 @@ import {
   clearSelectionState,
   createSelectionState,
   selectionBlocksSceneInput,
-  type SelectionCancellation,
   type SelectionCancellationReason,
   type SelectionSourceSample,
   type TargetObservation,
@@ -76,6 +76,10 @@ import {
   type WristAnchorPose,
   type WristSourceSample,
 } from './wrist-anchor.js'
+import {
+  cancelAllRuntimeSelection,
+  emitRuntimeCancellation,
+} from './runtime-internals.js'
 
 export {
   defaultRevealConfiguration,
@@ -118,6 +122,7 @@ export type {
   ScrollSourceSample,
 } from './scroll-state.js'
 export { VISIBLE_SLOTS } from './scroll-state.js'
+export type { PresentationModel } from './presentation-model.js'
 
 /** One renderer-neutral sample of poses and input for the current XR frame. */
 export type FrameSample = Readonly<{
@@ -177,23 +182,6 @@ export type WristMenuEvent =
       time: number
     }>
 
-/** Read-only output consumed by Renderer Integrations. */
-export type PresentationModel = Readonly<{
-  visible: boolean
-  targetable: boolean
-  opacity: number
-  revealPhase: RevealPhase
-  anchorPose: WristAnchorPose | null
-  revision: number
-  items: readonly PresentationItem[]
-  scrollOffset: number
-  totalRows: number
-  visibleSlots: number
-  scrollBarrierActive: boolean
-  /** Fully resolved visual tokens; never changes Menu Definition semantics. */
-  theme: ThemeTokens
-}>
-
 export type CreateWristMenuRuntimeOptions = Readonly<{
   snapshot: HostSnapshot
   onEvent: (event: WristMenuEvent) => void
@@ -214,20 +202,6 @@ export type WristMenuRuntimeState = {
   lastLifecycleRevision: number | undefined
   selectionState: ReturnType<typeof createSelectionState>
   scrollState: ScrollState
-}
-
-function countMenuRows(
-  menuDefinition: readonly MenuDefinitionEntry[],
-): number {
-  let count = 0
-  for (const entry of menuDefinition) {
-    if (entry.type === 'choice-group') {
-      count += 1 + entry.options.length
-    } else {
-      count += 1
-    }
-  }
-  return count
 }
 
 function selectionIntentFor(
@@ -263,30 +237,6 @@ function selectionIntentFor(
     return Object.freeze({ type: 'action', itemId: located.item.id })
   }
   throw new Error(`Selection-owned Menu Item has no intent: ${itemId}`)
-}
-
-function emitCancellation(
-  state: WristMenuRuntimeState,
-  cancellation: SelectionCancellation,
-  time: number,
-): void {
-  state.onEvent({
-    type: 'selection-cancellation',
-    itemId: cancellation.itemId,
-    sourceId: cancellation.sourceId,
-    reason: cancellation.reason,
-    time,
-  })
-}
-
-function cancelAllSelection(
-  state: WristMenuRuntimeState,
-  reason: SelectionCancellationReason,
-  time: number,
-): void {
-  for (const cancellation of cancelSelectionState(state.selectionState, reason)) {
-    emitCancellation(state, cancellation, time)
-  }
 }
 
 /** Create the framework-neutral behavior state used by every Renderer Integration. */
@@ -348,7 +298,11 @@ export function stepWristMenuRuntime(
     state.revealConfiguration = resolveRevealConfiguration(state.snapshot.comfort)
     state.revision += 1
     state.targetableAfterSequence = frameSample.sequence
-    cancelAllSelection(state, 'host-snapshot-changed', frameSample.time)
+    cancelAllRuntimeSelection(
+      state,
+      'host-snapshot-changed',
+      frameSample.time,
+    )
     resetScrollState(state.scrollState)
   }
 
@@ -398,7 +352,11 @@ export function stepWristMenuRuntime(
     frameSample.sequence > state.targetableAfterSequence
 
   if (!targetable) {
-    cancelAllSelection(state, 'lifecycle-interrupted', frameSample.time)
+    cancelAllRuntimeSelection(
+      state,
+      'lifecycle-interrupted',
+      frameSample.time,
+    )
   }
 
   if (visible !== state.lastReportedVisible) {
@@ -439,7 +397,7 @@ export function stepWristMenuRuntime(
         sourceId,
         'lifecycle-interrupted',
       )) {
-        emitCancellation(state, cancellation, frameSample.time)
+        emitRuntimeCancellation(state, cancellation, frameSample.time)
       }
     }
   }
@@ -453,7 +411,7 @@ export function stepWristMenuRuntime(
   })
   for (const transition of selectionResult.transitions) {
     if (transition.type === 'cancel') {
-      emitCancellation(state, transition, frameSample.time)
+      emitRuntimeCancellation(state, transition, frameSample.time)
     } else {
       state.onEvent({
         type: 'selection-intent',
@@ -469,25 +427,23 @@ export function stepWristMenuRuntime(
     }
   }
 
-  return Object.freeze({
+  return createPresentationModel({
+    snapshot: state.snapshot,
     visible,
     targetable,
     opacity: reveal.opacity,
     revealPhase: reveal.phase,
     anchorPose: reveal.anchorPose,
     revision: state.revision,
-    items: createPresentationItems(state.snapshot.menuDefinition, (itemId) =>
+    interactionFor: (itemId) =>
       selectionResult.armedItemId === itemId
         ? 'armed'
         : selectionResult.hoveredItemIds.has(itemId)
           ? 'hovered'
           : 'idle',
-    ),
     scrollOffset: scrollResult.offset,
-    totalRows: scrollResult.totalRows,
     visibleSlots: scrollResult.visibleSlots,
     scrollBarrierActive: scrollResult.barrierActive,
-    theme: resolveThemeTokens(state.snapshot.theme),
   })
 }
 
@@ -499,33 +455,13 @@ export function wristMenuRuntimeBlocksSceneInput(
   return selectionBlocksSceneInput(state.selectionState, sourceId)
 }
 
-/**
- * Release presentation-coupled interaction and require a fresh reveal
- * acquisition without changing the Host-owned snapshot.
- */
-export function resetWristMenuRuntimeForPresentationReplacement(
-  state: WristMenuRuntimeState,
-): void {
-  assertActive(state)
-  try {
-    cancelAllSelection(state, 'lifecycle-interrupted', state.lastTime)
-  } finally {
-    state.revealState = createRevealState()
-    state.revealWasInteractive = false
-    state.lastLifecycleRevision = undefined
-    state.targetableAfterSequence = undefined
-    state.revision += 1
-    resetScrollState(state.scrollState)
-  }
-}
-
 export function disposeWristMenuRuntime(
   state: WristMenuRuntimeState,
 ): void {
   if (state.disposed) return
   state.disposed = true
   try {
-    cancelAllSelection(state, 'disposed', state.lastTime)
+    cancelAllRuntimeSelection(state, 'disposed', state.lastTime)
   } finally {
     clearSelectionState(state.selectionState)
     resetScrollState(state.scrollState)

@@ -25,7 +25,7 @@ export {
   type ThreeWristMenuHitRegion,
   type ThreeWristMenuPresentation,
   type ThreeWristMenuPresentationFactory,
-  type ThreeWristMenuScrollRegion,
+  type ThreeWristMenuViewport,
 } from '../three/index.js'
 
 export type WristMenuProps = Readonly<{
