@@ -29,6 +29,22 @@ test('both Example Variants consume the packed public package exports', async ()
   assert.match(manifest.scripts.build, /build:react/)
 })
 
+test('both Example Variants thread one XR physical-action identity through scene and menu paths', async () => {
+  const [vanillaSource, reactSource] = await Promise.all([
+    text('vanilla/main.ts'),
+    text('react/main.tsx'),
+  ])
+
+  for (const source of [vanillaSource, reactSource]) {
+    assert.match(source, /createPhysicalActionIdentitySource/)
+    assert.match(source, /selectstart/)
+    assert.match(
+      source,
+      /reduceWorkshopMenuEvent\(\s*(?:model|current),\s*event,\s*xrPhysicalAction/,
+    )
+  }
+})
+
 test('the local link and unlink workflow preserves packed-export consumption', async () => {
   const rootManifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
@@ -49,4 +65,26 @@ test('the shared Workshop Model has no renderer coupling', async () => {
 
   assert.doesNotMatch(source, /(?:from|import\()[^\n]*(?:three|react)/i)
   assert.doesNotMatch(source, /\b(?:window|document|navigator|XRSession)\b/)
+})
+
+test('strict checkJs validates the Workshop Model runtime as its type source', async () => {
+  const config = JSON.parse(await text('tsconfig.json'))
+
+  assert.equal(config.compilerOptions.allowJs, true)
+  assert.equal(config.compilerOptions.checkJs, true)
+  assert.ok(config.include.includes('shared/**/*.js'))
+  await assert.rejects(text('shared/workshop-model.d.ts'), { code: 'ENOENT' })
+})
+
+test('the canonical Example App definition reflects its maintained repository location', async () => {
+  const context = await readFile(new URL('../CONTEXT.md', import.meta.url), 'utf8')
+
+  assert.match(
+    context,
+    /\*\*Example App\*\*:[\s\S]*under `examples\/` in this repository/,
+  )
+  assert.doesNotMatch(
+    context,
+    /\*\*Example App\*\*:[\s\S]*A separate repository/,
+  )
 })

@@ -21,7 +21,9 @@ A VR application that consumes and configures the Wrist Menu Package.
 _Avoid_: Client, parent app
 
 **Example App**:
-A separate repository that consumes the Wrist Menu Package and demonstrates a realistic use case.
+A companion application under `examples/` in this repository that consumes the
+built Wrist Menu Package through its public exports and demonstrates a realistic
+use case.
 _Avoid_: Use-case repo, library demo
 
 **Primitive Workshop**:

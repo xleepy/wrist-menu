@@ -36,6 +36,7 @@ import {
 
 import {
   WORKSHOP_BOUNDS_METERS,
+  createPhysicalActionIdentitySource,
   createWorkshopModel,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
@@ -102,9 +103,11 @@ workshopRoot.add(cursor)
 const objectsRoot = new Group()
 workshopRoot.add(objectsRoot)
 const objectMeshes = new Map<string, Mesh>()
+const XR_ACTION_IDENTITY_GRACE_MS = 250
 
 let model: WorkshopModel = createWorkshopModel()
 let actionSequence = 0
+const xrPhysicalActions = createPhysicalActionIdentitySource('vanilla-xr')
 
 const menu = createThreeWristMenuState({
   renderer,
@@ -181,7 +184,13 @@ function dispatch(action: WorkshopAction, physicalActionId?: string): void {
 }
 
 function handleWristMenuEvent(event: WristMenuEvent): void {
-  applyModel(reduceWorkshopMenuEvent(model, event))
+  const xrPhysicalAction =
+    event.type !== 'selection-intent'
+      ? undefined
+      : event.source.kind === 'controller'
+      ? (xrPhysicalActions.current() ?? xrPhysicalActions.begin())
+      : xrPhysicalActions.begin()
+  applyModel(reduceWorkshopMenuEvent(model, event, xrPhysicalAction))
 }
 
 const pointer = new Vector2()
@@ -266,10 +275,23 @@ async function enterVr(): Promise<void> {
     const session = await navigator.xr.requestSession('immersive-vr', {
       optionalFeatures: [...wristMenuSessionFeatures.optionalFeatures],
     })
+    session.addEventListener('selectstart', () => {
+      xrPhysicalActions.begin()
+    })
     session.addEventListener('select', (event) => {
+      const xrPhysicalAction =
+        xrPhysicalActions.current() ?? xrPhysicalActions.begin()
       interactFromController(
         event.inputSource,
-        `xr-select:${event.inputSource.handedness}:${event.timeStamp}`,
+        xrPhysicalAction,
+      )
+    })
+    session.addEventListener('selectend', () => {
+      const completedAction = xrPhysicalActions.current()
+      if (completedAction === null) return
+      window.setTimeout(
+        () => xrPhysicalActions.end(completedAction),
+        XR_ACTION_IDENTITY_GRACE_MS,
       )
     })
     session.addEventListener('end', () => {

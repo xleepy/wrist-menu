@@ -1,7 +1,7 @@
-import { StrictMode, useCallback, useMemo, useState } from 'react'
+import { StrictMode, useCallback, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Canvas, type ThreeEvent } from '@react-three/fiber'
-import { createXRStore, XR } from '@react-three/xr'
+import { createXRStore, useXR, XR } from '@react-three/xr'
 import { DoubleSide } from 'three'
 import {
   WristMenu,
@@ -11,6 +11,7 @@ import {
 
 import {
   WORKSHOP_BOUNDS_METERS,
+  createPhysicalActionIdentitySource,
   createWorkshopModel,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
@@ -27,11 +28,43 @@ const xrStore = createXRStore({
     optionalFeatures: [...wristMenuSessionFeatures.optionalFeatures],
   },
 })
+const xrPhysicalActions = createPhysicalActionIdentitySource('react-xr')
+const XR_ACTION_IDENTITY_GRACE_MS = 250
 
 type SceneEvent = ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>
 
 function eventActionId(prefix: string, event: SceneEvent): string {
   return `${prefix}:${event.nativeEvent.timeStamp}`
+}
+
+function committedActionId(prefix: string, event: SceneEvent): string {
+  if (xrStore.getState().session === undefined) {
+    return eventActionId(prefix, event)
+  }
+  return xrPhysicalActions.current() ?? xrPhysicalActions.begin()
+}
+
+function XrPhysicalActionCapture() {
+  const session = useXR((state) => state.session)
+  useEffect(() => {
+    if (session === undefined) return undefined
+    const beginPhysicalAction = () => xrPhysicalActions.begin()
+    const endPhysicalAction = () => {
+      const completedAction = xrPhysicalActions.current()
+      if (completedAction === null) return
+      window.setTimeout(
+        () => xrPhysicalActions.end(completedAction),
+        XR_ACTION_IDENTITY_GRACE_MS,
+      )
+    }
+    session.addEventListener('selectstart', beginPhysicalAction)
+    session.addEventListener('selectend', endPhysicalAction)
+    return () => {
+      session.removeEventListener('selectstart', beginPhysicalAction)
+      session.removeEventListener('selectend', endPhysicalAction)
+    }
+  }, [session])
+  return null
 }
 
 function PrimitiveObjectView({
@@ -60,7 +93,7 @@ function PrimitiveObjectView({
         event.stopPropagation()
         dispatch(
           { type: 'select-object', objectId: object.id },
-          eventActionId(`object:${object.id}`, event),
+          committedActionId(`object:${object.id}`, event),
         )
       }}
     >
@@ -86,7 +119,7 @@ function WorkshopScene({
   const snapshot = useMemo(() => workshopHostSnapshot(model), [model])
 
   const placeCursor = useCallback(
-    (event: SceneEvent, prefix: string) => {
+    (event: SceneEvent, physicalActionId: string) => {
       const localX = event.point.x
       const localZ = event.point.z + 0.55
       const valid =
@@ -94,7 +127,7 @@ function WorkshopScene({
         Math.abs(localZ) <= WORKSHOP_BOUNDS_METERS
       dispatch(
         { type: 'place-cursor', position: [localX, 0, localZ], valid },
-        eventActionId(prefix, event),
+        physicalActionId,
       )
     },
     [dispatch],
@@ -107,8 +140,12 @@ function WorkshopScene({
       <group position={[0, 0.72, -0.55]}>
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
-          onPointerMove={(event) => placeCursor(event, 'table-move')}
-          onClick={(event) => placeCursor(event, 'table-select')}
+          onPointerMove={(event) =>
+            placeCursor(event, eventActionId('table-move', event))
+          }
+          onClick={(event) =>
+            placeCursor(event, committedActionId('table-select', event))
+          }
         >
           <planeGeometry args={[WORKSHOP_BOUNDS_METERS * 2, WORKSHOP_BOUNDS_METERS * 2]} />
           <meshStandardMaterial color="#2d1733" roughness={0.82} side={DoubleSide} />
@@ -148,7 +185,15 @@ function App() {
     setModel((current) => reduceWorkshop(current, { actionId, action }))
   }, [])
   const onMenuEvent = useCallback((event: WristMenuEvent) => {
-    setModel((current) => reduceWorkshopMenuEvent(current, event))
+    const xrPhysicalAction =
+      event.type !== 'selection-intent'
+        ? undefined
+        : event.source.kind === 'controller'
+        ? (xrPhysicalActions.current() ?? xrPhysicalActions.begin())
+        : xrPhysicalActions.begin()
+    setModel((current) =>
+      reduceWorkshopMenuEvent(current, event, xrPhysicalAction),
+    )
   }, [])
 
   const enterVr = async () => {
@@ -188,6 +233,7 @@ function App() {
       <Canvas camera={{ position: [0, 1.55, 2.25], fov: 55 }}>
         <color attach="background" args={['#100916']} />
         <XR store={xrStore}>
+          <XrPhysicalActionCapture />
           <WorkshopScene model={model} dispatch={dispatch} onMenuEvent={onMenuEvent} />
         </XR>
       </Canvas>

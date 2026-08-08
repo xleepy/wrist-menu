@@ -56,5 +56,7 @@ local-floor features when available.
 The desktop **Spawn at cursor** button is a non-XR convenience. Package-owned
 menu hit regions still shield the React scene, and the vanilla variant checks
 the package Scene Input Claim before applying a controller action to scene
-content. The Workshop Model also ignores duplicate deliveries bearing the same
-physical-action ID, so one physical action advances it at most once.
+content. Both variants allocate one physical-action identity at XR select start
+and carry it through scene and menu delivery. The Workshop Model retains the 64
+most recently transitioned identities, so delayed duplicate delivery cannot
+advance it again while memory remains explicitly bounded.

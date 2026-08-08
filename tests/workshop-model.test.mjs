@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  PROCESSED_PHYSICAL_ACTION_CAPACITY,
+  createPhysicalActionIdentitySource,
   createWorkshopModel,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
@@ -103,6 +105,48 @@ test('one physical action causes at most one Workshop Model transition', () => {
   assert.equal(duplicate.objects.length, 1)
 })
 
+test('a processed physical action stays deduplicated after intervening transitions', () => {
+  const initial = createWorkshopModel()
+  const afterA = transition(
+    initial,
+    { type: 'choose-primitive', primitive: 'sphere' },
+    'physical-a',
+  )
+  const afterB = transition(
+    afterA,
+    { type: 'set-grid-visible', visible: false },
+    'physical-b',
+  )
+  const duplicateA = transition(
+    afterB,
+    { type: 'choose-primitive', primitive: 'cylinder' },
+    'physical-a',
+  )
+
+  assert.equal(duplicateA, afterB)
+  assert.equal(duplicateA.selectedPrimitive, 'sphere')
+  assert.equal(duplicateA.gridVisible, false)
+  assert.equal(duplicateA.revision, 2)
+})
+
+test('processed physical action identities have an explicit bounded lifetime', () => {
+  let model = createWorkshopModel()
+  for (let index = 0; index <= PROCESSED_PHYSICAL_ACTION_CAPACITY; index += 1) {
+    model = transition(
+      model,
+      { type: 'set-grid-visible', visible: index % 2 === 0 ? false : true },
+      `physical-${index}`,
+    )
+  }
+
+  assert.equal(
+    model.processedPhysicalActionIds.length,
+    PROCESSED_PHYSICAL_ACTION_CAPACITY,
+  )
+  assert.equal(model.processedPhysicalActionIds.includes('physical-0'), false)
+  assert.equal(model.processedPhysicalActionIds.includes('physical-1'), true)
+})
+
 test('semantic Wrist Menu intents cause one Host-controlled transition', () => {
   const event = {
     type: 'selection-intent',
@@ -128,6 +172,48 @@ test('semantic Wrist Menu intents cause one Host-controlled transition', () => {
     workshopHostSnapshot(changed).menuDefinition[4].selectedValue,
     'cylinder',
   )
+})
+
+test('menu and scene delivery paths can share one physical action identity', () => {
+  const identitySource = createPhysicalActionIdentitySource('controller')
+  const sharedActionId = identitySource.begin()
+  const menuEvent = {
+    type: 'selection-intent',
+    intent: {
+      type: 'choice',
+      groupId: 'primitive-choice',
+      itemId: 'primitive-cylinder',
+      currentValue: 'cube',
+      proposedValue: 'cylinder',
+    },
+    source: { id: 'right-controller', kind: 'controller', handedness: 'right' },
+    menuWrist: 'left',
+    time: 120,
+  }
+
+  const afterMenu = reduceWorkshopMenuEvent(
+    createWorkshopModel(),
+    menuEvent,
+    sharedActionId,
+  )
+  const afterScene = transition(afterMenu, { type: 'spawn' }, sharedActionId)
+
+  assert.equal(identitySource.current(), sharedActionId)
+  assert.equal(afterScene, afterMenu)
+  assert.equal(afterScene.selectedPrimitive, 'cylinder')
+  assert.equal(afterScene.objects.length, 0)
+  assert.equal(afterScene.revision, 1)
+})
+
+test('a physical action identity source ends only the matching current identity', () => {
+  const identitySource = createPhysicalActionIdentitySource('xr')
+  const first = identitySource.begin()
+  const second = identitySource.begin()
+
+  identitySource.end(first)
+  assert.equal(identitySource.current(), second)
+  identitySource.end(second)
+  assert.equal(identitySource.current(), null)
 })
 
 test('selection, removal, grid visibility, and both menu wrists stay Host-controlled', () => {
