@@ -15,6 +15,6 @@
     "typescript": "5.9.3"
   },
   "scripts": {
-    "test": "node public-import.mjs && tsc -p tsconfig.json && node executable-doc.mjs"
+    "test": "node hostile-import.mjs && node public-import.mjs && tsc -p tsconfig.json && node executable-doc.mjs"
   }
 }

@@ -16,8 +16,9 @@ using it. It then creates a digest-addressed ignored directory under
 - `package/`, the extracted install source;
 - `candidate.json`, with the package digest, exact source state, documentation
   digest, and non-promotional evidence relationship;
-- versioned documentation plus a complete copy of the predecessor record,
-  outside the package; and
+- versioned documentation, the executable candidate-doc fixture, the validation
+  protocol, and a complete copy of the predecessor record, all outside the
+  package; and
 - a byte manifest and checksum for the whole review bundle.
 
 The npm archive contains only built runtime JavaScript, declarations,

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { cp, lstat, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { cp, lstat, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { APPROVED_PACKAGE_FILES } from './approved-package-files.mjs'
 import { buildCandidateBundle, verifyCandidateBundle } from './candidate-package.mjs'
 import { sha256 } from './release-evidence-lib.mjs'
+import { inventoryRegularFiles } from './safe-files.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const evidenceFlag = process.argv.indexOf('--evidence-bundle')
@@ -20,21 +21,6 @@ assert.ok(
   evidenceBundleDirectory,
   'usage: npm run candidate:verify -- --evidence-bundle <immutable-record-directory>',
 )
-
-async function listFiles(directory, current = directory) {
-  const files = []
-  for (const entry of await readdir(current, { withFileTypes: true })) {
-    const path = resolve(current, entry.name)
-    if (entry.isDirectory()) {
-      files.push(...(await listFiles(directory, path)))
-    } else if (entry.isFile()) {
-      files.push(relative(directory, path).replaceAll('\\', '/'))
-    } else {
-      throw new Error(`candidate consumer contains a link: ${entry.name}`)
-    }
-  }
-  return files.sort()
-}
 
 function npm(args, cwd) {
   execFileSync(process.execPath, [npmCli, ...args], { cwd, stdio: 'inherit' })
@@ -93,7 +79,10 @@ try {
     false,
     'candidate fixture must install a copy, not a workspace/source link',
   )
-  assert.deepEqual(await listFiles(installedPackage), APPROVED_PACKAGE_FILES)
+  assert.deepEqual(
+    await inventoryRegularFiles(installedPackage),
+    APPROVED_PACKAGE_FILES,
+  )
   for (const path of APPROVED_PACKAGE_FILES) {
     const [extracted, installed] = await Promise.all([
       readFile(resolve(bundleDirectory, 'package', path)),

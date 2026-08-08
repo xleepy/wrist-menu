@@ -7,14 +7,21 @@ import {
   mkdir,
   mkdtemp,
   readFile,
-  readdir,
   rm,
   writeFile,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { APPROVED_PACKAGE_FILES } from './approved-package-files.mjs'
+import {
+  inventoryRegularFiles,
+  requireSafeRelativePath,
+} from './safe-files.mjs'
+import {
+  extractApprovedNpmPackageArchive,
+  inspectApprovedNpmPackageArchive,
+} from './safe-tar.mjs'
 import {
   canonicalJson,
   sha256,
@@ -117,23 +124,10 @@ export function createCandidateEvidenceIndex({
   }
 }
 
-async function listFiles(directory, current = directory) {
-  const files = []
-  for (const entry of await readdir(current, { withFileTypes: true })) {
-    const path = resolve(current, entry.name)
-    if (entry.isDirectory()) {
-      files.push(...(await listFiles(directory, path)))
-    } else if (entry.isFile()) {
-      files.push(relative(directory, path).replaceAll('\\', '/'))
-    } else {
-      throw new TypeError(`candidate bundles cannot contain links: ${entry.name}`)
-    }
-  }
-  return files.sort()
-}
-
 async function fileManifest(directory, excluded = new Set()) {
-  const files = (await listFiles(directory)).filter((path) => !excluded.has(path))
+  const files = (await inventoryRegularFiles(directory)).filter(
+    (path) => !excluded.has(path),
+  )
   return Promise.all(
     files.map(async (path) => {
       const bytes = await readFile(resolve(directory, path))
@@ -159,6 +153,80 @@ function git(root, args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
 }
 
+function gitBytes(root, args) {
+  return execFileSync('git', args, { cwd: root })
+}
+
+export async function captureCandidateSourceState(root) {
+  const commit = git(root, ['rev-parse', 'HEAD'])
+  requireIdentity(commit, COMMIT, 'candidate source commit')
+  const status = gitBytes(root, [
+    'status',
+    '--porcelain=v1',
+    '-z',
+    '--untracked-files=all',
+  ])
+  const diff = gitBytes(root, ['diff', '--binary', '--no-ext-diff', 'HEAD', '--'])
+  const untrackedOutput = gitBytes(root, [
+    'ls-files',
+    '--others',
+    '--exclude-standard',
+    '-z',
+  ])
+  const untrackedPaths = untrackedOutput
+    .toString('utf8')
+    .split('\0')
+    .filter((path) => path.length > 0)
+    .map((path) => requireSafeRelativePath(path, 'untracked source path'))
+    .sort()
+  const untracked = await Promise.all(
+    untrackedPaths.map(async (path) => ({
+      path,
+      sha256: sha256(await readFile(resolve(root, ...path.split('/')))),
+    })),
+  )
+  return {
+    commit,
+    clean: status.length === 0,
+    statusSha256: sha256(status),
+    diffSha256: sha256(diff),
+    untrackedSha256: sha256(canonicalJson(untracked)),
+  }
+}
+
+export function assertCandidateSourceUnchanged(before, after) {
+  if (canonicalJson(before) !== canonicalJson(after)) {
+    throw new Error('candidate source changed while the bundle was staged')
+  }
+}
+
+async function approvedPackageInputManifest(root) {
+  return Promise.all(
+    APPROVED_PACKAGE_FILES.map(async (path) => {
+      requireSafeRelativePath(path, 'approved package input')
+      const file = resolve(root, ...path.split('/'))
+      const stat = await lstat(file)
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new TypeError(`approved package input is not a regular file: ${path}`)
+      }
+      const bytes = await readFile(file)
+      return { path, bytes: bytes.byteLength, sha256: sha256(bytes) }
+    }),
+  )
+}
+
+async function captureCandidateBuildInputs(root) {
+  const versionedDocs = resolve(root, 'docs', '0.0.0')
+  const fixture = resolve(root, 'fixtures', 'candidate-docs')
+  const validationGates = await readFile(resolve(root, 'docs', 'validation-gates.md'))
+  return {
+    packageSha256: sha256(canonicalJson(await approvedPackageInputManifest(root))),
+    versionedDocsSha256: await directoryDigest(versionedDocs),
+    fixtureSha256: await directoryDigest(fixture),
+    validationGatesSha256: sha256(validationGates),
+  }
+}
+
 function candidateBundleId(identity) {
   return `candidate-${sha256(canonicalJson(identity)).slice(0, 16)}`
 }
@@ -181,6 +249,37 @@ async function writeCandidateManifest(bundleDirectory) {
     resolve(bundleDirectory, 'bundle-manifest.sha256'),
     `${sha256(manifestText)}  bundle-manifest.json\n`,
   )
+}
+
+async function verifyVersionedDocumentationLinks(bundleDirectory) {
+  const docsDirectory = resolve(bundleDirectory, 'documentation', '0.0.0')
+  const markdownFiles = (await inventoryRegularFiles(docsDirectory)).filter(
+    (path) => path.endsWith('.md'),
+  )
+  for (const path of markdownFiles) {
+    const documentPath = resolve(docsDirectory, ...path.split('/'))
+    const markdown = await readFile(documentPath, 'utf8')
+    for (const match of markdown.matchAll(/\[[^\]]*\]\(([^)]+)\)/gu)) {
+      const target = match[1].trim()
+      if (/^(?:https?:|mailto:|#)/u.test(target)) continue
+      const pathWithoutFragment = target.split('#', 1)[0]
+      const resolvedTarget = resolve(
+        dirname(documentPath),
+        ...decodeURIComponent(pathWithoutFragment).split('/'),
+      )
+      const bundleRelative = relative(bundleDirectory, resolvedTarget).replaceAll(
+        '\\',
+        '/',
+      )
+      if (bundleRelative === '..' || bundleRelative.startsWith('../')) {
+        throw new Error(`documentation link escapes the candidate bundle: ${target}`)
+      }
+      const stat = await lstat(resolvedTarget)
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new Error(`documentation link is not a bundled file: ${target}`)
+      }
+    }
+  }
 }
 
 export async function verifyCandidateBundle(bundleDirectory) {
@@ -213,7 +312,7 @@ export async function verifyCandidateBundle(bundleDirectory) {
     true,
     'candidate package must be extracted',
   )
-  verifyCandidateFileList(await listFiles(packageDirectory))
+  verifyCandidateFileList(await inventoryRegularFiles(packageDirectory))
 
   const candidate = await readCanonicalJson(
     resolve(bundleDirectory, 'candidate.json'),
@@ -245,6 +344,22 @@ export async function verifyCandidateBundle(bundleDirectory) {
     candidate.documentation.state,
     candidate.source.worktreeClean ? 'committed' : 'working-tree',
   )
+  const expectedResources = [
+    {
+      path: 'documentation/validation-gates.md',
+      sha256: sha256(
+        await readFile(resolve(bundleDirectory, 'documentation', 'validation-gates.md')),
+      ),
+    },
+    {
+      path: 'fixtures/candidate-docs',
+      sha256: await directoryDigest(
+        resolve(bundleDirectory, 'fixtures', 'candidate-docs'),
+      ),
+    },
+  ]
+  assert.deepEqual(candidate.documentation.resources, expectedResources)
+  await verifyVersionedDocumentationLinks(bundleDirectory)
 
   const evidenceDirectory = resolve(
     bundleDirectory,
@@ -279,6 +394,7 @@ export async function verifyCandidateBundle(bundleDirectory) {
     candidateBundleId({
       candidateSha256: candidate.package.sha256,
       docsSha256: candidate.documentation.sha256,
+      documentationResourcesSha256: sha256(canonicalJson(expectedResources)),
       evidenceChecksum: evidenceChecksum.trim(),
       sourceCommit: candidate.source.commit,
       worktreeClean: candidate.source.worktreeClean,
@@ -286,28 +402,16 @@ export async function verifyCandidateBundle(bundleDirectory) {
     'candidate bundle identity does not match its inputs',
   )
 
-  const extractionRoot = await mkdtemp(join(tmpdir(), 'wrist-menu-reextract-'))
-  try {
-    execFileSync(
-      'tar',
-      ['-xzf', resolve(bundleDirectory, 'package.tgz'), '-C', extractionRoot],
-      { stdio: 'inherit' },
+  const archiveMembers = inspectApprovedNpmPackageArchive(
+    await readFile(resolve(bundleDirectory, 'package.tgz')),
+  )
+  for (const { path, bytes } of archiveMembers) {
+    const packagePath = path.slice('package/'.length)
+    assert.equal(
+      sha256(await readFile(resolve(packageDirectory, packagePath))),
+      sha256(bytes),
+      `candidate extraction differs from package.tgz: ${packagePath}`,
     )
-    const reextractedPackage = resolve(extractionRoot, 'package')
-    verifyCandidateFileList(await listFiles(reextractedPackage))
-    for (const path of APPROVED_PACKAGE_FILES) {
-      const [documented, reextracted] = await Promise.all([
-        readFile(resolve(packageDirectory, path)),
-        readFile(resolve(reextractedPackage, path)),
-      ])
-      assert.equal(
-        sha256(documented),
-        sha256(reextracted),
-        `candidate extraction differs from package.tgz: ${path}`,
-      )
-    }
-  } finally {
-    await rm(extractionRoot, { recursive: true, force: true })
   }
   return candidate
 }
@@ -317,6 +421,7 @@ export async function buildCandidateBundle({
   evidenceBundleDirectory,
   outputRoot = resolve(root, 'artifacts', 'candidates'),
   npmCli = process.env.npm_execpath,
+  beforeSourceRecheck,
 }) {
   if (typeof npmCli !== 'string' || npmCli.length === 0) {
     throw new Error('run candidate generation through npm')
@@ -336,11 +441,11 @@ export async function buildCandidateBundle({
   }
 
   const docsDirectory = resolve(root, 'docs', '0.0.0')
-  const docsSha256 = await directoryDigest(docsDirectory)
-  const sourceCommit = git(root, ['rev-parse', 'HEAD'])
-  requireIdentity(sourceCommit, COMMIT, 'candidate source commit')
-  const worktreeClean =
-    git(root, ['status', '--porcelain', '--untracked-files=all']) === ''
+  const sourceBefore = await captureCandidateSourceState(root)
+  const inputsBefore = await captureCandidateBuildInputs(root)
+  const docsSha256 = inputsBefore.versionedDocsSha256
+  const sourceCommit = sourceBefore.commit
+  const worktreeClean = sourceBefore.clean
   const stagingRoot = await mkdtemp(join(tmpdir(), 'wrist-menu-candidate-'))
 
   try {
@@ -362,6 +467,18 @@ export async function buildCandidateBundle({
     const bundleId = candidateBundleId({
       candidateSha256,
       docsSha256,
+      documentationResourcesSha256: sha256(
+        canonicalJson([
+          {
+            path: 'documentation/validation-gates.md',
+            sha256: inputsBefore.validationGatesSha256,
+          },
+          {
+            path: 'fixtures/candidate-docs',
+            sha256: inputsBefore.fixtureSha256,
+          },
+        ]),
+      ),
       evidenceChecksum: evidenceChecksum.trim(),
       sourceCommit,
       worktreeClean,
@@ -369,18 +486,34 @@ export async function buildCandidateBundle({
     const stagedBundle = resolve(stagingRoot, bundleId)
     await mkdir(stagedBundle)
     await cp(sourceArchive, resolve(stagedBundle, 'package.tgz'))
-    execFileSync(
-      'tar',
-      ['-xzf', resolve(stagedBundle, 'package.tgz'), '-C', stagedBundle],
-      { stdio: 'inherit' },
+    const extractionRoot = resolve(stagingRoot, 'package-extraction')
+    await mkdir(extractionRoot)
+    await extractApprovedNpmPackageArchive(
+      await readFile(sourceArchive),
+      extractionRoot,
     )
-    verifyCandidateFileList(await listFiles(resolve(stagedBundle, 'package')))
+    await cp(resolve(extractionRoot, 'package'), resolve(stagedBundle, 'package'), {
+      recursive: true,
+    })
+    verifyCandidateFileList(
+      await inventoryRegularFiles(resolve(stagedBundle, 'package')),
+    )
 
     const documentationDirectory = resolve(stagedBundle, 'documentation')
     await mkdir(documentationDirectory)
     await cp(docsDirectory, resolve(documentationDirectory, '0.0.0'), {
       recursive: true,
     })
+    await cp(
+      resolve(root, 'docs', 'validation-gates.md'),
+      resolve(documentationDirectory, 'validation-gates.md'),
+    )
+    await mkdir(resolve(stagedBundle, 'fixtures'))
+    await cp(
+      resolve(root, 'fixtures', 'candidate-docs'),
+      resolve(stagedBundle, 'fixtures', 'candidate-docs'),
+      { recursive: true },
+    )
     const copiedEvidenceDirectory = resolve(
       documentationDirectory,
       'evidence',
@@ -417,6 +550,16 @@ export async function buildCandidateBundle({
         sha256: docsSha256,
         revision: worktreeClean ? sourceCommit : null,
         state: worktreeClean ? 'committed' : 'working-tree',
+        resources: [
+          {
+            path: 'documentation/validation-gates.md',
+            sha256: inputsBefore.validationGatesSha256,
+          },
+          {
+            path: 'fixtures/candidate-docs',
+            sha256: inputsBefore.fixtureSha256,
+          },
+        ],
       },
       evidence: {
         path: `documentation/evidence/${PREDECESSOR_EVIDENCE_ID}`,
@@ -431,6 +574,16 @@ export async function buildCandidateBundle({
     )
     await writeCandidateManifest(stagedBundle)
     await verifyCandidateBundle(stagedBundle)
+    await beforeSourceRecheck?.()
+    assertCandidateSourceUnchanged(
+      sourceBefore,
+      await captureCandidateSourceState(root),
+    )
+    assert.deepEqual(
+      await captureCandidateBuildInputs(root),
+      inputsBefore,
+      'candidate package or documentation inputs changed while the bundle was staged',
+    )
 
     await mkdir(outputRoot, { recursive: true })
     const destination = resolve(outputRoot, bundleId)

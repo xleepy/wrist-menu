@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { APPROVED_PACKAGE_FILES } from '../scripts/approved-package-files.mjs'
 import {
   createCandidateEvidenceIndex,
+  assertCandidateSourceUnchanged,
+  captureCandidateSourceState,
   verifyCandidateFileList,
 } from '../scripts/candidate-package.mjs'
 
@@ -75,6 +80,34 @@ test('candidate extraction fails closed on missing or additional package files',
   )
 })
 
+test('candidate source guard detects concurrent changes even when status paths stay the same', async () => {
+  const repository = await mkdtemp(join(tmpdir(), 'wrist-menu-source-guard-'))
+  const git = (args) => execFileSync('git', args, { cwd: repository })
+  try {
+    git(['init', '--quiet'])
+    git(['config', 'user.name', 'Candidate Test'])
+    git(['config', 'user.email', 'candidate@example.invalid'])
+    await writeFile(join(repository, 'tracked.txt'), 'committed\n')
+    git(['add', 'tracked.txt'])
+    git(['commit', '--quiet', '-m', 'fixture'])
+
+    await writeFile(join(repository, 'tracked.txt'), 'dirty one\n')
+    const before = await captureCandidateSourceState(repository)
+    await writeFile(join(repository, 'tracked.txt'), 'dirty two\n')
+    const after = await captureCandidateSourceState(repository)
+
+    assert.equal(before.clean, false)
+    assert.equal(after.clean, false)
+    assert.equal(before.statusSha256, after.statusSha256)
+    assert.throws(
+      () => assertCandidateSourceUnchanged(before, after),
+      /candidate source changed while the bundle was staged/,
+    )
+  } finally {
+    await rm(repository, { recursive: true, force: true })
+  }
+})
+
 test('versioned documentation covers the candidate contract and exact breaking migration', async () => {
   const [guide, migration, compatibility, release] = await Promise.all([
     readFile(new URL('../docs/0.0.0/index.md', import.meta.url), 'utf8'),
@@ -96,6 +129,14 @@ test('versioned documentation covers the candidate contract and exact breaking m
   ]) {
     assert.match(guide, new RegExp(`^## ${heading}$`, 'm'))
   }
+  assert.doesNotMatch(guide, /`reducedMotion`/)
+  assert.doesNotMatch(guide, /default theme targets 4\.5:1/i)
+  assert.doesNotMatch(guide, /default.*non-color cues/i)
+  assert.match(guide, /default Command slab does not render those labels/i)
+  assert.match(guide, /color and material changes only/i)
+  assert.match(guide, /no public reduced-motion override/i)
+  assert.match(guide, /clear transient interaction and Scene Input Claims immediately/i)
+  assert.match(guide, /sample-driven[\s\S]*next\s+Frame Sample/i)
 
   for (const name of [
     'createWristMenuRuntimeState',

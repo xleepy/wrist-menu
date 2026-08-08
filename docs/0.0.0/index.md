@@ -61,12 +61,14 @@ portable.
 
 ## Lifecycle
 
-Tracking loss, `visible-blurred`, `hidden`, source replacement, reference-space
-reset, attachment reparenting, session end, presentation replacement, and
-disposal clear transient interaction and Scene Input Claims on the next
-processed Frame Sample. Re-entry requires a fresh dwell. The Host Application
-must create one Wrist Menu Instance per live realization and dispose it before
-discarding its renderer or React tree. Disposal is idempotent.
+The Three.js session-end, hidden/blurred visibility, and reference-space reset
+handlers clear transient interaction and Scene Input Claims immediately. Other
+sample-driven interruptions, including tracking loss, source replacement, and
+attachment reparenting, are recognized by `updateThreeWristMenu` at the next
+Frame Sample. Presentation replacement and disposal also clear interaction
+synchronously. Re-entry requires a fresh dwell. The Host Application must create
+one Wrist Menu Instance per live realization and dispose it before discarding
+its renderer or React tree. Disposal is idempotent.
 
 For Three.js, the session and reference-space listener functions created in
 `ThreeWristMenuState` retain their identity for the state's full lifetime. The
@@ -85,13 +87,18 @@ Replacing a presentation clears transient interaction and requires fresh dwell.
 
 ## Accessibility
 
-Keep labels concise and provide `disabledReason` whenever an unavailable action
-needs explanation. Hover, selection, disabled, Selection Ownership, and Scroll
-Ownership need non-color cues. The default theme targets 4.5:1 text contrast
-and 3:1 meaningful boundary contrast. `reducedMotion` removes the 150 ms
-show/hide interpolation but does not change dwell, targeting, event ordering,
-or cancellation. Both wrists, both Selection Source kinds, seated use, standing
-use, and Host eligibility overrides require equivalent Host Application paths.
+Host Snapshot labels and `disabledReason` values remain available as model data,
+but the default Command slab does not render those labels. Its interaction
+states use color and material changes only; this candidate has not proved text
+contrast, non-color state cues, headset legibility, or screen-reader output for
+that presentation. A custom presentation is responsible for rendering readable
+labels and reasons and for validating contrast and redundant state cues in its
+actual Host Application context.
+
+There is no public reduced-motion override in this candidate. The core ordinary
+show/hide transition remains 150 ms, so a Host Application that requires a
+reduced-motion path must treat that as a current limitation rather than claim
+support. The physical accessibility and comfort protocol remains outstanding.
 
 ## Testing
 
