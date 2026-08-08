@@ -3,11 +3,17 @@ import assert from 'node:assert/strict'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import {
+  digestNamedCandidate,
+  installPackedCandidate,
+} from './candidate-tarball.mjs'
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const npmCli = process.env.npm_execpath
 const fixtures = ['three', 'react-18', 'react-19']
 
 assert.ok(npmCli, 'run consumer verification through npm')
+const candidate = await digestNamedCandidate(root)
 
 const installFrozen = async (fixtureDirectory) => {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -33,8 +39,17 @@ for (const fixture of fixtures) {
   const fixtureDirectory = resolve(root, 'fixtures', 'consumers', fixture)
   console.log(`checking ${fixture} consumer`)
   await installFrozen(fixtureDirectory)
+  installPackedCandidate({
+    npmCli,
+    directory: fixtureDirectory,
+    candidatePath: candidate.candidatePath,
+  })
   execFileSync(process.execPath, [npmCli, 'test'], {
     cwd: fixtureDirectory,
     stdio: 'inherit',
+    env: {
+      ...process.env,
+      WRIST_MENU_CANDIDATE_SHA256: candidate.sha256,
+    },
   })
 }

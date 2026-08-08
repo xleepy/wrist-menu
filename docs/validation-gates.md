@@ -2,9 +2,9 @@
 
 This document resolves
 [issue #8](https://github.com/xleepy/wrist-menu/issues/8). It defines what a
-candidate must prove; it is not evidence that the current repository passes the
-gates. Production implementation and evidence collection happen after the
-Wayfinder map closes.
+candidate must prove. The automation and source compatibility policy are
+described in [release-evidence.md](release-evidence.md); only generated records
+from an exact candidate show whether the current release commit passes.
 
 ## Release policy
 
@@ -45,6 +45,13 @@ The public peers remain `three >=0.185.1 <0.186.0`,
 selected and locked when its consumer fixture is implemented; it is not guessed
 in this planning issue. Widening any peer range requires the complete affected
 suite on every newly claimed Tested Lane.
+
+Although both Primitive Workshop variants live in this repository, evidence
+runs treat them as packed-public consumers. After the Example App's frozen
+dependency install, automation installs the freshly packed candidate under a
+digest-unique filename and builds through public exports. Source imports,
+workspace links, and a cached tarball at the stable development path cannot
+satisfy this gate.
 
 Every public entry point must import without reading `window`, `document`, or
 `navigator`; creating a renderer or Three.js resource; installing IWER or a

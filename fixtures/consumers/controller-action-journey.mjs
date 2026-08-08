@@ -220,6 +220,12 @@ export async function runPackedThreeControllerJourney({
       wristMenuEvents.filter(({ type }) => type === 'selection-intent').length,
       1,
     )
+    return {
+      id: 'iwer-vanilla-controller',
+      status: 'passed',
+      selectionIntents: 1,
+      blockedSceneActions: sceneActions,
+    }
   } finally {
     disposeThreeWristMenu(menu)
     fixture.restoreGlobals()
@@ -276,6 +282,12 @@ export async function runPackedThreeHandJourney({
         .map(({ intent, source }) => [intent.itemId, source.kind]),
       [['first', 'hand']],
     )
+    return {
+      id: 'iwer-vanilla-hand',
+      status: 'passed',
+      selectionIntents: 1,
+      blockedSceneActions: sceneActions,
+    }
   } finally {
     disposeThreeWristMenu(menu)
     fixture.restoreGlobals()
@@ -520,6 +532,15 @@ export async function runPackedReactControllerJourney({
     await fiber.act(async () => {
       fixture.release(112)
     })
+    return {
+      id: 'iwer-react-controller',
+      status: 'passed',
+      selectionIntents: 1,
+      sceneShield: {
+        blockedWhileMenuOwned: true,
+        behindTargetLiveAfterUnmount: sceneActions > 0,
+      },
+    }
   } finally {
     await fiber.act(async () => root.unmount())
     assert.equal(menuGroup?.children.length ?? 0, 0)
@@ -656,6 +677,12 @@ export async function runPackedReactHandJourney({
         .map(({ intent, source }) => [intent.itemId, source.kind]),
       [['first', 'hand']],
     )
+    return {
+      id: 'iwer-react-hand',
+      status: 'passed',
+      selectionIntents: 1,
+      blockedSceneActions: sceneActions,
+    }
   } finally {
     await fiber.act(async () => root.unmount())
     behindGeometry.dispose()

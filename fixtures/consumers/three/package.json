@@ -9,6 +9,6 @@
     "three": "0.185.1"
   },
   "scripts": {
-    "test": "node smoke.mjs"
+    "test": "node import-safety.mjs && node smoke.mjs"
   }
 }

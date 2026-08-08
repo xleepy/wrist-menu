@@ -1,18 +1,12 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
-
-const packageVersion = async (packageName, fixtureUrl) => {
-  const manifestUrl = new URL(
-    `./node_modules/${packageName}/package.json`,
-    fixtureUrl,
-  )
-  return JSON.parse(await readFile(manifestUrl, 'utf8')).version
-}
+import { installedVersion } from './evidence-report.mjs'
 
 export async function assertReactLane(renderedOutput, expectedVersions, fixtureUrl) {
   assert.equal(renderedOutput, '')
 
   for (const [packageName, expectedVersion] of Object.entries(expectedVersions)) {
-    assert.equal(await packageVersion(packageName, fixtureUrl), expectedVersion)
+    assert.equal(await installedVersion(packageName, fixtureUrl), expectedVersion)
   }
+
+  return expectedVersions
 }

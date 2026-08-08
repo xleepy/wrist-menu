@@ -149,3 +149,8 @@ framework-neutral Workshop Model. Run `npm run examples:link`, then
 `npm run examples:dev:vanilla` or `npm run examples:dev:react`; see the
 [Primitive Workshop guide](examples/primitive-workshop/README.md) for the full
 journey and frozen-install restore workflow.
+
+Release candidates are verified from a clean commit with `npm run evidence`.
+That command installs a digest-named copy of the packed candidate in every
+consumer and writes immutable, fail-closed records under ignored artifacts; see
+the [release evidence guide](docs/release-evidence.md).

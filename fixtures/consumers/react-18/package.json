@@ -20,6 +20,6 @@
     "typescript": "5.9.3"
   },
   "scripts": {
-    "test": "node smoke.mjs && tsc -p tsconfig.json"
+    "test": "node import-safety.mjs && node smoke.mjs && tsc -p tsconfig.json"
   }
 }
