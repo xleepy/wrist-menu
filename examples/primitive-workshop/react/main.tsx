@@ -1,4 +1,11 @@
-import { StrictMode, useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  StrictMode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { createRoot } from 'react-dom/client'
 import { Canvas, type ThreeEvent } from '@react-three/fiber'
 import { createXRStore, useXR, XR } from '@react-three/xr'
@@ -13,16 +20,19 @@ import {
 
 import {
   WORKSHOP_BOUNDS_METERS,
+  WORKSHOP_OBJECT_CAPACITY,
   createWorkshopScenario,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
-  workshopHostSnapshot,
   type WorkshopAction,
   type WorkshopModel,
   type WorkshopObject,
 } from '../shared/workshop-model.js'
 import { createPhysicalActions } from './physical-actions.js'
-import { createWorkshopLifecycle } from './lifecycle.js'
+import {
+  createWorkshopRuntime,
+  deriveWorkshopView,
+} from './runtime.js'
 
 import './style.css'
 
@@ -60,7 +70,7 @@ function committedActionId(prefix: string, event: SceneEvent): string {
 function XrPhysicalActionCapture({
   lifecycle,
 }: Readonly<{
-  lifecycle: ReturnType<typeof createWorkshopLifecycle>
+  lifecycle: ReturnType<typeof createWorkshopRuntime>
 }>) {
   const session = useXR((state) => state.session)
   useEffect(() => {
@@ -128,33 +138,14 @@ function WorkshopScene({
     context: WristMenuEventContext,
   ) => void
   lifecycleState: ReturnType<
-    ReturnType<typeof createWorkshopLifecycle>['snapshot']
+    ReturnType<typeof createWorkshopRuntime>['snapshot']
   >
-  lifecycle: ReturnType<typeof createWorkshopLifecycle>
+  lifecycle: ReturnType<typeof createWorkshopRuntime>
 }>) {
-  const tracksSession = ![
-    'pre-session',
-    'requesting',
-    'rejected',
-    'ended',
-  ].includes(lifecycleState.runtimeStatus)
-  const snapshot = useMemo(
+  const view = useMemo(
     () =>
-      workshopHostSnapshot(model, {
-        ...scenario.snapshotOptions,
-        ...(tracksSession
-          ? {
-              availableWrists: lifecycleState.availableWrists,
-              cursorAvailable: lifecycleState.cursorAvailable,
-            }
-          : {}),
-      }),
-    [
-      lifecycleState.availableWrists,
-      lifecycleState.cursorAvailable,
-      model,
-      tracksSession,
-    ],
+      deriveWorkshopView(model, lifecycleState, scenario.snapshotOptions),
+    [lifecycleState, model],
   )
 
   const placeCursor = useCallback(
@@ -193,8 +184,7 @@ function WorkshopScene({
         {model.gridVisible ? (
           <gridHelper args={[WORKSHOP_BOUNDS_METERS * 2, 8, '#ed8df4', '#603866']} position={[0, 0.003, 0]} />
         ) : null}
-        {model.placementCursor.status !== 'unavailable' &&
-        (!tracksSession || lifecycleState.cursorAvailable) ? (
+        {view.cursorVisible ? (
           <mesh
             position={[model.placementCursor.position[0], 0.008, model.placementCursor.position[2]]}
             rotation={[-Math.PI / 2, 0, 0]}
@@ -218,13 +208,10 @@ function WorkshopScene({
             dispatch={dispatch}
           />
         ))}
-        {lifecycleState.sessionRevision > 0 &&
-        !['ended', 'rejected', 'requesting'].includes(
-          lifecycleState.runtimeStatus,
-        ) ? (
+        {lifecycleState.sessionRevision > 0 && lifecycleState.hasLiveSession ? (
           <WristMenu
             key={lifecycleState.sessionRevision}
-            snapshot={snapshot}
+            snapshot={view.hostSnapshot}
             onEvent={onMenuEvent}
           />
         ) : null}
@@ -235,14 +222,18 @@ function WorkshopScene({
 
 function App() {
   const [model, setModel] = useState<WorkshopModel>(() => scenario.model)
+  const modelRef = useRef(model)
+  modelRef.current = model
   const [lastSemanticEvent, setLastSemanticEvent] = useState('none')
   const [, renderLifecycle] = useState(0)
   const lifecycle = useMemo(
     () =>
-      createWorkshopLifecycle({
+      createWorkshopRuntime({
+        readModel: () => modelRef.current,
+        readSnapshotOptions: () => scenario.snapshotOptions,
         clearTransientInteraction: () =>
           physicalActions.clearTransientInteraction(),
-        onChange: () => renderLifecycle((revision) => revision + 1),
+        render: () => renderLifecycle((revision) => revision + 1),
       }),
     [],
   )
@@ -338,7 +329,7 @@ function App() {
       </aside>
       {showDiagnostics ? (
         <aside className="diagnostics" role="status">
-          react · package {WRIST_MENU_PACKAGE_VERSION} · {model.objects.length}/12
+          react · package {WRIST_MENU_PACKAGE_VERSION} · {model.objects.length}/{WORKSHOP_OBJECT_CAPACITY}
           {' '}objects · model revision {model.revision} · last event{' '}
           {lastSemanticEvent} ·{' '}
           {lifecycleState.runtimeStatus} · {diagnosticMessage}. Next:{' '}

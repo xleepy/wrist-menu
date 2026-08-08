@@ -20,10 +20,10 @@
  * @typedef {Readonly<{
  *   variant: 'vanilla',
  *   runtimeStatus: WorkshopRuntimeStatus,
+ *   hasLiveSession: boolean,
  *   inputMode: WorkshopInputMode,
  *   availableWrists: readonly ('left' | 'right')[],
  *   cursorAvailable: boolean,
- *   interactionRevision: number,
  *   sessionRevision: number,
  *   diagnostic: WorkshopDiagnostic,
  * }>} WorkshopLifecycleSnapshot
@@ -38,6 +38,16 @@
 /** @param {DiagnosticLevel} level @param {string} code @param {string} message @param {string} nextAction */
 function diagnostic(level, code, message, nextAction) {
   return Object.freeze({ level, code, message, nextAction })
+}
+
+/** @param {WorkshopRuntimeStatus} runtimeStatus */
+function hasLiveSession(runtimeStatus) {
+  return (
+    runtimeStatus === 'active' ||
+    runtimeStatus === 'blurred' ||
+    runtimeStatus === 'hidden' ||
+    runtimeStatus === 'tracking-lost'
+  )
 }
 
 /** @param {XRInputSource} source */
@@ -73,10 +83,10 @@ export function createWorkshopLifecycle(options = {}) {
   let state = Object.freeze({
     variant: 'vanilla',
     runtimeStatus: 'pre-session',
+    hasLiveSession: false,
     inputMode: 'none',
     availableWrists: Object.freeze([]),
     cursorAvailable: false,
-    interactionRevision: 0,
     sessionRevision: 0,
     diagnostic: diagnostic(
       'info',
@@ -91,14 +101,16 @@ export function createWorkshopLifecycle(options = {}) {
   /** @param {Partial<WorkshopLifecycleSnapshot>} changes @param {string} [clearReason] */
   function transition(changes, clearReason) {
     if (clearReason !== undefined) clearTransientInteraction(clearReason)
+    const runtimeStatus = changes.runtimeStatus ?? state.runtimeStatus
     state = Object.freeze({
       ...state,
       ...changes,
+      runtimeStatus,
+      hasLiveSession: hasLiveSession(runtimeStatus),
       ...(clearReason === undefined
         ? {}
         : {
             cursorAvailable: false,
-            interactionRevision: state.interactionRevision + 1,
           }),
       availableWrists: Object.freeze([
         ...(changes.availableWrists ?? state.availableWrists),
@@ -269,17 +281,6 @@ export function createWorkshopLifecycle(options = {}) {
     markCursorAvailable() {
       if (state.runtimeStatus !== 'active') return state
       return transition({ cursorAvailable: true })
-    },
-    /** @param {'left' | 'right'} wrist */
-    reportUnavailableWrist(wrist) {
-      return transition({
-        diagnostic: diagnostic(
-          'warning',
-          'wrist-unavailable',
-          `The ${wrist} wrist is not tracked.`,
-          'Restore tracking or choose the other wrist',
-        ),
-      })
     },
     snapshot() {
       return state

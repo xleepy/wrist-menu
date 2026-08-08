@@ -17,9 +17,11 @@
     "shared/**/*.js",
     "vanilla/physical-actions.js",
     "vanilla/lifecycle.js",
+    "vanilla/runtime.js",
     "vanilla/**/*.ts",
     "react/physical-actions.js",
     "react/lifecycle.js",
+    "react/runtime.js",
     "react/**/*.tsx"
   ]
 }

@@ -224,7 +224,11 @@ test('invalid placement does not spawn or advance the Workshop Model', () => {
   const initial = createWorkshopModel()
   const invalidCursor = transition(
     initial,
-    { type: 'place-cursor', position: [3, 0, 3], valid: false },
+    {
+      type: 'place-cursor',
+      position: workshopPlacementFixtures.invalid,
+      valid: false,
+    },
     'place-invalid',
   )
   const afterSpawn = transition(invalidCursor, { type: 'spawn' }, 'spawn-invalid')

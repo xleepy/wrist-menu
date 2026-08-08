@@ -17,7 +17,7 @@
  * @typedef {Readonly<{
  *   requestedPosition: WorkshopPosition,
  *   position: WorkshopPosition,
- *   sourceValid: boolean,
+ *   requestedPositionObserved: boolean,
  *   valid: boolean,
  *   status: PlacementCursorStatus,
  * }>} PlacementCursor
@@ -156,7 +156,8 @@ function freezeModel(model) {
         model.placementCursor.requestedPosition,
       ),
       position: freezePosition(model.placementCursor.position),
-      sourceValid: model.placementCursor.sourceValid,
+      requestedPositionObserved:
+        model.placementCursor.requestedPositionObserved,
       valid: model.placementCursor.valid,
       status: model.placementCursor.status,
     }),
@@ -183,7 +184,7 @@ export function createWorkshopModel() {
     placementCursor: {
       requestedPosition: [0, 0, 0],
       position: [0, 0, 0],
-      sourceValid: false,
+      requestedPositionObserved: false,
       valid: false,
       status: 'unavailable',
     },
@@ -476,18 +477,23 @@ function overlapsWorkshopObject(objects, primitive, position) {
 /**
  * @param {WorkshopModel} model
  * @param {WorkshopPosition} requestedPosition
- * @param {boolean} sourceValid
+ * @param {boolean} requestedPositionObserved
  * @param {Partial<Pick<WorkshopModel, 'objects' | 'selectedPrimitive' | 'snapToGrid'>>} [changes]
  * @returns {PlacementCursor}
  */
-function resolvePlacementCursor(model, requestedPosition, sourceValid, changes = {}) {
+function resolvePlacementCursor(
+  model,
+  requestedPosition,
+  requestedPositionObserved,
+  changes = {},
+) {
   const objects = changes.objects ?? model.objects
   const selectedPrimitive = changes.selectedPrimitive ?? model.selectedPrimitive
   const snapToGrid = changes.snapToGrid ?? model.snapToGrid
   const position = effectiveCursorPosition(requestedPosition, snapToGrid)
   const footprintRadius = primitiveFootprintRadius(selectedPrimitive)
   const onTable =
-    sourceValid &&
+    requestedPositionObserved &&
     Math.abs(position[0]) <= WORKSHOP_BOUNDS_METERS - footprintRadius &&
     Math.abs(position[2]) <= WORKSHOP_BOUNDS_METERS - footprintRadius
   const status = !onTable
@@ -498,7 +504,7 @@ function resolvePlacementCursor(model, requestedPosition, sourceValid, changes =
   return Object.freeze({
     requestedPosition: freezePosition(requestedPosition),
     position: freezePosition(position),
-    sourceValid,
+    requestedPositionObserved,
     valid: status === 'valid',
     status,
   })
@@ -608,7 +614,7 @@ export function reduceWorkshop(model, command) {
         placementCursor: resolvePlacementCursor(
           model,
           model.placementCursor.requestedPosition,
-          model.placementCursor.sourceValid,
+          model.placementCursor.requestedPositionObserved,
           { objects },
         ),
         selectedObjectId: null,
@@ -625,7 +631,7 @@ export function reduceWorkshop(model, command) {
         placementCursor: resolvePlacementCursor(
           model,
           model.placementCursor.requestedPosition,
-          model.placementCursor.sourceValid,
+          model.placementCursor.requestedPositionObserved,
           { selectedPrimitive: action.primitive },
         ),
       })
@@ -651,7 +657,7 @@ export function reduceWorkshop(model, command) {
         placementCursor: resolvePlacementCursor(
           model,
           model.placementCursor.requestedPosition,
-          model.placementCursor.sourceValid,
+          model.placementCursor.requestedPositionObserved,
           { snapToGrid: action.enabled },
         ),
       })

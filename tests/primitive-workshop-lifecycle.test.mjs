@@ -69,10 +69,14 @@ const variantAdapters = [
     name: 'vanilla',
     load: () =>
       import('../examples/primitive-workshop/vanilla/lifecycle.js'),
+    loadRuntime: () =>
+      import('../examples/primitive-workshop/vanilla/runtime.js'),
   },
   {
     name: 'react',
     load: () => import('../examples/primitive-workshop/react/lifecycle.js'),
+    loadRuntime: () =>
+      import('../examples/primitive-workshop/react/runtime.js'),
   },
 ]
 
@@ -166,6 +170,56 @@ for (const variant of variantAdapters) {
       assert.ok(state.availableWrists.includes(lane.menuWrist))
       lifecycle.dispose()
     }
+  })
+
+  test(`${variant.name} production runtime immediately renders an input-mode switch`, async () => {
+    const { createWorkshopRuntime } = await variant.loadRuntime()
+    let model = reduceWorkshop(createWorkshopModel(), {
+      actionId: `${variant.name}-runtime-cursor`,
+      action: { type: 'place-cursor', position: [0.5, 0, -0.5], valid: true },
+    })
+    const modelBeforeSwitch = model
+    const renderedViews = []
+    const runtime = createWorkshopRuntime({
+      readModel: () => model,
+      readSnapshotOptions: () => ({}),
+      clearTransientInteraction: () => undefined,
+      render: (view) => renderedViews.push(view),
+    })
+    runtime.beginSessionRequest()
+    const session = new FakeSession([
+      inputSource('left', 'hand'),
+      inputSource('right', 'hand'),
+    ])
+    runtime.sessionActivated(session)
+    runtime.markCursorAvailable()
+
+    const beforeSwitch = renderedViews.at(-1)
+    assert.equal(beforeSwitch.cursorVisible, true)
+    assert.equal(
+      beforeSwitch.hostSnapshot.menuDefinition.find(
+        (entry) => entry.id === 'spawn-primitive',
+      ).disabled,
+      false,
+    )
+
+    const renderCount = renderedViews.length
+    session.replaceSources([
+      inputSource('left', 'controller'),
+      inputSource('right', 'controller'),
+    ])
+
+    const afterSwitch = renderedViews.at(-1)
+    assert.ok(renderedViews.length > renderCount)
+    assert.equal(afterSwitch.cursorVisible, false)
+    assert.equal(
+      afterSwitch.hostSnapshot.menuDefinition.find(
+        (entry) => entry.id === 'spawn-primitive',
+      ).disabledReason,
+      'Aim at the table first',
+    )
+    assert.equal(model, modelBeforeSwitch)
+    runtime.dispose()
   })
 }
 

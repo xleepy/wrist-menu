@@ -37,6 +37,7 @@ import {
 
 import {
   WORKSHOP_BOUNDS_METERS,
+  WORKSHOP_OBJECT_CAPACITY,
   createWorkshopScenario,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
@@ -46,7 +47,11 @@ import {
   type WorkshopObject,
 } from '../shared/workshop-model.js'
 import { createPhysicalActions } from './physical-actions.js'
-import { createWorkshopLifecycle } from './lifecycle.js'
+import {
+  createWorkshopRuntime,
+  deriveWorkshopView,
+  type WorkshopView,
+} from './runtime.js'
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector)
@@ -121,13 +126,13 @@ const objectMeshes = new Map<string, Mesh>()
 let model: WorkshopModel = scenario.model
 let actionSequence = 0
 let physicalActions: ReturnType<typeof createPhysicalActions>
-let lifecycle: ReturnType<typeof createWorkshopLifecycle> | null = null
+let lifecycle: ReturnType<typeof createWorkshopRuntime> | null = null
 let lastSemanticEvent = 'none'
 
 function renderDiagnostics(): void {
   const lifecycleState = lifecycle?.snapshot()
   if (lifecycleState === undefined) return
-  const detail = `${lifecycleState.variant} · package ${WRIST_MENU_PACKAGE_VERSION} · ${model.objects.length}/12 objects · model revision ${model.revision} · last event ${lastSemanticEvent} · ${lifecycleState.runtimeStatus}`
+  const detail = `${lifecycleState.variant} · package ${WRIST_MENU_PACKAGE_VERSION} · ${model.objects.length}/${WORKSHOP_OBJECT_CAPACITY} objects · model revision ${model.revision} · last event ${lastSemanticEvent} · ${lifecycleState.runtimeStatus}`
   diagnostics.textContent = startupError === null
     ? `${detail} · ${lifecycleState.diagnostic.message} Next: ${lifecycleState.diagnostic.nextAction}.`
     : `${detail} · ${startupError}. Next: use fixture=default, full-workshop, empty-definition, or shield.`
@@ -139,20 +144,10 @@ function renderDiagnostics(): void {
 
 function currentSnapshot() {
   const lifecycleState = lifecycle?.snapshot()
-  const tracksSession =
-    lifecycleState !== undefined &&
-    !['pre-session', 'requesting', 'rejected', 'ended'].includes(
-      lifecycleState.runtimeStatus,
-    )
-  return workshopHostSnapshot(model, {
-    ...scenario.snapshotOptions,
-    ...(tracksSession
-      ? {
-          availableWrists: lifecycleState.availableWrists,
-          cursorAvailable: lifecycleState.cursorAvailable,
-        }
-      : {}),
-  })
+  return lifecycleState === undefined
+    ? workshopHostSnapshot(model, scenario.snapshotOptions)
+    : deriveWorkshopView(model, lifecycleState, scenario.snapshotOptions)
+        .hostSnapshot
 }
 
 let menu: ReturnType<typeof createThreeWristMenuState> | null = null
@@ -179,10 +174,13 @@ physicalActions = createPhysicalActions({
   inputSourceForMenuSourceId: (sourceId) =>
     menu?.inputSourceById.get(sourceId) ?? null,
 })
-lifecycle = createWorkshopLifecycle({
+lifecycle = createWorkshopRuntime({
+  readModel: () => model,
+  readSnapshotOptions: () => scenario.snapshotOptions,
   clearTransientInteraction: () => physicalActions.clearTransientInteraction(),
-  onChange: () => {
-    if (menu !== null) syncThreeWristMenu(menu, currentSnapshot())
+  render: (view) => {
+    if (menu !== null) syncThreeWristMenu(menu, view.hostSnapshot)
+    renderTransientState(view)
     renderDiagnostics()
   },
 })
@@ -230,14 +228,18 @@ function renderWorkshop(): void {
 
   grid.visible = model.gridVisible
   const lifecycleState = lifecycle?.snapshot()
-  const sessionOwnsCursor =
-    lifecycleState !== undefined &&
-    !['pre-session', 'requesting', 'rejected', 'ended'].includes(
-      lifecycleState.runtimeStatus,
-    )
-  cursor.visible =
-    model.placementCursor.status !== 'unavailable' &&
-    (!sessionOwnsCursor || lifecycleState.cursorAvailable)
+  const view = lifecycleState === undefined
+    ? Object.freeze({
+        hostSnapshot: workshopHostSnapshot(model, scenario.snapshotOptions),
+        cursorVisible: model.placementCursor.status !== 'unavailable',
+      })
+    : deriveWorkshopView(model, lifecycleState, scenario.snapshotOptions)
+  renderTransientState(view)
+  status.textContent = `${model.objects.length} object${model.objects.length === 1 ? '' : 's'} · ${model.selectedPrimitive} · grid ${model.gridVisible ? 'shown' : 'hidden'} · snap ${model.snapToGrid ? 'on' : 'off'} · ${model.menuWrist} wrist`
+}
+
+function renderTransientState(view: WorkshopView): void {
+  cursor.visible = view.cursorVisible
   ;(cursor.material as MeshBasicMaterial).color.set(
     model.placementCursor.status === 'occupied' ? 0xff6b6b : 0x7effd4,
   )
@@ -246,7 +248,6 @@ function renderWorkshop(): void {
     0.008,
     model.placementCursor.position[2],
   )
-  status.textContent = `${model.objects.length} object${model.objects.length === 1 ? '' : 's'} · ${model.selectedPrimitive} · grid ${model.gridVisible ? 'shown' : 'hidden'} · snap ${model.snapToGrid ? 'on' : 'off'} · ${model.menuWrist} wrist`
 }
 
 function applyModel(nextModel: WorkshopModel): void {

@@ -116,8 +116,10 @@ test('the Example Variants share only the portable Workshop Model', async () => 
   const sources = await Promise.all([
     text('vanilla/main.ts'),
     text('vanilla/physical-actions.js'),
+    text('vanilla/runtime.js'),
     text('react/main.tsx'),
     text('react/physical-actions.js'),
+    text('react/runtime.js'),
   ])
 
   for (const source of sources) {
@@ -132,24 +134,35 @@ test('the Example Variants share only the portable Workshop Model', async () => 
 })
 
 test('each Example Variant owns and wires its lifecycle integration', async () => {
-  const [vanillaMain, vanillaLifecycle, reactMain, reactLifecycle] =
+  const [
+    vanillaMain,
+    vanillaLifecycle,
+    vanillaRuntime,
+    reactMain,
+    reactLifecycle,
+    reactRuntime,
+  ] =
     await Promise.all([
       text('vanilla/main.ts'),
       text('vanilla/lifecycle.js'),
+      text('vanilla/runtime.js'),
       text('react/main.tsx'),
       text('react/lifecycle.js'),
+      text('react/runtime.js'),
     ])
 
   assert.match(
     vanillaMain,
-    /from ['"]\.\/lifecycle\.js['"]/,
+    /from ['"]\.\/runtime\.js['"]/,
   )
   assert.match(
     reactMain,
-    /from ['"]\.\/lifecycle\.js['"]/,
+    /from ['"]\.\/runtime\.js['"]/,
   )
   assert.match(vanillaMain, /lifecycle\?\.sessionActivated\(session\)/)
   assert.match(reactMain, /lifecycle\.sessionActivated\(session\)/)
+  assert.match(vanillaRuntime, /createWorkshopLifecycle/)
+  assert.match(reactRuntime, /createWorkshopLifecycle/)
   assert.match(vanillaMain, /createWorkshopScenario/)
   assert.match(reactMain, /createWorkshopScenario/)
   assert.doesNotMatch(vanillaLifecycle, /react\/(?:main|lifecycle)/i)
