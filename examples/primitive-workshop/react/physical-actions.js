@@ -113,6 +113,9 @@ export function createPhysicalActions(options = {}) {
       }
       return physicalActions.menuAction(event)
     },
+    clearTransientInteraction() {
+      physicalActions.clear()
+    },
     dispose() {
       detachSession()
       physicalActions.clear()

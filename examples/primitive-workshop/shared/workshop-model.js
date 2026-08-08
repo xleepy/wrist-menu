@@ -12,6 +12,16 @@
 
 /** @typedef {'cube' | 'sphere' | 'cylinder'} WorkshopPrimitive */
 /** @typedef {readonly [number, number, number]} WorkshopPosition */
+/** @typedef {'unavailable' | 'valid' | 'occupied'} PlacementCursorStatus */
+/**
+ * @typedef {Readonly<{
+ *   requestedPosition: WorkshopPosition,
+ *   position: WorkshopPosition,
+ *   sourceValid: boolean,
+ *   valid: boolean,
+ *   status: PlacementCursorStatus,
+ * }>} PlacementCursor
+ */
 /**
  * @typedef {Readonly<{
  *   id: string,
@@ -24,7 +34,7 @@
  * @typedef {Readonly<{
  *   revision: number,
  *   selectedPrimitive: WorkshopPrimitive,
- *   placementCursor: Readonly<{position: WorkshopPosition, valid: boolean}>,
+ *   placementCursor: PlacementCursor,
  *   objects: readonly WorkshopObject[],
  *   selectedObjectId: string | null,
  *   gridVisible: boolean,
@@ -90,9 +100,18 @@
  *   clear(): void,
  * }>} PhysicalActionCoordinator
  */
+/**
+ * @typedef {Readonly<{
+ *   availableWrists?: readonly ('left' | 'right')[],
+ *   cursorAvailable?: boolean,
+ *   emptyDefinition?: boolean,
+ * }>} WorkshopSnapshotOptions
+ */
 
 export const WORKSHOP_BOUNDS_METERS = 1
 export const GRID_STEP_METERS = 0.25
+export const WORKSHOP_OBJECT_CAPACITY = 12
+export const WORKSHOP_CLEARANCE_METERS = 0.02
 /** Processed identities expire after this many later successful transitions. */
 export const PROCESSED_PHYSICAL_ACTION_CAPACITY = 64
 /** Correlation lifetime for instantaneous menu/scene input deliveries. */
@@ -133,8 +152,13 @@ function freezeModel(model) {
     revision: model.revision,
     selectedPrimitive: model.selectedPrimitive,
     placementCursor: Object.freeze({
+      requestedPosition: freezePosition(
+        model.placementCursor.requestedPosition,
+      ),
       position: freezePosition(model.placementCursor.position),
+      sourceValid: model.placementCursor.sourceValid,
       valid: model.placementCursor.valid,
+      status: model.placementCursor.status,
     }),
     objects: Object.freeze(model.objects.map(freezeObject)),
     selectedObjectId: model.selectedObjectId,
@@ -156,7 +180,13 @@ export function createWorkshopModel() {
   return freezeModel({
     revision: 0,
     selectedPrimitive: 'cube',
-    placementCursor: { position: [0, 0, -0.5], valid: true },
+    placementCursor: {
+      requestedPosition: [0, 0, 0],
+      position: [0, 0, 0],
+      sourceValid: false,
+      valid: false,
+      status: 'unavailable',
+    },
     objects: [],
     selectedObjectId: null,
     gridVisible: true,
@@ -403,6 +433,89 @@ function snapCoordinate(coordinate) {
   return Math.round(coordinate / GRID_STEP_METERS) * GRID_STEP_METERS
 }
 
+/** @param {WorkshopPrimitive} primitive */
+function primitiveFootprintRadius(primitive) {
+  if (primitive === 'sphere') return 0.1
+  if (primitive === 'cylinder') return 0.085
+  return 0.09
+}
+
+/**
+ * @param {WorkshopPosition} requestedPosition
+ * @param {boolean} snapToGrid
+ * @returns {WorkshopPosition}
+ */
+function effectiveCursorPosition(requestedPosition, snapToGrid) {
+  return snapToGrid
+    ? [
+        snapCoordinate(requestedPosition[0]),
+        requestedPosition[1],
+        snapCoordinate(requestedPosition[2]),
+      ]
+    : requestedPosition
+}
+
+/**
+ * @param {readonly WorkshopObject[]} objects
+ * @param {WorkshopPrimitive} primitive
+ * @param {WorkshopPosition} position
+ */
+function overlapsWorkshopObject(objects, primitive, position) {
+  const nextRadius = primitiveFootprintRadius(primitive)
+  return objects.some((object) => {
+    const minimumDistance =
+      nextRadius +
+      primitiveFootprintRadius(object.primitive) +
+      WORKSHOP_CLEARANCE_METERS
+    const deltaX = position[0] - object.position[0]
+    const deltaZ = position[2] - object.position[2]
+    return deltaX * deltaX + deltaZ * deltaZ < minimumDistance * minimumDistance
+  })
+}
+
+/**
+ * @param {WorkshopModel} model
+ * @param {WorkshopPosition} requestedPosition
+ * @param {boolean} sourceValid
+ * @param {Partial<Pick<WorkshopModel, 'objects' | 'selectedPrimitive' | 'snapToGrid'>>} [changes]
+ * @returns {PlacementCursor}
+ */
+function resolvePlacementCursor(model, requestedPosition, sourceValid, changes = {}) {
+  const objects = changes.objects ?? model.objects
+  const selectedPrimitive = changes.selectedPrimitive ?? model.selectedPrimitive
+  const snapToGrid = changes.snapToGrid ?? model.snapToGrid
+  const position = effectiveCursorPosition(requestedPosition, snapToGrid)
+  const footprintRadius = primitiveFootprintRadius(selectedPrimitive)
+  const onTable =
+    sourceValid &&
+    Math.abs(position[0]) <= WORKSHOP_BOUNDS_METERS - footprintRadius &&
+    Math.abs(position[2]) <= WORKSHOP_BOUNDS_METERS - footprintRadius
+  const status = !onTable
+    ? 'unavailable'
+    : overlapsWorkshopObject(objects, selectedPrimitive, position)
+      ? 'occupied'
+      : 'valid'
+  return Object.freeze({
+    requestedPosition: freezePosition(requestedPosition),
+    position: freezePosition(position),
+    sourceValid,
+    valid: status === 'valid',
+    status,
+  })
+}
+
+/** @param {WorkshopModel} model */
+function workshopCanReset(model) {
+  return (
+    model.objects.length > 0 ||
+    model.selectedObjectId !== null ||
+    model.placementCursor.status !== 'unavailable' ||
+    model.selectedPrimitive !== 'cube' ||
+    model.gridVisible !== true ||
+    model.snapToGrid !== true
+  )
+}
+
 /**
  * Apply one physical action. Repeated delivery of the same physical action ID
  * returns the existing model even after intervening transitions. Identities
@@ -423,28 +536,36 @@ export function reduceWorkshop(model, command) {
   switch (action.type) {
     case 'place-cursor': {
       assertPosition(action.position)
-      const position = freezePosition(action.position)
-      const valid = action.valid === true
+      const placementCursor = resolvePlacementCursor(
+        model,
+        action.position,
+        action.valid === true,
+      )
       if (
-        model.placementCursor.valid === valid &&
+        model.placementCursor.status === placementCursor.status &&
+        model.placementCursor.requestedPosition.every(
+          (coordinate, index) =>
+            coordinate === placementCursor.requestedPosition[index],
+        ) &&
         model.placementCursor.position.every(
-          (coordinate, index) => coordinate === position[index],
+          (coordinate, index) => coordinate === placementCursor.position[index],
         )
       ) {
         return model
       }
       return nextModel(model, command.actionId, {
-        placementCursor: { position, valid },
+        placementCursor,
       })
     }
 
     case 'spawn': {
-      if (!model.placementCursor.valid) return model
-      const [x, y, z] = model.placementCursor.position
-      /** @type {WorkshopPosition} */
-      const position = model.snapToGrid
-        ? [snapCoordinate(x), y, snapCoordinate(z)]
-        : [x, y, z]
+      if (
+        !model.placementCursor.valid ||
+        model.objects.length >= WORKSHOP_OBJECT_CAPACITY
+      ) {
+        return model
+      }
+      const position = model.placementCursor.position
       /** @type {WorkshopObject} */
       const object = {
         id: `workshop-object-${model.nextObjectNumber}`,
@@ -452,8 +573,15 @@ export function reduceWorkshop(model, command) {
         position,
         snapped: model.snapToGrid,
       }
+      const objects = [...model.objects, object]
       return nextModel(model, command.actionId, {
-        objects: [...model.objects, object],
+        objects,
+        placementCursor: resolvePlacementCursor(
+          model,
+          model.placementCursor.requestedPosition,
+          true,
+          { objects },
+        ),
         nextObjectNumber: model.nextObjectNumber + 1,
       })
     }
@@ -472,9 +600,16 @@ export function reduceWorkshop(model, command) {
 
     case 'remove-selection': {
       if (model.selectedObjectId === null) return model
+      const objects = model.objects.filter(
+        (object) => object.id !== model.selectedObjectId,
+      )
       return nextModel(model, command.actionId, {
-        objects: model.objects.filter(
-          (object) => object.id !== model.selectedObjectId,
+        objects,
+        placementCursor: resolvePlacementCursor(
+          model,
+          model.placementCursor.requestedPosition,
+          model.placementCursor.sourceValid,
+          { objects },
         ),
         selectedObjectId: null,
       })
@@ -487,6 +622,12 @@ export function reduceWorkshop(model, command) {
       if (model.selectedPrimitive === action.primitive) return model
       return nextModel(model, command.actionId, {
         selectedPrimitive: action.primitive,
+        placementCursor: resolvePlacementCursor(
+          model,
+          model.placementCursor.requestedPosition,
+          model.placementCursor.sourceValid,
+          { selectedPrimitive: action.primitive },
+        ),
       })
     }
 
@@ -507,6 +648,12 @@ export function reduceWorkshop(model, command) {
       if (model.snapToGrid === action.enabled) return model
       return nextModel(model, command.actionId, {
         snapToGrid: action.enabled,
+        placementCursor: resolvePlacementCursor(
+          model,
+          model.placementCursor.requestedPosition,
+          model.placementCursor.sourceValid,
+          { snapToGrid: action.enabled },
+        ),
       })
     }
 
@@ -521,15 +668,94 @@ export function reduceWorkshop(model, command) {
     }
 
     case 'reset': {
+      if (!workshopCanReset(model)) return model
       const reset = createWorkshopModel()
       return nextModel(model, command.actionId, {
         ...reset,
+        menuWrist: model.menuWrist,
       })
     }
 
     default:
       throw new TypeError(`Unsupported Workshop action: ${action.type}`)
   }
+}
+
+const scenarioCapacityPositions = Object.freeze([
+  freezePosition([-0.75, 0, -0.5]),
+  freezePosition([-0.5, 0, -0.5]),
+  freezePosition([-0.25, 0, -0.5]),
+  freezePosition([0, 0, -0.5]),
+  freezePosition([0.25, 0, -0.5]),
+  freezePosition([0.5, 0, -0.5]),
+  freezePosition([-0.75, 0, -0.25]),
+  freezePosition([-0.5, 0, -0.25]),
+  freezePosition([-0.25, 0, -0.25]),
+  freezePosition([0, 0, -0.25]),
+  freezePosition([0.25, 0, -0.25]),
+  freezePosition([0.5, 0, -0.25]),
+])
+
+/**
+ * Create a portable scenario selected by the static Example App query string.
+ * The fixture contains model data only; each Example Variant still owns its
+ * renderer, scene shielding, XR source mapping, and lifecycle integration.
+ * @param {string} name
+ */
+export function createWorkshopScenario(name) {
+  if (name === 'default' || name === 'empty-definition') {
+    return Object.freeze({
+      name,
+      model: createWorkshopModel(),
+      snapshotOptions: Object.freeze({
+        ...(name === 'empty-definition' ? { emptyDefinition: true } : {}),
+      }),
+      shieldObjectId: null,
+    })
+  }
+
+  if (name === 'full-workshop') {
+    let model = createWorkshopModel()
+    for (const [index, position] of scenarioCapacityPositions.entries()) {
+      model = reduceWorkshop(model, {
+        actionId: `fixture-place-${index}`,
+        action: { type: 'place-cursor', position, valid: true },
+      })
+      model = reduceWorkshop(model, {
+        actionId: `fixture-spawn-${index}`,
+        action: { type: 'spawn' },
+      })
+    }
+    return Object.freeze({
+      name,
+      model,
+      snapshotOptions: Object.freeze({}),
+      shieldObjectId: null,
+    })
+  }
+
+  if (name === 'shield') {
+    let model = reduceWorkshop(createWorkshopModel(), {
+      actionId: 'fixture-shield-place',
+      action: { type: 'place-cursor', position: [0, 0, -0.5], valid: true },
+    })
+    model = reduceWorkshop(model, {
+      actionId: 'fixture-shield-spawn',
+      action: { type: 'spawn' },
+    })
+    model = reduceWorkshop(model, {
+      actionId: 'fixture-shield-clear-cursor',
+      action: { type: 'place-cursor', position: [0, 0, -0.5], valid: false },
+    })
+    return Object.freeze({
+      name,
+      model,
+      snapshotOptions: Object.freeze({}),
+      shieldObjectId: 'workshop-object-1',
+    })
+  }
+
+  throw new TypeError(`Unknown Workshop scenario: ${name}`)
 }
 
 /**
@@ -592,35 +818,37 @@ export function reduceWorkshopMenuEvent(model, event, physicalActionId) {
 /** Derive the complete immutable Host Snapshot for one Workshop Model revision. */
 /**
  * @param {WorkshopModel} model
+ * @param {WorkshopSnapshotOptions} [options]
  * @returns {HostSnapshot}
  */
-export function workshopHostSnapshot(model) {
+export function workshopHostSnapshot(model, options = {}) {
+  /** @type {Set<'left' | 'right'>} */
+  const availableWrists = new Set(options.availableWrists ?? ['left', 'right'])
+  for (const wrist of availableWrists) {
+    if (!handednessValues.has(wrist)) {
+      throw new TypeError(`Unsupported available wrist: ${wrist}`)
+    }
+  }
+  if (options.emptyDefinition === true) {
+    return Object.freeze({
+      activationMode: 'automatic',
+      wrist: model.menuWrist,
+      menuDefinition: Object.freeze([]),
+    })
+  }
   const removeDisabled = model.selectedObjectId === null
-  const spawnDisabled = !model.placementCursor.valid
+  const workshopFull = model.objects.length >= WORKSHOP_OBJECT_CAPACITY
+  const cursorAvailable = options.cursorAvailable ?? true
+  const spawnDisabled =
+    workshopFull || !cursorAvailable || !model.placementCursor.valid
+  const spawnDisabledReason = workshopFull
+    ? 'Workshop is full'
+    : cursorAvailable && model.placementCursor.status === 'occupied'
+      ? 'Choose an empty spot'
+      : 'Aim at the table first'
+  const resetDisabled = !workshopCanReset(model)
   /** @type {MenuDefinitionEntry[]} */
   const menuDefinition = [
-    {
-      type: 'action',
-      id: 'spawn-primitive',
-      label: `Spawn ${model.selectedPrimitive}`,
-      iconKey: 'add',
-      disabled: spawnDisabled,
-      ...(spawnDisabled
-        ? { disabledReason: 'Move the Placement Cursor onto the table' }
-        : {}),
-    },
-    { type: 'separator', id: 'objects-section', label: 'Objects' },
-    {
-      type: 'action',
-      id: 'remove-selection',
-      label: 'Remove selection',
-      iconKey: 'remove',
-      disabled: removeDisabled,
-      ...(removeDisabled
-        ? { disabledReason: 'Select a Workshop Object first' }
-        : {}),
-    },
-    { type: 'separator', id: 'primitive-section', label: 'Primitive' },
     {
       type: 'choice-group',
       id: 'primitive-choice',
@@ -632,7 +860,32 @@ export function workshopHostSnapshot(model) {
         { id: 'primitive-cylinder', label: 'Cylinder', value: 'cylinder' },
       ],
     },
+    {
+      type: 'action',
+      id: 'spawn-primitive',
+      label: `Spawn ${model.selectedPrimitive}`,
+      iconKey: 'add',
+      disabled: spawnDisabled,
+      ...(spawnDisabled ? { disabledReason: spawnDisabledReason } : {}),
+    },
+    { type: 'separator', id: 'objects-section', label: 'Objects' },
+    {
+      type: 'action',
+      id: 'remove-selection',
+      label: 'Remove selection',
+      iconKey: 'remove',
+      disabled: removeDisabled,
+      ...(removeDisabled
+        ? { disabledReason: 'Select an object first' }
+        : {}),
+    },
     { type: 'separator', id: 'grid-section', label: 'Grid' },
+    {
+      type: 'toggle',
+      id: 'snap-to-grid',
+      label: 'Snap placement',
+      value: model.snapToGrid,
+    },
     {
       type: 'toggle',
       id: 'grid-visible',
@@ -640,10 +893,12 @@ export function workshopHostSnapshot(model) {
       value: model.gridVisible,
     },
     {
-      type: 'toggle',
-      id: 'snap-to-grid',
-      label: 'Snap placement',
-      value: model.snapToGrid,
+      type: 'action',
+      id: 'reset-workshop',
+      label: 'Reset workshop',
+      iconKey: 'reset',
+      disabled: resetDisabled,
+      ...(resetDisabled ? { disabledReason: 'Workshop already empty' } : {}),
     },
     { type: 'separator', id: 'wrist-section', label: 'Menu wrist' },
     {
@@ -652,15 +907,25 @@ export function workshopHostSnapshot(model) {
       label: 'Attach menu to',
       selectedValue: model.menuWrist,
       options: [
-        { id: 'wrist-left', label: 'Left wrist', value: 'left' },
-        { id: 'wrist-right', label: 'Right wrist', value: 'right' },
+        {
+          id: 'wrist-left',
+          label: 'Left wrist',
+          value: 'left',
+          disabled: !availableWrists.has('left'),
+          ...(!availableWrists.has('left')
+            ? { disabledReason: 'Hand not tracked' }
+            : {}),
+        },
+        {
+          id: 'wrist-right',
+          label: 'Right wrist',
+          value: 'right',
+          disabled: !availableWrists.has('right'),
+          ...(!availableWrists.has('right')
+            ? { disabledReason: 'Hand not tracked' }
+            : {}),
+        },
       ],
-    },
-    {
-      type: 'action',
-      id: 'reset-workshop',
-      label: 'Reset workshop',
-      iconKey: 'reset',
     },
   ]
 

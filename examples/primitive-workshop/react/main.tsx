@@ -5,6 +5,7 @@ import { createXRStore, useXR, XR } from '@react-three/xr'
 import { DoubleSide } from 'three'
 import {
   WristMenu,
+  WRIST_MENU_PACKAGE_VERSION,
   wristMenuSessionFeatures,
   type WristMenuEvent,
   type WristMenuEventContext,
@@ -12,7 +13,7 @@ import {
 
 import {
   WORKSHOP_BOUNDS_METERS,
-  createWorkshopModel,
+  createWorkshopScenario,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
   workshopHostSnapshot,
@@ -21,6 +22,7 @@ import {
   type WorkshopObject,
 } from '../shared/workshop-model.js'
 import { createPhysicalActions } from './physical-actions.js'
+import { createWorkshopLifecycle } from './lifecycle.js'
 
 import './style.css'
 
@@ -30,6 +32,16 @@ const xrStore = createXRStore({
   },
 })
 const physicalActions = createPhysicalActions()
+const query = new URLSearchParams(window.location.search)
+const debugEnabled = query.get('debug') === '1'
+let startupError: string | null = null
+let scenario: ReturnType<typeof createWorkshopScenario>
+try {
+  scenario = createWorkshopScenario(query.get('fixture') ?? 'default')
+} catch (error) {
+  startupError = error instanceof Error ? error.message : String(error)
+  scenario = createWorkshopScenario('default')
+}
 
 type SceneEvent = (ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>) &
   Readonly<{ pointerState?: unknown }>
@@ -45,16 +57,20 @@ function committedActionId(prefix: string, event: SceneEvent): string {
   return physicalActions.sceneAction(event) ?? eventActionId(prefix, event)
 }
 
-function XrPhysicalActionCapture() {
+function XrPhysicalActionCapture({
+  lifecycle,
+}: Readonly<{
+  lifecycle: ReturnType<typeof createWorkshopLifecycle>
+}>) {
   const session = useXR((state) => state.session)
   useEffect(() => {
     if (session === undefined) return undefined
     const detach = physicalActions.attachSession(session)
+    lifecycle.sessionActivated(session)
     return () => {
       detach()
-      physicalActions.dispose()
     }
-  }, [session])
+  }, [lifecycle, session])
   return null
 }
 
@@ -102,6 +118,8 @@ function WorkshopScene({
   model,
   dispatch,
   onMenuEvent,
+  lifecycleState,
+  lifecycle,
 }: Readonly<{
   model: WorkshopModel
   dispatch: (action: WorkshopAction, actionId: string) => void
@@ -109,8 +127,35 @@ function WorkshopScene({
     event: WristMenuEvent,
     context: WristMenuEventContext,
   ) => void
+  lifecycleState: ReturnType<
+    ReturnType<typeof createWorkshopLifecycle>['snapshot']
+  >
+  lifecycle: ReturnType<typeof createWorkshopLifecycle>
 }>) {
-  const snapshot = useMemo(() => workshopHostSnapshot(model), [model])
+  const tracksSession = ![
+    'pre-session',
+    'requesting',
+    'rejected',
+    'ended',
+  ].includes(lifecycleState.runtimeStatus)
+  const snapshot = useMemo(
+    () =>
+      workshopHostSnapshot(model, {
+        ...scenario.snapshotOptions,
+        ...(tracksSession
+          ? {
+              availableWrists: lifecycleState.availableWrists,
+              cursorAvailable: lifecycleState.cursorAvailable,
+            }
+          : {}),
+      }),
+    [
+      lifecycleState.availableWrists,
+      lifecycleState.cursorAvailable,
+      model,
+      tracksSession,
+    ],
+  )
 
   const placeCursor = useCallback(
     (event: SceneEvent, physicalActionId: string) => {
@@ -123,8 +168,9 @@ function WorkshopScene({
         { type: 'place-cursor', position: [localX, 0, localZ], valid },
         physicalActionId,
       )
+      lifecycle.markCursorAvailable()
     },
-    [dispatch],
+    [dispatch, lifecycle],
   )
 
   return (
@@ -147,13 +193,21 @@ function WorkshopScene({
         {model.gridVisible ? (
           <gridHelper args={[WORKSHOP_BOUNDS_METERS * 2, 8, '#ed8df4', '#603866']} position={[0, 0.003, 0]} />
         ) : null}
-        {model.placementCursor.valid ? (
+        {model.placementCursor.status !== 'unavailable' &&
+        (!tracksSession || lifecycleState.cursorAvailable) ? (
           <mesh
             position={[model.placementCursor.position[0], 0.008, model.placementCursor.position[2]]}
             rotation={[-Math.PI / 2, 0, 0]}
           >
             <ringGeometry args={[0.055, 0.072, 32]} />
-            <meshBasicMaterial color="#ffb4ff" side={DoubleSide} />
+            <meshBasicMaterial
+              color={
+                model.placementCursor.status === 'occupied'
+                  ? '#ff6b6b'
+                  : '#ffb4ff'
+              }
+              side={DoubleSide}
+            />
           </mesh>
         ) : null}
         {model.objects.map((object) => (
@@ -164,15 +218,35 @@ function WorkshopScene({
             dispatch={dispatch}
           />
         ))}
-        <WristMenu snapshot={snapshot} onEvent={onMenuEvent} />
+        {lifecycleState.sessionRevision > 0 &&
+        !['ended', 'rejected', 'requesting'].includes(
+          lifecycleState.runtimeStatus,
+        ) ? (
+          <WristMenu
+            key={lifecycleState.sessionRevision}
+            snapshot={snapshot}
+            onEvent={onMenuEvent}
+          />
+        ) : null}
       </group>
     </>
   )
 }
 
 function App() {
-  const [model, setModel] = useState(createWorkshopModel)
-  const [message, setMessage] = useState('Ready for VR')
+  const [model, setModel] = useState<WorkshopModel>(() => scenario.model)
+  const [lastSemanticEvent, setLastSemanticEvent] = useState('none')
+  const [, renderLifecycle] = useState(0)
+  const lifecycle = useMemo(
+    () =>
+      createWorkshopLifecycle({
+        clearTransientInteraction: () =>
+          physicalActions.clearTransientInteraction(),
+        onChange: () => renderLifecycle((revision) => revision + 1),
+      }),
+    [],
+  )
+  const lifecycleState = lifecycle.snapshot()
   const desktopActionSequence = model.revision + 1
 
   const dispatch = useCallback((action: WorkshopAction, actionId: string) => {
@@ -180,6 +254,11 @@ function App() {
   }, [])
   const onMenuEvent = useCallback(
     (event: WristMenuEvent, context: WristMenuEventContext) => {
+      setLastSemanticEvent(
+        event.type === 'selection-intent'
+          ? `${event.type}:${event.intent.itemId}`
+          : event.type,
+      )
       setModel((current) =>
         reduceWorkshopMenuEvent(
           current,
@@ -192,13 +271,27 @@ function App() {
   )
 
   const enterVr = async () => {
+    lifecycle.beginSessionRequest()
     try {
       await xrStore.enterVR()
-      setMessage('VR active · Wrist Menu ready')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
+      lifecycle.sessionRejected(error)
     }
   }
+
+  useEffect(
+    () => () => {
+      lifecycle.dispose()
+      physicalActions.dispose()
+    },
+    [lifecycle],
+  )
+
+  const diagnosticMessage = startupError ?? lifecycleState.diagnostic.message
+  const showDiagnostics =
+    debugEnabled ||
+    startupError !== null ||
+    lifecycleState.diagnostic.level === 'error'
 
   return (
     <div className="app">
@@ -207,7 +300,7 @@ function App() {
           <p className="eyebrow">React Three Fiber + XR Example Variant</p>
           <h1>Primitive Workshop</h1>
           <p className="status">
-            {message} · {model.objects.length} object{model.objects.length === 1 ? '' : 's'} · {model.menuWrist} wrist
+            {diagnosticMessage} · {model.objects.length} object{model.objects.length === 1 ? '' : 's'} · {model.menuWrist} wrist
           </p>
         </div>
         <div className="actions">
@@ -228,8 +321,14 @@ function App() {
       <Canvas camera={{ position: [0, 1.55, 2.25], fov: 55 }}>
         <color attach="background" args={['#100916']} />
         <XR store={xrStore}>
-          <XrPhysicalActionCapture />
-          <WorkshopScene model={model} dispatch={dispatch} onMenuEvent={onMenuEvent} />
+          <XrPhysicalActionCapture lifecycle={lifecycle} />
+          <WorkshopScene
+            model={model}
+            dispatch={dispatch}
+            onMenuEvent={onMenuEvent}
+            lifecycleState={lifecycleState}
+            lifecycle={lifecycle}
+          />
         </XR>
       </Canvas>
       <aside className="help">
@@ -237,6 +336,17 @@ function App() {
         choose and spawn shapes, remove a selected object, toggle grid behavior,
         switch wrists, and drag the long menu to scroll.
       </aside>
+      {showDiagnostics ? (
+        <aside className="diagnostics" role="status">
+          react · package {WRIST_MENU_PACKAGE_VERSION} · {model.objects.length}/12
+          {' '}objects · model revision {model.revision} · last event{' '}
+          {lastSemanticEvent} ·{' '}
+          {lifecycleState.runtimeStatus} · {diagnosticMessage}. Next:{' '}
+          {startupError === null
+            ? lifecycleState.diagnostic.nextAction
+            : 'use fixture=default, full-workshop, empty-definition, or shield'}.
+        </aside>
+      ) : null}
     </div>
   )
 }

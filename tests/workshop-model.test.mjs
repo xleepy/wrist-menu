@@ -3,12 +3,19 @@ import test from 'node:test'
 
 import {
   PROCESSED_PHYSICAL_ACTION_CAPACITY,
+  WORKSHOP_OBJECT_CAPACITY,
   createPhysicalActionCoordinator,
+  createWorkshopScenario,
   createWorkshopModel,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
   workshopHostSnapshot,
 } from '../examples/primitive-workshop/shared/workshop-model.js'
+import {
+  workshopCapacityPositions,
+  workshopPlacementFixtures,
+  workshopScenarioNames,
+} from '../fixtures/primitive-workshop-lifecycle.mjs'
 
 function transition(model, action, actionId) {
   return reduceWorkshop(model, { actionId, action })
@@ -24,22 +31,152 @@ test('the Workshop Model exposes a complete scrollable Host Snapshot', () => {
   assert.deepEqual(
     snapshot.menuDefinition.map((entry) => entry.id).filter(Boolean),
     [
+      'primitive-choice',
       'spawn-primitive',
       'objects-section',
       'remove-selection',
-      'primitive-section',
-      'primitive-choice',
       'grid-section',
-      'grid-visible',
       'snap-to-grid',
+      'grid-visible',
+      'reset-workshop',
       'wrist-section',
       'menu-wrist',
-      'reset-workshop',
     ],
   )
-  assert.equal(snapshot.menuDefinition[2].disabled, true)
+  assert.equal(
+    snapshot.menuDefinition.find((entry) => entry.id === 'remove-selection')
+      .disabled,
+    true,
+  )
   assert.equal(Object.isFrozen(snapshot), true)
   assert.equal(Object.isFrozen(snapshot.menuDefinition), true)
+})
+
+test('the Workshop Model enforces the shared twelve-object capacity fixture', () => {
+  let model = createWorkshopModel()
+
+  for (const [index, position] of workshopCapacityPositions.entries()) {
+    model = transition(
+      model,
+      { type: 'place-cursor', position, valid: true },
+      `capacity-place-${index}`,
+    )
+    model = transition(model, { type: 'spawn' }, `capacity-spawn-${index}`)
+  }
+
+  assert.equal(WORKSHOP_OBJECT_CAPACITY, 12)
+  assert.equal(model.objects.length, 12)
+  const snapshot = workshopHostSnapshot(model)
+  const spawn = snapshot.menuDefinition.find(
+    (entry) => entry.id === 'spawn-primitive',
+  )
+  assert.equal(spawn.disabled, true)
+  assert.equal(spawn.disabledReason, 'Workshop is full')
+  assert.equal(
+    transition(model, { type: 'spawn' }, 'capacity-overflow'),
+    model,
+  )
+
+  const occupied = transition(
+    createWorkshopModel(),
+    {
+      type: 'place-cursor',
+      position: workshopPlacementFixtures.occupied,
+      valid: true,
+    },
+    'occupied-place',
+  )
+  const spawned = transition(occupied, { type: 'spawn' }, 'occupied-spawn')
+  const blocked = transition(
+    spawned,
+    {
+      type: 'place-cursor',
+      position: workshopPlacementFixtures.occupied,
+      valid: true,
+    },
+    'occupied-again',
+  )
+  const occupiedSpawn = workshopHostSnapshot(blocked).menuDefinition.find(
+    (entry) => entry.id === 'spawn-primitive',
+  )
+  assert.equal(blocked.placementCursor.status, 'occupied')
+  assert.equal(occupiedSpawn.disabledReason, 'Choose an empty spot')
+  assert.equal(
+    transition(blocked, { type: 'spawn' }, 'occupied-spawn-again'),
+    blocked,
+  )
+})
+
+test('disabled actions, reset, empty definitions, and unavailable wrists fail safely', () => {
+  const initial = createWorkshopModel()
+  const initialSnapshot = workshopHostSnapshot(initial, {
+    availableWrists: ['left'],
+  })
+  const item = (id) =>
+    initialSnapshot.menuDefinition.find((entry) => entry.id === id)
+
+  assert.equal(initial.placementCursor.status, 'unavailable')
+  assert.equal(item('spawn-primitive').disabledReason, 'Aim at the table first')
+  assert.equal(item('remove-selection').disabledReason, 'Select an object first')
+  assert.equal(item('reset-workshop').disabledReason, 'Workshop already empty')
+  assert.equal(
+    item('menu-wrist').options.find((option) => option.value === 'right')
+      .disabledReason,
+    'Hand not tracked',
+  )
+  assert.equal(
+    transition(initial, { type: 'reset' }, 'disabled-reset'),
+    initial,
+  )
+  assert.deepEqual(
+    workshopHostSnapshot(initial, { emptyDefinition: true }).menuDefinition,
+    [],
+  )
+
+  let changed = transition(
+    initial,
+    { type: 'set-menu-wrist', wrist: 'right' },
+    'reset-wrist',
+  )
+  changed = transition(
+    changed,
+    { type: 'choose-primitive', primitive: 'sphere' },
+    'reset-primitive',
+  )
+  const reset = transition(changed, { type: 'reset' }, 'reset-workshop')
+  assert.equal(reset.menuWrist, 'right')
+  assert.equal(reset.selectedPrimitive, 'cube')
+  assert.equal(reset.placementCursor.status, 'unavailable')
+})
+
+test('the shared named scenarios are deterministic portable Workshop fixtures', () => {
+  assert.deepEqual(
+    workshopScenarioNames.map((name) => createWorkshopScenario(name).name),
+    ['default', 'full-workshop', 'empty-definition', 'shield'],
+  )
+
+  const full = createWorkshopScenario('full-workshop')
+  assert.equal(full.model.objects.length, 12)
+  assert.equal(
+    workshopHostSnapshot(full.model, full.snapshotOptions).menuDefinition.find(
+      (entry) => entry.id === 'spawn-primitive',
+    ).disabledReason,
+    'Workshop is full',
+  )
+
+  const emptyDefinition = createWorkshopScenario('empty-definition')
+  assert.deepEqual(
+    workshopHostSnapshot(
+      emptyDefinition.model,
+      emptyDefinition.snapshotOptions,
+    ).menuDefinition,
+    [],
+  )
+
+  const shield = createWorkshopScenario('shield')
+  assert.equal(shield.model.objects.length, 1)
+  assert.equal(shield.shieldObjectId, 'workshop-object-1')
+  assert.throws(() => createWorkshopScenario('unknown'), /Unknown Workshop scenario/)
 })
 
 test('valid placement deterministically spawns snapped and unsnapped primitives', () => {
@@ -68,12 +205,17 @@ test('valid placement deterministically spawns snapped and unsnapped primitives'
     { type: 'set-snap-to-grid', enabled: false },
     'snap-1',
   )
+  model = transition(
+    model,
+    { type: 'place-cursor', position: [0.63, 0, -0.38], valid: true },
+    'place-2',
+  )
   model = transition(model, { type: 'spawn' }, 'spawn-2')
 
   assert.deepEqual(model.objects[1], {
     id: 'workshop-object-2',
     primitive: 'sphere',
-    position: [0.37, 0, -0.38],
+    position: [0.63, 0, -0.38],
     snapped: false,
   })
 })
@@ -92,7 +234,11 @@ test('invalid placement does not spawn or advance the Workshop Model', () => {
 })
 
 test('one physical action causes at most one Workshop Model transition', () => {
-  const initial = createWorkshopModel()
+  const initial = transition(
+    createWorkshopModel(),
+    { type: 'place-cursor', position: [0.5, 0, -0.5], valid: true },
+    'place-for-exactly-once',
+  )
   const spawned = transition(initial, { type: 'spawn' }, 'controller-select-7')
   const duplicate = transition(
     spawned,
@@ -169,7 +315,9 @@ test('semantic Wrist Menu intents cause one Host-controlled transition', () => {
   assert.equal(changed.revision, 1)
   assert.equal(duplicate, changed)
   assert.equal(
-    workshopHostSnapshot(changed).menuDefinition[4].selectedValue,
+    workshopHostSnapshot(changed).menuDefinition.find(
+      (entry) => entry.id === 'primitive-choice',
+    ).selectedValue,
     'cylinder',
   )
 })
@@ -277,14 +425,21 @@ test('distinct menu commit occurrences stay distinct inside the correlation life
 })
 
 test('selection, removal, grid visibility, and both menu wrists stay Host-controlled', () => {
-  let model = transition(createWorkshopModel(), { type: 'spawn' }, 'spawn-1')
+  let model = transition(
+    createWorkshopModel(),
+    { type: 'place-cursor', position: [0.5, 0, -0.5], valid: true },
+    'place-1',
+  )
+  model = transition(model, { type: 'spawn' }, 'spawn-1')
   model = transition(
     model,
     { type: 'select-object', objectId: 'workshop-object-1' },
     'select-1',
   )
   assert.equal(
-    workshopHostSnapshot(model).menuDefinition[2].disabled,
+    workshopHostSnapshot(model).menuDefinition.find(
+      (entry) => entry.id === 'remove-selection',
+    ).disabled,
     false,
   )
 
@@ -306,6 +461,13 @@ test('selection, removal, grid visibility, and both menu wrists stay Host-contro
   assert.equal(model.objects.length, 0)
   assert.equal(model.selectedObjectId, null)
   assert.equal(snapshot.wrist, 'right')
-  assert.equal(snapshot.menuDefinition[6].value, false)
-  assert.equal(snapshot.menuDefinition[2].disabled, true)
+  assert.equal(
+    snapshot.menuDefinition.find((entry) => entry.id === 'grid-visible').value,
+    false,
+  )
+  assert.equal(
+    snapshot.menuDefinition.find((entry) => entry.id === 'remove-selection')
+      .disabled,
+    true,
+  )
 })

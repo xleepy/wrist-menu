@@ -68,6 +68,9 @@ import {
   type ScrollSourceSample,
   type ScrollState,
 } from './scroll-state.js'
+
+/** Package version exposed for Host Application diagnostics. */
+export const WRIST_MENU_PACKAGE_VERSION = '0.0.0'
 import {
   resolveWristAnchor,
   selectWristSource,

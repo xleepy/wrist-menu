@@ -16,8 +16,10 @@
   "include": [
     "shared/**/*.js",
     "vanilla/physical-actions.js",
+    "vanilla/lifecycle.js",
     "vanilla/**/*.ts",
     "react/physical-actions.js",
+    "react/lifecycle.js",
     "react/**/*.tsx"
   ]
 }

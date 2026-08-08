@@ -7,7 +7,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "build:vanilla": "vite build --config vanilla/vite.config.js",
     "build:react": "vite build --config react/vite.config.js",
-    "build": "npm run typecheck && npm run build:vanilla && npm run build:react",
+    "build:index": "node build-static-index.mjs",
+    "build": "npm run typecheck && npm run build:vanilla && npm run build:react && npm run build:index",
     "dev:vanilla": "vite --config vanilla/vite.config.js",
     "dev:react": "vite --config react/vite.config.js"
   },
