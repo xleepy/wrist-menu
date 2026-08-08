@@ -12,6 +12,7 @@ import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { digestNamedCandidate } from './candidate-tarball.mjs'
+import { assertCompleteJourneyCoverage } from '../fixtures/consumers/journey-evidence.mjs'
 import {
   buildAutomatedEvidenceRecord,
   buildCandidateUnavailableEvidenceRecord,
@@ -51,33 +52,6 @@ const instrumentationPaths = [
   resolve(root, 'fixtures', 'consumers', 'react-19', 'smoke.mjs'),
   baselinePath,
 ]
-const journeyCaseIds = [
-  'fresh-reveal-hide-dwell',
-  'both-wrists',
-  'scrolling',
-  'invalid-disabled',
-  'tracking-loss',
-  'input-switching',
-  'visibility-session-reentry',
-  'empty-unavailable',
-]
-const sceneShieldCaseIds = [
-  'commit',
-  'cancel',
-  'hold',
-  'leave-before-release',
-  'rapid-actions',
-]
-const sceneActionTypes = [
-  'pointerdown',
-  'pointerup',
-  'click',
-  'dblclick',
-  'contextmenu',
-]
-
-assert.ok(npmCli, 'run release evidence through npm')
-
 function git(...args) {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
   if (result.status !== 0) throw new Error(result.stderr || result.stdout)
@@ -227,24 +201,14 @@ function resolveCompatibilityEvidence(
   }
 }
 
-function sameOrderedValues(actual, expected) {
-  return (
-    Array.isArray(actual) &&
-    actual.length === expected.length &&
-    actual.every((value, index) => value === expected[index])
-  )
-}
-
-function journeyCombinationPassed(report, integration, sourceKind) {
+export function journeyCombinationPassed(report, integration, sourceKind) {
   const journey = report?.journeys?.find(
-    ({ sceneEventShield }) =>
+    ({ sceneEventShield } = {}) =>
       sceneEventShield?.rendererIntegration === integration &&
       sceneEventShield.selectionSourceKind === sourceKind,
   )
   const coverage = journey?.coverage
   const shield = journey?.sceneEventShield
-  const semanticCases = coverage?.semanticCases
-  const shieldCases = shield?.cases
   const expectedDriver = integration === 'three'
     ? 'packed-three-renderer-xr'
     : 'packed-react-renderer-xr'
@@ -252,53 +216,31 @@ function journeyCombinationPassed(report, integration, sourceKind) {
     ? 'three-host-shield'
     : 'react-event-manager'
 
-  return (
+  if (!(
     report?.status === 'passed' &&
     journey?.status === 'passed' &&
     coverage?.status === 'passed' &&
     coverage?.driver === expectedDriver &&
     coverage?.sourceKind === sourceKind &&
-    sameOrderedValues(
-      semanticCases?.map(({ id }) => id),
-      journeyCaseIds,
-    ) &&
-    semanticCases.every(
-      ({ status, observations }) =>
-        status === 'passed' &&
-        Number.isInteger(observations?.iwerFrames) &&
-        observations.iwerFrames > 0 &&
-        Number.isInteger(observations?.rendererFrames) &&
-        observations.rendererFrames > 0,
-    ) &&
     shield?.status === 'passed' &&
-    sameOrderedValues(shield.actionTypes, sceneActionTypes) &&
-    sameOrderedValues(
-      shieldCases?.map(({ id }) => id),
-      sceneShieldCaseIds,
-    ) &&
-    shieldCases.every(
-      ({ status, observations }) =>
-        status === 'passed' &&
-        observations?.dispatchPath === expectedDispatchPath &&
-        sameOrderedValues(
-          observations?.dispatches?.map(({ type }) => type),
-          sceneActionTypes,
-        ) &&
-        observations.dispatches.every(
-          ({ behindTargetDeliveries }) => behindTargetDeliveries === 0,
-        ) &&
-        sameOrderedValues(
-          observations?.recoveryDispatches?.map(({ type }) => type),
-          sceneActionTypes,
-        ) &&
-        observations.recoveryDispatches.every(
-          ({ behindTargetDeliveries }) => behindTargetDeliveries > 0,
-        ),
-    )
+    shield.rendererIntegration === integration &&
+    shield.selectionSourceKind === sourceKind
+  )) return false
+
+  try {
+    assertCompleteJourneyCoverage(coverage)
+    assert.deepEqual(coverage.sceneEventShield, shield)
+  } catch {
+    return false
+  }
+
+  return shield.cases.every(
+    ({ observations }) => observations.dispatchPath === expectedDispatchPath,
   )
 }
 
 async function main() {
+  assert.ok(npmCli, 'run release evidence through npm')
   const arguments_ = process.argv.slice(2)
   if (arguments_[0] === '--verify') {
     const recordId = arguments_[1]
@@ -751,4 +693,6 @@ async function main() {
   }
 }
 
-await main()
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main()
+}

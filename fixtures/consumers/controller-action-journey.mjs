@@ -89,8 +89,8 @@ async function createIwerControllerFixture(iwer, menuWrist = 'left') {
   controller.position.set(0, 0, 1)
   controller.quaternion.set(0, 0, 0, 1)
 
-  const session = new iwer.XRSession(device, 'immersive-vr', ['local-floor'])
-  const referenceSpace = await session.requestReferenceSpace('local-floor')
+  let session = new iwer.XRSession(device, 'immersive-vr', ['local-floor'])
+  let referenceSpace = await session.requestReferenceSpace('local-floor')
   session[iwer.P_SESSION].updateActiveInputSources()
   let sequence = 0
 
@@ -111,8 +111,12 @@ async function createIwerControllerFixture(iwer, menuWrist = 'left') {
     inputSource: controller.inputSource,
     menuInput: menuController,
     menuWrist,
-    referenceSpace,
-    session,
+    get referenceSpace() {
+      return referenceSpace
+    },
+    get session() {
+      return session
+    },
     nextFrame,
     press(time) {
       controller.updateButtonValue('trigger', 1)
@@ -121,6 +125,15 @@ async function createIwerControllerFixture(iwer, menuWrist = 'left') {
     release(time) {
       controller.updateButtonValue('trigger', 0)
       return nextFrame(time)
+    },
+    async endSession() {
+      await session.end()
+    },
+    async reenterSession() {
+      session = new iwer.XRSession(device, 'immersive-vr', ['local-floor'])
+      referenceSpace = await session.requestReferenceSpace('local-floor')
+      session[iwer.P_SESSION].updateActiveInputSources()
+      return session
     },
     restoreGlobals,
   }
@@ -139,11 +152,11 @@ async function createIwerHandFixture(iwer, menuWrist = 'left') {
   selectionHand.position.set(0.5, 1.2, 0)
   selectionHand.quaternion.set(0, 0, 0, 1)
 
-  const session = new iwer.XRSession(device, 'immersive-vr', [
+  let session = new iwer.XRSession(device, 'immersive-vr', [
     'local-floor',
     'hand-tracking',
   ])
-  const referenceSpace = await session.requestReferenceSpace('local-floor')
+  let referenceSpace = await session.requestReferenceSpace('local-floor')
   session[iwer.P_SESSION].updateActiveInputSources()
   let sequence = 0
 
@@ -164,8 +177,12 @@ async function createIwerHandFixture(iwer, menuWrist = 'left') {
     menuInput: menuHand,
     menuWrist,
     selectionInput: selectionHand,
-    referenceSpace,
-    session,
+    get referenceSpace() {
+      return referenceSpace
+    },
+    get session() {
+      return session
+    },
     nextFrame,
     moveFingertipTo(frame, target) {
       const fingertipSpace = selectionHand.inputSource.hand.get('index-finger-tip')
@@ -176,6 +193,18 @@ async function createIwerHandFixture(iwer, menuWrist = 'left') {
         selectionHand.position.y + target.y - pose.transform.position.y,
         selectionHand.position.z + target.z - pose.transform.position.z,
       )
+    },
+    async endSession() {
+      await session.end()
+    },
+    async reenterSession() {
+      session = new iwer.XRSession(device, 'immersive-vr', [
+        'local-floor',
+        'hand-tracking',
+      ])
+      referenceSpace = await session.requestReferenceSpace('local-floor')
+      session[iwer.P_SESSION].updateActiveInputSources()
+      return session
     },
     restoreGlobals,
   }
@@ -238,6 +267,70 @@ function setControllerRayAtPanelLocal(fixture, group, three, x, y) {
   )
 }
 
+function presentationModelSignature(group) {
+  const rows = []
+  group.traverse((object) => {
+    if (
+      object.visible &&
+      object.name.startsWith('wrist-menu-') &&
+      object.name.includes('-visual:')
+    ) {
+      rows.push([
+        object.name,
+        object.userData['wristMenuLabel'] ?? null,
+        object.userData['wristMenuValue'] ?? null,
+      ].join('|'))
+    }
+  })
+  return rows
+}
+
+function observedPresentationScrollOffset(group) {
+  let firstVisual
+  group.traverse((object) => {
+    if (
+      firstVisual === undefined &&
+      object.visible &&
+      /^wrist-menu-action-visual:row-\d+$/.test(object.name)
+    ) {
+      firstVisual = object
+    }
+  })
+  if (firstVisual === undefined) return null
+  const startRow = Number(firstVisual.name.slice(firstVisual.name.lastIndexOf('-') + 1))
+  const firstSlotY = (12 - 1) * (0.0225 / 2)
+  return startRow + (firstVisual.position.y - firstSlotY) / 0.0225
+}
+
+function terminalWristMenuEvents(events) {
+  return events
+    .filter(({ type }) =>
+      type === 'selection-intent' || type === 'selection-cancellation')
+    .map((event) => ({
+      type: event.type,
+      ...(event.type === 'selection-cancellation'
+        ? { reason: event.reason }
+        : { itemId: event.intent.itemId }),
+      time: event.time,
+    }))
+}
+
+function expectedShieldTerminalTypes(id) {
+  if (id === 'rapid-actions') return ['selection-intent', 'selection-intent']
+  if (id === 'cancel' || id === 'leave-before-release') {
+    return ['selection-cancellation']
+  }
+  return ['selection-intent']
+}
+
+function terminalSequenceMatches(id, events) {
+  const expected = expectedShieldTerminalTypes(id)
+  return (
+    events.length === expected.length &&
+    events.every(({ type }, index) => type === expected[index])
+  )
+}
+
 function threeBehindTarget(three) {
   const target = new three.Object3D()
   const deliveries = new Map(sceneActionTypes.map((type) => [type, 0]))
@@ -288,6 +381,7 @@ async function runThreeShieldMatrix({
     })
     const behind = threeBehindTarget(three)
     let rendererFrames = 0
+    let disposed = false
     let time = 0
     const update = (frame) => {
       rendererFrames += 1
@@ -331,20 +425,26 @@ async function runThreeShieldMatrix({
         threeWristMenuBlocksSceneInput(menu, fixture.inputSource),
       )
 
+      let neutralTransitions = 0
       if (id === 'cancel') {
         fixture.menuInput.connected = false
         update(fixture.nextFrame(time += 16))
+        neutralTransitions += 1
       } else if (sourceKind === 'controller') {
         if (id === 'commit' || id === 'hold') {
           update(fixture.release(time += 16))
+          neutralTransitions += 1
         } else if (id === 'rapid-actions') {
           update(fixture.release(time += 16))
+          neutralTransitions += 1
           update(fixture.nextFrame(time += 16))
           update(fixture.press(time += 16))
           update(fixture.release(time += 16))
+          neutralTransitions += 1
         } else {
           fixture.controller.position.x += 2
           update(fixture.release(time += 16))
+          neutralTransitions += 1
         }
         fixture.controller.position.x += 2
         update(fixture.nextFrame(time += 16))
@@ -360,6 +460,7 @@ async function runThreeShieldMatrix({
         if (id === 'rapid-actions') {
           fixture.selectionInput.position.x += 2
           update(fixture.nextFrame(time += 16))
+          neutralTransitions += 1
           const hoverFrame = fixture.nextFrame(time += 16)
           fixture.moveFingertipTo(
             hoverFrame,
@@ -379,30 +480,50 @@ async function runThreeShieldMatrix({
         }
         fixture.selectionInput.position.x += 2
         update(fixture.nextFrame(time += 16))
+        neutralTransitions += 1
       }
 
-      const recoveryDispatches = behind.dispatch(
+      const mountedRecoveryDispatches = behind.dispatch(
         threeWristMenuBlocksSceneInput(menu, fixture.inputSource),
       )
+      const terminalEvents = terminalWristMenuEvents(events)
+      const mountedRecoveryMenuPresent =
+        !menu.runtime.disposed && menu.presentation.group.children.length > 0
+      const sourceNeutralized =
+        !threeWristMenuBlocksSceneInput(menu, fixture.inputSource)
+      disposeThreeWristMenu(menu)
+      disposed = true
+      const menuPresentAfterUnmount = menu.presentation.group.children.length > 0
+      const unmountRecoveryDispatches = behind.dispatch(false)
       const passed =
         dispatches.every(({ behindTargetDeliveries }) =>
           behindTargetDeliveries === 0) &&
-        recoveryDispatches.every(({ behindTargetDeliveries }) =>
-          behindTargetDeliveries === 1)
+        mountedRecoveryDispatches.every(({ behindTargetDeliveries }) =>
+          behindTargetDeliveries === 1) &&
+        unmountRecoveryDispatches.every(({ behindTargetDeliveries }) =>
+          behindTargetDeliveries === 1) &&
+        terminalSequenceMatches(id, terminalEvents)
       cases.push({
         id,
         status: passed ? 'passed' : 'failed',
         observations: {
           dispatchPath: 'three-host-shield',
           dispatches,
-          recoveryDispatches,
+          recoveryDispatches: mountedRecoveryDispatches,
+          mountedRecoveryDispatches,
+          unmountRecoveryDispatches,
+          terminalEvents,
+          neutralTransitions,
+          mountedRecoveryMenuPresent,
+          sourceNeutralized,
+          menuPresentAfterUnmount,
           iwerFrames: fixture.frameCount,
           rendererFrames,
           wristMenuEvents: events,
         },
       })
     } finally {
-      disposeThreeWristMenu(menu)
+      if (!disposed) disposeThreeWristMenu(menu)
       fixture.restoreGlobals()
     }
   }
@@ -420,6 +541,7 @@ async function runThreeSemanticMatrix({
   createThreeWristMenuState,
   disposeThreeWristMenu,
   syncThreeWristMenu,
+  threeWristMenuBlocksSceneInput,
   updateThreeWristMenu,
   iwer,
   three,
@@ -445,8 +567,11 @@ async function runThreeSemanticMatrix({
           label: `Row ${index}`,
         })),
       }, wrist)
+      const automaticDwellCase =
+        id === 'fresh-reveal-hide-dwell' ||
+        id === 'visibility-session-reentry'
       const initialSnapshot =
-        id === 'fresh-reveal-hide-dwell'
+        automaticDwellCase
           ? {
               ...snapshotForWrist(crossInputSnapshot, wrist),
               activationMode: 'automatic',
@@ -474,7 +599,7 @@ async function runThreeSemanticMatrix({
       }
       try {
         let frame = fixture.nextFrame(time)
-        if (id === 'fresh-reveal-hide-dwell') {
+        if (automaticDwellCase) {
           frame = withViewerPosition(
             frame,
             [0, -1, 0],
@@ -485,7 +610,7 @@ async function runThreeSemanticMatrix({
         update(frame, 0)
         let facingViewer = [0, -1, 0]
         let awayViewer = [0, 0, 1]
-        if (id === 'fresh-reveal-hide-dwell') {
+        if (automaticDwellCase) {
           const position = menu.presentation.group.getWorldPosition(
             new three.Vector3(),
           )
@@ -496,7 +621,7 @@ async function runThreeSemanticMatrix({
           awayViewer = position.clone().sub(palmNormal).toArray()
         }
         frame = fixture.nextFrame(16)
-        if (id === 'fresh-reveal-hide-dwell') {
+        if (automaticDwellCase) {
           frame = withViewerPosition(frame, facingViewer, fixture, sourceKind)
         }
         update(frame, 16)
@@ -558,47 +683,71 @@ async function runThreeSemanticMatrix({
         }
 
         if (id === 'scrolling') {
-          update(fixture.nextFrame(32), 32)
-          update(fixture.nextFrame(48), 48)
-          if (sourceKind === 'controller') {
-            setControllerRayAtPanelLocal(
-              fixture,
-              menu.presentation.group,
-              three,
-              0.09,
-              0,
-            )
-            update(fixture.nextFrame(64), 64)
-            setControllerRayAtPanelLocal(
-              fixture,
-              menu.presentation.group,
-              three,
-              0.09,
-              -0.02,
-            )
-            update(fixture.nextFrame(80), 80)
-          } else {
-            const baseline = fixture.nextFrame(64)
-            fixture.moveFingertipTo(
-              baseline,
-              menu.presentation.group.localToWorld(
-                new three.Vector3(0, 0, 0.06),
-              ),
-            )
-            update(fixture.nextFrame(80), 80)
-            const moved = fixture.nextFrame(96)
-            fixture.moveFingertipTo(
-              moved,
-              menu.presentation.group.localToWorld(
-                new three.Vector3(0, -0.012, 0.06),
-              ),
-            )
-            update(fixture.nextFrame(112), 112)
+          let scrollTime = 32
+          const aimAtPanelY = (positionY) => {
+            if (sourceKind === 'controller') {
+              setControllerRayAtPanelLocal(
+                fixture,
+                menu.presentation.group,
+                three,
+                0.09,
+                positionY,
+              )
+              update(fixture.nextFrame(scrollTime), scrollTime)
+              scrollTime += 16
+            } else {
+              const poseFrame = fixture.nextFrame(scrollTime)
+              scrollTime += 16
+              fixture.moveFingertipTo(
+                poseFrame,
+                menu.presentation.group.localToWorld(
+                  new three.Vector3(0, positionY, 0.06),
+                ),
+              )
+              update(fixture.nextFrame(scrollTime), scrollTime)
+              scrollTime += 16
+            }
+            return menu.runtime.scrollState.offset
           }
-          detail.scrollOffset = menu.runtime.scrollState.offset
-          detail.scrollCandidate = menu.runtime.scrollState.candidateSourceId
-          detail.scrollOwner = menu.runtime.scrollState.ownerSourceId
-          casePassed = detail.scrollOffset > 0
+          const downwardSamples = [0.12, 0.08, 0.04, 0, -0.04, -0.08, -0.12]
+            .map(aimAtPanelY)
+          const offsetSamples = downwardSamples.slice(0, 4)
+          const bottomClamp = menu.runtime.scrollState.offset
+          const ownershipAcquired =
+            menu.runtime.scrollState.ownerSourceId !== null
+
+          if (sourceKind === 'controller') fixture.controller.position.x += 2
+          else fixture.selectionInput.position.x += 2
+          update(fixture.nextFrame(scrollTime), scrollTime)
+          scrollTime += 16
+          const ownershipReleased =
+            menu.runtime.scrollState.ownerSourceId === null
+
+          aimAtPanelY(-0.12)
+          aimAtPanelY(-0.1)
+          const rearmed = menu.runtime.scrollState.ownerSourceId !== null
+          const returnSamples = [-0.06, -0.02, 0.02, 0.06, 0.1, 0.12]
+            .map(aimAtPanelY)
+          const topClamp = menu.runtime.scrollState.offset
+          const maxOffset = 18 - 12
+          Object.assign(detail, {
+            offsetSamples,
+            downwardSamples,
+            returnSamples,
+            topClamp,
+            bottomClamp,
+            maxOffset,
+            ownershipAcquired,
+            ownershipReleased,
+            rearmed,
+          })
+          casePassed =
+            offsetSamples.slice(1).every(
+              (offset, index) => offset > offsetSamples[index],
+            ) &&
+            Math.abs(bottomClamp - maxOffset) < 1e-9 &&
+            Math.abs(topClamp) < 1e-9 &&
+            ownershipAcquired && ownershipReleased && rearmed
         }
 
         if (id === 'invalid-disabled') {
@@ -641,26 +790,279 @@ async function runThreeSemanticMatrix({
         }
 
         if (id === 'input-switching') {
+          const durableModelBefore = presentationModelSignature(
+            menu.presentation.group,
+          )
+          if (sourceKind === 'controller') {
+            setControllerRayAtPanelLocal(
+              fixture,
+              menu.presentation.group,
+              three,
+              0,
+              0.0225,
+            )
+            update(fixture.nextFrame(32), 32)
+            update(fixture.press(48), 48)
+          } else {
+            const hoverFrame = fixture.nextFrame(32)
+            fixture.moveFingertipTo(
+              hoverFrame,
+              menu.presentation.group.localToWorld(
+                new three.Vector3(0, 0.0225, 0.03),
+              ),
+            )
+            update(fixture.nextFrame(48), 48)
+          }
+          const activeTransientBefore = {
+            kind: sourceKind === 'controller'
+              ? 'selection-ownership'
+              : 'scene-input-claim',
+            claimed: threeWristMenuBlocksSceneInput(
+              menu,
+              fixture.inputSource,
+            ),
+          }
           fixture.device.primaryInputMode =
             sourceKind === 'controller' ? 'hand' : 'controller'
-          update(fixture.nextFrame(32), 32)
-          detail.targetable = menu.presentation.group.visible
-          detail.primaryInputMode = fixture.device.primaryInputMode
+          update(fixture.nextFrame(64), 64)
+          if (sourceKind === 'controller') update(fixture.release(80), 80)
+          else {
+            fixture.selectionInput.position.x += 2
+            update(fixture.nextFrame(80), 80)
+          }
+          const terminalEvents = terminalWristMenuEvents(events)
+          const durableModelAfter = presentationModelSignature(
+            menu.presentation.group,
+          )
+          const sourceSwitched =
+            fixture.device.primaryInputMode ===
+              (sourceKind === 'controller' ? 'hand' : 'controller') &&
+            !fixture.session.inputSources.includes(fixture.inputSource)
+          const transientCleared =
+            !threeWristMenuBlocksSceneInput(menu, fixture.inputSource) &&
+            menu.runtime.selectionState.claims.size === 0 &&
+            menu.runtime.selectionState.ownership === undefined &&
+            menu.runtime.scrollState.ownerSourceId === null
+          Object.assign(detail, {
+            activeTransientBefore,
+            sourceSwitched,
+            transientCleared,
+            terminalEvents,
+            durableModelBefore,
+            durableModelAfter,
+          })
           casePassed =
-            detail.primaryInputMode ===
-            (sourceKind === 'controller' ? 'hand' : 'controller')
+            activeTransientBefore.claimed &&
+            sourceSwitched &&
+            transientCleared &&
+            terminalEvents.length === 1 &&
+            terminalEvents[0].type === 'selection-cancellation' &&
+            durableModelBefore.length > 0 &&
+            durableModelAfter.join('\n') === durableModelBefore.join('\n')
         }
 
         if (id === 'visibility-session-reentry') {
+          update(
+            withViewerPosition(
+              fixture.nextFrame(315),
+              facingViewer,
+              fixture,
+              sourceKind,
+            ),
+            315,
+          )
+          update(
+            withViewerPosition(
+              fixture.nextFrame(316),
+              facingViewer,
+              fixture,
+              sourceKind,
+            ),
+            316,
+          )
+          const durableModelBefore = presentationModelSignature(
+            menu.presentation.group,
+          )
           fixture.device.updateVisibilityState('hidden')
-          update(fixture.nextFrame(32), 32)
-          const hidden = !menu.presentation.group.visible
+          update(
+            withViewerPosition(
+              fixture.nextFrame(332),
+              facingViewer,
+              fixture,
+              sourceKind,
+            ),
+            332,
+          )
+          const visibilityHidden = !menu.presentation.group.visible
           fixture.device.updateVisibilityState('visible')
-          update(fixture.nextFrame(48), 48)
-          update(fixture.nextFrame(64), 64)
-          const reentered = menu.presentation.group.visible
-          Object.assign(detail, { hidden, reentered })
-          casePassed = hidden && reentered
+          update(
+            withViewerPosition(
+              fixture.nextFrame(348),
+              facingViewer,
+              fixture,
+              sourceKind,
+            ),
+            348,
+          )
+          update(
+            withViewerPosition(
+              fixture.nextFrame(548),
+              facingViewer,
+              fixture,
+              sourceKind,
+            ),
+            548,
+          )
+          const visibilityRestored = menu.presentation.group.visible
+
+          const previousSession = fixture.session
+          await fixture.endSession()
+          const sessionEnded =
+            fixture.session === previousSession &&
+            previousSession[iwer.P_SESSION].ended === true
+          const sessionCleanup =
+            !menu.presentation.group.visible &&
+            menu.runtime.selectionState.claims.size === 0 &&
+            menu.runtime.selectionState.ownership === undefined &&
+            menu.runtime.scrollState.ownerSourceId === null
+          const nextSession = await fixture.reenterSession()
+          const newSessionIdentity = nextSession !== previousSession
+
+          update(
+            withViewerPosition(
+              fixture.nextFrame(564),
+              facingViewer,
+              fixture,
+              sourceKind,
+            ),
+            564,
+          )
+          const before = menu.presentation.group.visible
+          update(
+            withViewerPosition(
+              fixture.nextFrame(763),
+              facingViewer,
+              fixture,
+              sourceKind,
+            ),
+            763,
+          )
+          const below = menu.presentation.group.visible
+          update(
+            withViewerPosition(
+              fixture.nextFrame(764),
+              facingViewer,
+              fixture,
+              sourceKind,
+            ),
+            764,
+          )
+          const at = menu.presentation.group.visible
+          const durableModelAfter = presentationModelSignature(
+            menu.presentation.group,
+          )
+          const intentsBefore = events.filter(
+            ({ type }) => type === 'selection-intent',
+          ).length
+          if (sourceKind === 'controller') {
+            setControllerRayAtPanelLocal(
+              fixture,
+              menu.presentation.group,
+              three,
+              0,
+              0.0225,
+            )
+            update(
+              withViewerPosition(
+                fixture.nextFrame(780),
+                facingViewer,
+                fixture,
+                sourceKind,
+              ),
+              780,
+            )
+            update(
+              withViewerPosition(
+                fixture.press(796),
+                facingViewer,
+                fixture,
+                sourceKind,
+              ),
+              796,
+            )
+            update(
+              withViewerPosition(
+                fixture.release(812),
+                facingViewer,
+                fixture,
+                sourceKind,
+              ),
+              812,
+            )
+          } else {
+            const hoverFrame = withViewerPosition(
+              fixture.nextFrame(780),
+              facingViewer,
+              fixture,
+              sourceKind,
+            )
+            fixture.moveFingertipTo(
+              hoverFrame,
+              menu.presentation.group.localToWorld(
+                new three.Vector3(0, 0.0225, 0.03),
+              ),
+            )
+            update(
+              withViewerPosition(
+                fixture.nextFrame(796),
+                facingViewer,
+                fixture,
+                sourceKind,
+              ),
+              796,
+            )
+            const pressFrame = withViewerPosition(
+              fixture.nextFrame(812),
+              facingViewer,
+              fixture,
+              sourceKind,
+            )
+            fixture.moveFingertipTo(
+              pressFrame,
+              menu.presentation.group.localToWorld(
+                new three.Vector3(0, 0.0225, 0.008),
+              ),
+            )
+            update(
+              withViewerPosition(
+                fixture.nextFrame(828),
+                facingViewer,
+                fixture,
+                sourceKind,
+              ),
+              828,
+            )
+          }
+          const postReentrySelectionIntents = events.filter(
+            ({ type }) => type === 'selection-intent',
+          ).length - intentsBefore
+          Object.assign(detail, {
+            visibilityHidden,
+            visibilityRestored,
+            sessionEnded,
+            newSessionIdentity,
+            sessionCleanup,
+            durableModelBefore,
+            durableModelAfter,
+            freshDwell: { before, below, at },
+            postReentrySelectionIntents,
+          })
+          casePassed =
+            visibilityHidden && visibilityRestored && sessionEnded &&
+            newSessionIdentity && sessionCleanup && !before && !below && at &&
+            postReentrySelectionIntents === 1 &&
+            durableModelBefore.length > 0 &&
+            durableModelAfter.join('\n') === durableModelBefore.join('\n')
         }
 
         if (id === 'empty-unavailable') {
@@ -777,6 +1179,7 @@ export async function runPackedThreeControllerJourney({
       createThreeWristMenuState,
       disposeThreeWristMenu,
       syncThreeWristMenu,
+      threeWristMenuBlocksSceneInput,
       updateThreeWristMenu,
       iwer,
       three,
@@ -879,6 +1282,7 @@ export async function runPackedThreeHandJourney({
       createThreeWristMenuState,
       disposeThreeWristMenu,
       syncThreeWristMenu,
+      threeWristMenuBlocksSceneInput,
       updateThreeWristMenu,
       iwer,
       three,
@@ -1004,6 +1408,11 @@ async function createReactRendererHarness({
         listener({ type: 'sessionstart' })
       }
     },
+    dispatchSessionEnd() {
+      for (const listener of xrManagerListeners.get('sessionend') ?? []) {
+        listener({ type: 'sessionend' })
+      }
+    },
   }
   const renderer = {
     xr: xrManager,
@@ -1104,17 +1513,23 @@ async function createReactRendererHarness({
   const menuGroup = () => state.scene.children.find(
     ({ name }) => name === 'wrist-menu-attachment-root',
   )
-  const placeBehindMenu = () => {
+  const placeBehindAtMenuLocalX = (localX) => {
     const group = menuGroup()
     assert.ok(group)
-    behind.position.copy(group.localToWorld(new three.Vector3(0, 0, -0.1)))
+    behind.position.copy(
+      group.localToWorld(new three.Vector3(localX, 0, -0.1)),
+    )
     behind.quaternion.copy(group.getWorldQuaternion(new three.Quaternion()))
     behind.updateMatrixWorld(true)
-    state.camera.position.copy(group.localToWorld(new three.Vector3(0, 0, 1)))
+    state.camera.position.copy(
+      group.localToWorld(new three.Vector3(localX, 0, 1)),
+    )
     state.camera.lookAt(behind.position)
     state.camera.updateProjectionMatrix()
     state.camera.updateMatrixWorld(true)
   }
+  const placeBehindMenu = () => placeBehindAtMenuLocalX(0)
+  const placeBehindOutsideMenu = () => placeBehindAtMenuLocalX(0.3)
   const dispatchSceneActions = () => sceneActionTypes.map((type) => {
     const before = deliveries.get(type)
     const listenerAttached = canvas.dispatch(type)
@@ -1130,6 +1545,31 @@ async function createReactRendererHarness({
       interactionRegistered: state.internal.interaction.includes(behind),
     }
   })
+  const endAndReenterSession = async () => {
+    const previousSession = fixture.session
+    await fiber.act(async () => {
+      await fixture.endSession()
+      if (sourceKind === 'controller') xrManager.dispatchSessionEnd()
+    })
+    const endedStoreSession = sourceKind !== 'controller' ||
+      xrStore.getState().session == null
+    const nextSession = await fixture.reenterSession()
+    if (sourceKind === 'controller') {
+      await fiber.act(async () => xrManager.dispatchSessionStart())
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if (xrStore.getState().session === nextSession) break
+        await fiber.act(async () => Promise.resolve())
+      }
+    }
+    return {
+      previousSession,
+      nextSession,
+      iwerSessionEnded: previousSession[iwer.P_SESSION].ended === true,
+      endedStoreSession,
+      reenteredStoreSession:
+        sourceKind !== 'controller' || xrStore.getState().session === nextSession,
+    }
+  }
   const dispose = async () => {
     await fiber.act(async () => root.unmount())
     behindGeometry.dispose()
@@ -1150,7 +1590,9 @@ async function createReactRendererHarness({
     advance,
     render,
     placeBehindMenu,
+    placeBehindOutsideMenu,
     dispatchSceneActions,
+    endAndReenterSession,
     dispose,
   }
 }
@@ -1163,7 +1605,10 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
     const runs = []
     for (const wrist of wrists) {
       const baseSnapshot = snapshotForWrist(crossInputSnapshot, wrist)
-      const initialSnapshot = id === 'fresh-reveal-hide-dwell'
+      const automaticDwellCase =
+        id === 'fresh-reveal-hide-dwell' ||
+        id === 'visibility-session-reentry'
+      const initialSnapshot = automaticDwellCase
         ? { ...baseSnapshot, activationMode: 'automatic', comfort: { transitionMs: 0 } }
         : id === 'scrolling'
           ? {
@@ -1185,7 +1630,7 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
       const detail = {}
       try {
         let frame = harness.fixture.nextFrame(0)
-        if (id === 'fresh-reveal-hide-dwell') {
+        if (automaticDwellCase) {
           frame = withViewerPosition(frame, [0, -1, 0], harness.fixture, sourceKind)
         }
         await step(0, frame)
@@ -1193,7 +1638,7 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
         assert.ok(group)
         let facingViewer = [0, -1, 0]
         let awayViewer = [0, 0, 1]
-        if (id === 'fresh-reveal-hide-dwell') {
+        if (automaticDwellCase) {
           const position = group.getWorldPosition(new three.Vector3())
           const normal = new three.Vector3(0, 0, 1).applyQuaternion(
             group.getWorldQuaternion(new three.Quaternion()),
@@ -1202,7 +1647,7 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
           awayViewer = position.clone().sub(normal).toArray()
         }
         frame = harness.fixture.nextFrame(16)
-        if (id === 'fresh-reveal-hide-dwell') {
+        if (automaticDwellCase) {
           frame = withViewerPosition(frame, facingViewer, harness.fixture, sourceKind)
         }
         await step(16, frame)
@@ -1227,49 +1672,78 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
           passed = group.visible
           Object.assign(detail, { wrist, visible: group.visible })
         } else if (id === 'scrolling') {
-          await step(32, harness.fixture.nextFrame(32))
-          await step(48, harness.fixture.nextFrame(48))
-          const firstVisual = () => {
-            let visual
-            group.traverse((object) => {
-              if (
-                visual === undefined &&
-                object.name.startsWith('wrist-menu-action-visual:')
-              ) {
-                visual = object
-              }
-            })
-            return visual
+          let scrollTime = 32
+          const aimAtPanelY = async (positionY) => {
+            if (sourceKind === 'controller') {
+              setControllerRayAtPanelLocal(
+                harness.fixture,
+                group,
+                three,
+                0.09,
+                positionY,
+              )
+              await step(scrollTime, harness.fixture.nextFrame(scrollTime))
+              scrollTime += 16
+            } else {
+              const poseFrame = harness.fixture.nextFrame(scrollTime)
+              scrollTime += 16
+              harness.fixture.moveFingertipTo(
+                poseFrame,
+                group.localToWorld(new three.Vector3(0, positionY, 0.06)),
+              )
+              await step(scrollTime, harness.fixture.nextFrame(scrollTime))
+              scrollTime += 16
+            }
+            return observedPresentationScrollOffset(group)
           }
-          const beforeY = firstVisual()?.position.y
-          if (sourceKind === 'controller') {
-            setControllerRayAtPanelLocal(harness.fixture, group, three, 0.09, 0)
-            await step(64, harness.fixture.nextFrame(64))
-            setControllerRayAtPanelLocal(harness.fixture, group, three, 0.09, -0.02)
-            await step(80, harness.fixture.nextFrame(80))
-          } else {
-            const baseline = harness.fixture.nextFrame(64)
-            harness.fixture.moveFingertipTo(
-              baseline, group.localToWorld(new three.Vector3(0, 0, 0.06)),
-            )
-            await step(80, harness.fixture.nextFrame(80))
-            const moved = harness.fixture.nextFrame(96)
-            harness.fixture.moveFingertipTo(
-              moved, group.localToWorld(new three.Vector3(0, -0.012, 0.06)),
-            )
-            await step(112, harness.fixture.nextFrame(112))
+          const downwardSamples = []
+          for (const positionY of [0.12, 0.08, 0.04, 0, -0.04, -0.08, -0.12]) {
+            downwardSamples.push(await aimAtPanelY(positionY))
           }
-          const afterY = firstVisual()?.position.y
-          passed = Number.isFinite(beforeY) && Number.isFinite(afterY) && afterY !== beforeY
+          const offsetSamples = downwardSamples.slice(0, 4)
+          const bottomClamp = observedPresentationScrollOffset(group)
+          const ownershipAcquired =
+            bottomClamp !== null && bottomClamp > 0
+
+          if (sourceKind === 'controller') harness.fixture.controller.position.x += 2
+          else harness.fixture.selectionInput.position.x += 2
+          await step(scrollTime, harness.fixture.nextFrame(scrollTime))
+          scrollTime += 16
+          const releasedOffset = observedPresentationScrollOffset(group)
+          const ownershipReleased = releasedOffset === bottomClamp
+
+          await aimAtPanelY(-0.12)
+          const rearmBaseline = observedPresentationScrollOffset(group)
+          await aimAtPanelY(-0.1)
+          const rearmMoved = observedPresentationScrollOffset(group)
+          const rearmed =
+            rearmBaseline !== null && rearmMoved !== null &&
+            rearmMoved < rearmBaseline
+          const returnSamples = []
+          for (const positionY of [-0.06, -0.02, 0.02, 0.06, 0.1, 0.12]) {
+            returnSamples.push(await aimAtPanelY(positionY))
+          }
+          const topClamp = observedPresentationScrollOffset(group)
+          const maxOffset = 18 - 12
           Object.assign(detail, {
-            beforeY,
-            afterY,
-            childNames: (() => {
-              const names = []
-              group.traverse(({ name }) => names.push(name))
-              return names
-            })(),
+            offsetSamples,
+            downwardSamples,
+            returnSamples,
+            topClamp,
+            bottomClamp,
+            maxOffset,
+            ownershipAcquired,
+            ownershipReleased,
+            rearmed,
           })
+          passed =
+            offsetSamples.every(Number.isFinite) &&
+            offsetSamples.slice(1).every(
+              (offset, index) => offset > offsetSamples[index],
+            ) &&
+            Math.abs(bottomClamp - maxOffset) < 1e-9 &&
+            Math.abs(topClamp) < 1e-9 &&
+            ownershipAcquired && ownershipReleased && rearmed
         } else if (id === 'invalid-disabled') {
           const before = harness.wristMenuEvents.filter(({ type }) => type === 'selection-intent').length
           if (sourceKind === 'controller') {
@@ -1298,21 +1772,181 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
           passed = !group.visible
           detail.hidden = !group.visible
         } else if (id === 'input-switching') {
+          const durableModelBefore = presentationModelSignature(group)
+          if (sourceKind === 'controller') {
+            setControllerRayAtPanelLocal(
+              harness.fixture,
+              group,
+              three,
+              0,
+              0.0225,
+            )
+            await step(32, harness.fixture.nextFrame(32))
+            await step(48, harness.fixture.press(48))
+          } else {
+            const hoverFrame = harness.fixture.nextFrame(32)
+            harness.fixture.moveFingertipTo(
+              hoverFrame,
+              group.localToWorld(new three.Vector3(0, 0.0225, 0.03)),
+            )
+            await step(48, harness.fixture.nextFrame(48))
+          }
+          harness.placeBehindMenu()
+          const activeClaimDispatches = harness.dispatchSceneActions()
           harness.fixture.device.primaryInputMode = sourceKind === 'controller' ? 'hand' : 'controller'
-          await step(32, harness.fixture.nextFrame(32))
-          passed = harness.fixture.device.primaryInputMode ===
-            (sourceKind === 'controller' ? 'hand' : 'controller')
-          detail.primaryInputMode = harness.fixture.device.primaryInputMode
-        } else if (id === 'visibility-session-reentry') {
-          harness.fixture.device.updateVisibilityState('hidden')
-          await step(32, harness.fixture.nextFrame(32))
-          const hidden = !group.visible
-          harness.fixture.device.updateVisibilityState('visible')
-          await step(48, harness.fixture.nextFrame(48))
           await step(64, harness.fixture.nextFrame(64))
-          const reentered = group.visible
-          passed = hidden && reentered
-          Object.assign(detail, { hidden, reentered })
+          if (sourceKind === 'controller') {
+            await step(80, harness.fixture.release(80))
+          } else {
+            harness.fixture.selectionInput.position.x += 2
+            await step(80, harness.fixture.nextFrame(80))
+          }
+          const terminalEvents = terminalWristMenuEvents(
+            harness.wristMenuEvents,
+          )
+          const sourceSwitched =
+            harness.fixture.device.primaryInputMode ===
+              (sourceKind === 'controller' ? 'hand' : 'controller') &&
+            !harness.fixture.session.inputSources.includes(
+              harness.fixture.inputSource,
+            )
+          const activeTransientBefore = {
+            kind: sourceKind === 'controller'
+              ? 'selection-ownership'
+              : 'scene-input-claim',
+            claimed: activeClaimDispatches.every(
+              ({ behindTargetDeliveries }) => behindTargetDeliveries === 0,
+            ),
+          }
+          const transientCleared =
+            sourceSwitched &&
+            terminalEvents.length === 1 &&
+            terminalEvents[0].type === 'selection-cancellation' &&
+            harness.wristMenuEvents.filter(
+              ({ type }) => type === 'selection-intent',
+            ).length === 0
+          const durableModelAfter = presentationModelSignature(group)
+          Object.assign(detail, {
+            activeTransientBefore,
+            activeClaimDispatches,
+            sourceSwitched,
+            transientCleared,
+            terminalEvents,
+            durableModelBefore,
+            durableModelAfter,
+          })
+          passed =
+            activeTransientBefore.claimed && sourceSwitched &&
+            transientCleared && durableModelBefore.length > 0 &&
+            durableModelAfter.join('\n') === durableModelBefore.join('\n')
+        } else if (id === 'visibility-session-reentry') {
+          await step(315, withViewerPosition(
+            harness.fixture.nextFrame(315), facingViewer, harness.fixture, sourceKind,
+          ))
+          await step(316, withViewerPosition(
+            harness.fixture.nextFrame(316), facingViewer, harness.fixture, sourceKind,
+          ))
+          const durableModelBefore = presentationModelSignature(group)
+          harness.fixture.device.updateVisibilityState('hidden')
+          await step(332, withViewerPosition(
+            harness.fixture.nextFrame(332), facingViewer, harness.fixture, sourceKind,
+          ))
+          const visibilityHidden = !group.visible
+          harness.fixture.device.updateVisibilityState('visible')
+          await step(348, withViewerPosition(
+            harness.fixture.nextFrame(348), facingViewer, harness.fixture, sourceKind,
+          ))
+          await step(548, withViewerPosition(
+            harness.fixture.nextFrame(548), facingViewer, harness.fixture, sourceKind,
+          ))
+          const visibilityRestored = group.visible
+
+          const sessionTransition = await harness.endAndReenterSession()
+          const sessionEnded =
+            sessionTransition.iwerSessionEnded &&
+            sessionTransition.endedStoreSession &&
+            !group.visible
+          const sessionCleanup =
+            sessionTransition.endedStoreSession && !group.visible
+          const newSessionIdentity =
+            sessionTransition.nextSession !== sessionTransition.previousSession &&
+            sessionTransition.reenteredStoreSession
+
+          await step(564, withViewerPosition(
+            harness.fixture.nextFrame(564), facingViewer, harness.fixture, sourceKind,
+          ))
+          const before = group.visible
+          await step(763, withViewerPosition(
+            harness.fixture.nextFrame(763), facingViewer, harness.fixture, sourceKind,
+          ))
+          const below = group.visible
+          await step(764, withViewerPosition(
+            harness.fixture.nextFrame(764), facingViewer, harness.fixture, sourceKind,
+          ))
+          const at = group.visible
+          const durableModelAfter = presentationModelSignature(group)
+          const intentsBefore = harness.wristMenuEvents.filter(
+            ({ type }) => type === 'selection-intent',
+          ).length
+          if (sourceKind === 'controller') {
+            setControllerRayAtPanelLocal(
+              harness.fixture,
+              group,
+              three,
+              0,
+              0.0225,
+            )
+            await step(780, withViewerPosition(
+              harness.fixture.nextFrame(780), facingViewer, harness.fixture, sourceKind,
+            ))
+            await step(796, withViewerPosition(
+              harness.fixture.press(796), facingViewer, harness.fixture, sourceKind,
+            ))
+            await step(812, withViewerPosition(
+              harness.fixture.release(812), facingViewer, harness.fixture, sourceKind,
+            ))
+          } else {
+            const hoverFrame = withViewerPosition(
+              harness.fixture.nextFrame(780), facingViewer, harness.fixture, sourceKind,
+            )
+            harness.fixture.moveFingertipTo(
+              hoverFrame,
+              group.localToWorld(new three.Vector3(0, 0.0225, 0.03)),
+            )
+            await step(796, withViewerPosition(
+              harness.fixture.nextFrame(796), facingViewer, harness.fixture, sourceKind,
+            ))
+            const pressFrame = withViewerPosition(
+              harness.fixture.nextFrame(812), facingViewer, harness.fixture, sourceKind,
+            )
+            harness.fixture.moveFingertipTo(
+              pressFrame,
+              group.localToWorld(new three.Vector3(0, 0.0225, 0.008)),
+            )
+            await step(828, withViewerPosition(
+              harness.fixture.nextFrame(828), facingViewer, harness.fixture, sourceKind,
+            ))
+          }
+          const postReentrySelectionIntents = harness.wristMenuEvents.filter(
+            ({ type }) => type === 'selection-intent',
+          ).length - intentsBefore
+          Object.assign(detail, {
+            visibilityHidden,
+            visibilityRestored,
+            sessionEnded,
+            newSessionIdentity,
+            sessionCleanup,
+            durableModelBefore,
+            durableModelAfter,
+            freshDwell: { before, below, at },
+            postReentrySelectionIntents,
+          })
+          passed =
+            visibilityHidden && visibilityRestored && sessionEnded &&
+            newSessionIdentity && sessionCleanup && !before && !below && at &&
+            postReentrySelectionIntents === 1 &&
+            durableModelBefore.length > 0 &&
+            durableModelAfter.join('\n') === durableModelBefore.join('\n')
         } else if (id === 'empty-unavailable') {
           await harness.render({ ...baseSnapshot, menuDefinition: [] })
           await step(32, harness.fixture.nextFrame(32))
@@ -1396,21 +2030,27 @@ async function runReactShieldMatrix(dependencies, sourceKind) {
       const dispatches = harness.dispatchSceneActions()
 
       let recoveryTime = 160
+      let neutralTransitions = 0
       if (id === 'cancel') {
         harness.fixture.menuInput.connected = false
         await step(112, harness.fixture.nextFrame(112))
+        neutralTransitions += 1
       } else if (sourceKind === 'controller') {
         if (id === 'commit' || id === 'hold') {
           await step(112, harness.fixture.release(112))
+          neutralTransitions += 1
         } else if (id === 'rapid-actions') {
           await step(112, harness.fixture.release(112))
+          neutralTransitions += 1
           await step(128, harness.fixture.nextFrame(128))
           await step(144, harness.fixture.press(144))
           await step(160, harness.fixture.release(160))
+          neutralTransitions += 1
           recoveryTime = 192
         } else {
           harness.fixture.controller.position.x += 2
           await step(112, harness.fixture.release(112))
+          neutralTransitions += 1
         }
         harness.fixture.controller.position.x += 2
         await step(recoveryTime - 16, harness.fixture.nextFrame(recoveryTime - 16))
@@ -1425,6 +2065,7 @@ async function runReactShieldMatrix(dependencies, sourceKind) {
         if (id === 'rapid-actions') {
           harness.fixture.selectionInput.position.x += 2
           await step(128, harness.fixture.nextFrame(128))
+          neutralTransitions += 1
           const hover = harness.fixture.nextFrame(144)
           harness.fixture.moveFingertipTo(
             hover, group.localToWorld(new three.Vector3(0, 0.0225, 0.03)),
@@ -1439,20 +2080,47 @@ async function runReactShieldMatrix(dependencies, sourceKind) {
         }
         harness.fixture.selectionInput.position.x += 2
         await step(recoveryTime - 16, harness.fixture.nextFrame(recoveryTime - 16))
+        neutralTransitions += 1
       }
+      const terminalEvents = terminalWristMenuEvents(
+        harness.wristMenuEvents,
+      )
+      harness.placeBehindOutsideMenu()
+      const mountedRecoveryMenuPresent = harness.menuGroup() === group
+      const mountedRecoveryDispatches = harness.dispatchSceneActions()
+      const sourceNeutralized =
+        neutralTransitions > 0 &&
+        mountedRecoveryDispatches.every(
+          ({ behindTargetDeliveries }) => behindTargetDeliveries > 0,
+        )
+      harness.placeBehindMenu()
       await harness.render(crossInputSnapshot, false)
       await step(recoveryTime, harness.fixture.nextFrame(recoveryTime))
-      const recoveryDispatches = harness.dispatchSceneActions()
+      const menuPresentAfterUnmount = harness.menuGroup() !== undefined
+      const unmountRecoveryDispatches = harness.dispatchSceneActions()
       const passed =
         dispatches.every(({ behindTargetDeliveries }) => behindTargetDeliveries === 0) &&
-        recoveryDispatches.every(({ behindTargetDeliveries }) => behindTargetDeliveries > 0)
+        mountedRecoveryDispatches.every(
+          ({ behindTargetDeliveries }) => behindTargetDeliveries > 0,
+        ) &&
+        unmountRecoveryDispatches.every(
+          ({ behindTargetDeliveries }) => behindTargetDeliveries > 0,
+        ) &&
+        terminalSequenceMatches(id, terminalEvents)
       cases.push({
         id,
         status: passed ? 'passed' : 'failed',
         observations: {
           dispatchPath: 'react-event-manager',
           dispatches,
-          recoveryDispatches,
+          recoveryDispatches: mountedRecoveryDispatches,
+          mountedRecoveryDispatches,
+          unmountRecoveryDispatches,
+          terminalEvents,
+          neutralTransitions,
+          mountedRecoveryMenuPresent,
+          sourceNeutralized,
+          menuPresentAfterUnmount,
           iwerFrames: harness.fixture.frameCount,
           rendererFrames,
           wristMenuEvents: harness.wristMenuEvents,

@@ -24,6 +24,21 @@ export const sceneActionTypes = Object.freeze([
   'dblclick',
   'contextmenu',
 ])
+const shieldTerminalEventTypes = Object.freeze({
+  commit: Object.freeze(['selection-intent']),
+  cancel: Object.freeze(['selection-cancellation']),
+  hold: Object.freeze(['selection-intent']),
+  'leave-before-release': Object.freeze(['selection-cancellation']),
+  'rapid-actions': Object.freeze(['selection-intent', 'selection-intent']),
+})
+
+function sameOrderedValues(actual, expected) {
+  return (
+    Array.isArray(actual) &&
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  )
+}
 
 function sameIds(entries, ids) {
   return (
@@ -39,12 +54,96 @@ function validRendererObservation(entry) {
     Number.isInteger(entry.observations?.iwerFrames) &&
     entry.observations.iwerFrames > 0 &&
     Number.isInteger(entry.observations?.rendererFrames) &&
-    entry.observations.rendererFrames > 0
+    entry.observations.rendererFrames > 0 &&
+    (entry.id !== 'input-switching' ||
+      validInputSwitchingObservations(entry.observations)) &&
+    (entry.id !== 'visibility-session-reentry' ||
+      validLifecycleObservations(entry.observations)) &&
+    (entry.id !== 'scrolling' ||
+      validScrollingObservations(entry.observations))
+  )
+}
+
+function sameNonemptyStringSignatures(before, after) {
+  return (
+    Array.isArray(before) &&
+    before.length > 0 &&
+    before.every((value) => typeof value === 'string') &&
+    Array.isArray(after) &&
+    after.length === before.length &&
+    after.every((value, index) => value === before[index])
+  )
+}
+
+function validInputSwitchingObservations(observations) {
+  return (
+    Array.isArray(observations?.runs) &&
+    observations.runs.length > 0 &&
+    observations.runs.every((run) =>
+      typeof run?.activeTransientBefore?.kind === 'string' &&
+      run.activeTransientBefore.kind.length > 0 &&
+      run.activeTransientBefore.claimed === true &&
+      run.sourceSwitched === true &&
+      run.transientCleared === true &&
+      Array.isArray(run.terminalEvents) &&
+      run.terminalEvents.length === 1 &&
+      run.terminalEvents[0]?.type === 'selection-cancellation' &&
+      sameNonemptyStringSignatures(
+        run.durableModelBefore,
+        run.durableModelAfter,
+      ),
+    )
+  )
+}
+
+function validLifecycleObservations(observations) {
+  return (
+    Array.isArray(observations?.runs) &&
+    observations.runs.length > 0 &&
+    observations.runs.every((run) =>
+      run?.visibilityHidden === true &&
+      run.visibilityRestored === true &&
+      run.sessionEnded === true &&
+      run.newSessionIdentity === true &&
+      run.sessionCleanup === true &&
+      sameNonemptyStringSignatures(
+        run.durableModelBefore,
+        run.durableModelAfter,
+      ) &&
+      run.freshDwell?.before === false &&
+      run.freshDwell.below === false &&
+      run.freshDwell.at === true &&
+      run.postReentrySelectionIntents === 1,
+    )
+  )
+}
+
+function validScrollingObservations(observations) {
+  return (
+    Array.isArray(observations?.runs) &&
+    observations.runs.length > 0 &&
+    observations.runs.every((run) =>
+      Array.isArray(run?.offsetSamples) &&
+      run.offsetSamples.length >= 4 &&
+      run.offsetSamples.every(Number.isFinite) &&
+      run.offsetSamples[0] >= 0 &&
+      run.offsetSamples.slice(1).every(
+        (offset, index) => offset > run.offsetSamples[index],
+      ) &&
+      run.topClamp === 0 &&
+      Number.isFinite(run.maxOffset) &&
+      run.maxOffset > 0 &&
+      run.bottomClamp === run.maxOffset &&
+      run.ownershipAcquired === true &&
+      run.ownershipReleased === true &&
+      run.rearmed === true,
+    )
   )
 }
 
 function validActualDispatchCase(entry) {
   const observations = entry?.observations
+  const terminalEventTypes = shieldTerminalEventTypes[entry?.id]
   return (
     entry?.status === 'passed' &&
     (observations?.dispatchPath === 'three-host-shield' ||
@@ -55,11 +154,30 @@ function validActualDispatchCase(entry) {
       ({ type, behindTargetDeliveries }, index) =>
         type === sceneActionTypes[index] && behindTargetDeliveries === 0,
     ) &&
-    Array.isArray(observations.recoveryDispatches) &&
-    observations.recoveryDispatches.length === sceneActionTypes.length &&
-    observations.recoveryDispatches.every(
+    sameOrderedValues(
+      observations.terminalEvents?.map(({ type }) => type),
+      terminalEventTypes,
+    ) &&
+    Number.isInteger(observations.neutralTransitions) &&
+    observations.neutralTransitions >= 1 &&
+    observations.mountedRecoveryMenuPresent === true &&
+    observations.sourceNeutralized === true &&
+    Array.isArray(observations.mountedRecoveryDispatches) &&
+    observations.mountedRecoveryDispatches.length === sceneActionTypes.length &&
+    observations.mountedRecoveryDispatches.every(
       ({ type, behindTargetDeliveries }, index) =>
-        type === sceneActionTypes[index] && behindTargetDeliveries > 0,
+        type === sceneActionTypes[index] &&
+        Number.isInteger(behindTargetDeliveries) &&
+        behindTargetDeliveries > 0,
+    ) &&
+    observations.menuPresentAfterUnmount === false &&
+    Array.isArray(observations.unmountRecoveryDispatches) &&
+    observations.unmountRecoveryDispatches.length === sceneActionTypes.length &&
+    observations.unmountRecoveryDispatches.every(
+      ({ type, behindTargetDeliveries }, index) =>
+        type === sceneActionTypes[index] &&
+        Number.isInteger(behindTargetDeliveries) &&
+        behindTargetDeliveries > 0,
     )
   )
 }
@@ -97,10 +215,7 @@ export function buildRendererJourneyCoverage({
     )
   }
   if (
-    !Array.isArray(sceneEventShield.actionTypes) ||
-    !sceneEventShield.actionTypes.every(
-      (type, index) => type === sceneActionTypes[index],
-    )
+    !sameOrderedValues(sceneEventShield.actionTypes, sceneActionTypes)
   ) {
     throw new TypeError('Scene Event Shield action matrix is incomplete')
   }

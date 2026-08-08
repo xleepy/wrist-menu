@@ -24,6 +24,129 @@ import {
   assertCompleteJourneyCoverage,
   buildRendererJourneyCoverage,
 } from '../fixtures/consumers/journey-evidence.mjs'
+import { journeyCombinationPassed } from '../scripts/generate-release-evidence.mjs'
+
+const semanticCaseIds = [
+  'fresh-reveal-hide-dwell',
+  'both-wrists',
+  'scrolling',
+  'invalid-disabled',
+  'tracking-loss',
+  'input-switching',
+  'visibility-session-reentry',
+  'empty-unavailable',
+]
+const sceneActionTypes = [
+  'pointerdown',
+  'pointerup',
+  'click',
+  'dblclick',
+  'contextmenu',
+]
+const terminalEventsByShieldCase = {
+  commit: ['selection-intent'],
+  cancel: ['selection-cancellation'],
+  hold: ['selection-intent'],
+  'leave-before-release': ['selection-cancellation'],
+  'rapid-actions': ['selection-intent', 'selection-intent'],
+}
+
+function makeValidSemanticCases() {
+  return semanticCaseIds.map((id) => ({
+    id,
+    status: 'passed',
+    observations: {
+      iwerFrames: 8,
+      rendererFrames: 8,
+      runs: [{
+        ...(id === 'input-switching' ? {
+          activeTransientBefore: { kind: 'selection', claimed: true },
+          sourceSwitched: true,
+          transientCleared: true,
+          terminalEvents: [{ type: 'selection-cancellation' }],
+          durableModelBefore: ['grid:true', 'shape:cube'],
+          durableModelAfter: ['grid:true', 'shape:cube'],
+        } : {}),
+        ...(id === 'visibility-session-reentry' ? {
+          visibilityHidden: true,
+          visibilityRestored: true,
+          sessionEnded: true,
+          newSessionIdentity: true,
+          sessionCleanup: true,
+          durableModelBefore: ['grid:true', 'shape:cube'],
+          durableModelAfter: ['grid:true', 'shape:cube'],
+          freshDwell: { before: false, below: false, at: true },
+          postReentrySelectionIntents: 1,
+        } : {}),
+        ...(id === 'scrolling' ? {
+          offsetSamples: [0, 0.01, 0.02, 0.03],
+          topClamp: 0,
+          bottomClamp: 0.2,
+          maxOffset: 0.2,
+          ownershipAcquired: true,
+          ownershipReleased: true,
+          rearmed: true,
+        } : {}),
+      }],
+    },
+  }))
+}
+
+function makeValidSceneEventShield() {
+  return {
+    status: 'passed',
+    actionTypes: [...sceneActionTypes],
+    cases: ['commit', 'cancel', 'hold', 'leave-before-release', 'rapid-actions']
+      .map((id) => ({
+        id,
+        status: 'passed',
+        observations: {
+          dispatchPath: 'react-event-manager',
+          dispatches: sceneActionTypes.map((type) => ({
+            type,
+            behindTargetDeliveries: 0,
+          })),
+          terminalEvents: terminalEventsByShieldCase[id]
+            .map((type) => ({ type })),
+          neutralTransitions: 1,
+          mountedRecoveryMenuPresent: true,
+          sourceNeutralized: true,
+          mountedRecoveryDispatches: sceneActionTypes.map((type) => ({
+            type,
+            behindTargetDeliveries: 1,
+          })),
+          unmountRecoveryDispatches: sceneActionTypes.map((type) => ({
+            type,
+            behindTargetDeliveries: 1,
+          })),
+          menuPresentAfterUnmount: false,
+        },
+      })),
+  }
+}
+
+function makeValidJourneyReport() {
+  const semanticCases = makeValidSemanticCases()
+  const sceneEventShield = {
+    ...makeValidSceneEventShield(),
+    rendererIntegration: 'react',
+    selectionSourceKind: 'hand',
+  }
+  return {
+    status: 'passed',
+    journeys: [{
+      status: 'passed',
+      coverage: {
+        status: 'passed',
+        driver: 'packed-react-renderer-xr',
+        sourceKind: 'hand',
+        semanticCases,
+        sceneEventShield: structuredClone(sceneEventShield),
+      },
+      sceneEventShield,
+    }],
+  }
+}
 
 test('Three allocation evidence observes transient resource construction by ordinal', () => {
   const before = sampleThreeAllocationOrdinals(three)
@@ -170,36 +293,8 @@ test('import evidence fails closed with observed resources, listeners, and rende
 })
 
 test('renderer journey evidence rejects Core-only samples and inferred shield booleans', () => {
-  const semanticCases = [
-    'fresh-reveal-hide-dwell',
-    'both-wrists',
-    'scrolling',
-    'invalid-disabled',
-    'tracking-loss',
-    'input-switching',
-    'visibility-session-reentry',
-    'empty-unavailable',
-  ].map((id) => ({
-    id,
-    status: 'passed',
-    observations: { iwerFrames: 1, rendererFrames: 1 },
-  }))
-  const sceneEventShield = {
-    status: 'passed',
-    actionTypes: ['pointerdown', 'pointerup', 'click', 'dblclick', 'contextmenu'],
-    cases: ['commit', 'cancel', 'hold', 'leave-before-release', 'rapid-actions']
-      .map((id) => ({
-        id,
-        status: 'passed',
-        observations: {
-          dispatchPath: 'react-event-manager',
-          dispatches: ['pointerdown', 'pointerup', 'click', 'dblclick', 'contextmenu']
-            .map((type) => ({ type, behindTargetDeliveries: 0 })),
-          recoveryDispatches: ['pointerdown', 'pointerup', 'click', 'dblclick', 'contextmenu']
-            .map((type) => ({ type, behindTargetDeliveries: 1 })),
-        },
-      })),
-  }
+  const semanticCases = makeValidSemanticCases()
+  const sceneEventShield = makeValidSceneEventShield()
 
   assert.throws(
     () => buildRendererJourneyCoverage({
@@ -231,4 +326,203 @@ test('renderer journey evidence rejects Core-only samples and inferred shield bo
     }),
     /actual behind-target dispatch/,
   )
+})
+
+test('renderer journey evidence rejects incomplete input-switching proof', () => {
+  const mutations = [
+    (run) => { run.activeTransientBefore.claimed = false },
+    (run) => { run.sourceSwitched = false },
+    (run) => { run.transientCleared = false },
+    (run) => { run.terminalEvents = [] },
+    (run) => { run.durableModelBefore = [] },
+    (run) => { run.durableModelAfter = ['grid:false'] },
+  ]
+
+  for (const mutate of mutations) {
+    const semanticCases = makeValidSemanticCases()
+    const inputSwitching = semanticCases.find(
+      ({ id }) => id === 'input-switching',
+    )
+    mutate(inputSwitching.observations.runs[0])
+
+    assert.throws(
+      () => buildRendererJourneyCoverage({
+        driver: 'packed-react-renderer-xr',
+        sourceKind: 'hand',
+        semanticCases,
+        sceneEventShield: makeValidSceneEventShield(),
+      }),
+      /input-switching/,
+    )
+  }
+})
+
+test('renderer journey evidence rejects incomplete session lifecycle and reentry proof', () => {
+  const mutations = [
+    (run) => { run.visibilityHidden = false },
+    (run) => { run.visibilityRestored = false },
+    (run) => { run.sessionEnded = false },
+    (run) => { run.newSessionIdentity = false },
+    (run) => { run.sessionCleanup = false },
+    (run) => { run.durableModelAfter = ['grid:false'] },
+    (run) => { run.freshDwell.at = false },
+    (run) => { run.postReentrySelectionIntents = 0 },
+  ]
+
+  for (const mutate of mutations) {
+    const semanticCases = makeValidSemanticCases()
+    const lifecycle = semanticCases.find(
+      ({ id }) => id === 'visibility-session-reentry',
+    )
+    mutate(lifecycle.observations.runs[0])
+
+    assert.throws(
+      () => buildRendererJourneyCoverage({
+        driver: 'packed-react-renderer-xr',
+        sourceKind: 'hand',
+        semanticCases,
+        sceneEventShield: makeValidSceneEventShield(),
+      }),
+      /visibility-session-reentry/,
+    )
+  }
+})
+
+test('renderer journey evidence rejects discontinuous or unrearmed scrolling proof', () => {
+  const mutations = [
+    (run) => { run.offsetSamples = [0, 0.01, 0.02] },
+    (run) => { run.offsetSamples = [0, 0.01, 0.01, 0.03] },
+    (run) => { run.topClamp = 0.01 },
+    (run) => { run.bottomClamp = 0.19 },
+    (run) => { run.maxOffset = 0 },
+    (run) => { run.ownershipAcquired = false },
+    (run) => { run.ownershipReleased = false },
+    (run) => { run.rearmed = false },
+  ]
+
+  for (const mutate of mutations) {
+    const semanticCases = makeValidSemanticCases()
+    const scrolling = semanticCases.find(({ id }) => id === 'scrolling')
+    mutate(scrolling.observations.runs[0])
+
+    assert.throws(
+      () => buildRendererJourneyCoverage({
+        driver: 'packed-react-renderer-xr',
+        sourceKind: 'controller',
+        semanticCases,
+        sceneEventShield: makeValidSceneEventShield(),
+      }),
+      /scrolling/,
+    )
+  }
+})
+
+test('renderer journey evidence rejects wrong shield terminals or missing recovery phases', () => {
+  const mutations = [
+    (shield) => { shield.actionTypes.pop() },
+    (shield) => {
+      shield.cases[0].observations.dispatches[0]
+        .behindTargetDeliveries = 1
+    },
+    (shield) => {
+      shield.cases.find(({ id }) => id === 'commit')
+        .observations.terminalEvents = []
+    },
+    (shield) => {
+      shield.cases.find(({ id }) => id === 'cancel')
+        .observations.terminalEvents = [{ type: 'selection-intent' }]
+    },
+    (shield) => {
+      shield.cases.find(({ id }) => id === 'rapid-actions')
+        .observations.terminalEvents.pop()
+    },
+    (shield) => {
+      shield.cases.find(({ id }) => id === 'rapid-actions')
+        .observations.neutralTransitions = 0
+    },
+    (shield) => {
+      shield.cases.find(({ id }) => id === 'commit')
+        .observations.neutralTransitions = 0
+    },
+    (shield) => {
+      shield.cases[0].observations.mountedRecoveryMenuPresent = false
+    },
+    (shield) => {
+      shield.cases[0].observations.sourceNeutralized = false
+    },
+    (shield) => {
+      shield.cases[0].observations.mountedRecoveryDispatches[0]
+        .behindTargetDeliveries = 0
+    },
+    (shield) => {
+      shield.cases[0].observations.unmountRecoveryDispatches.pop()
+    },
+    (shield) => {
+      shield.cases[0].observations.menuPresentAfterUnmount = true
+    },
+  ]
+
+  for (const mutate of mutations) {
+    const sceneEventShield = makeValidSceneEventShield()
+    mutate(sceneEventShield)
+
+    assert.throws(
+      () => buildRendererJourneyCoverage({
+        driver: 'packed-react-renderer-xr',
+        sourceKind: 'hand',
+        semanticCases: makeValidSemanticCases(),
+        sceneEventShield,
+      }),
+      /Scene Event Shield/,
+    )
+  }
+})
+
+test('release generator fails closed on passed journey reports with weakened proof', () => {
+  const mutations = [
+    (report) => {
+      report.journeys[0].coverage.semanticCases.find(
+        ({ id }) => id === 'input-switching',
+      ).observations.runs[0].transientCleared = false
+    },
+    (report) => {
+      report.journeys[0].coverage.semanticCases.find(
+        ({ id }) => id === 'visibility-session-reentry',
+      ).observations.runs[0].sessionEnded = false
+    },
+    (report) => {
+      report.journeys[0].coverage.semanticCases.find(
+        ({ id }) => id === 'scrolling',
+      ).observations.runs[0].offsetSamples = [0, 0.01, 0.01, 0.03]
+    },
+    (report) => {
+      report.journeys[0].sceneEventShield.cases.find(
+        ({ id }) => id === 'hold',
+      ).observations.terminalEvents = []
+    },
+    (report) => {
+      report.journeys[0].coverage.sceneEventShield.cases.find(
+        ({ id }) => id === 'hold',
+      ).observations.terminalEvents = []
+    },
+    (report) => {
+      report.journeys[0].sceneEventShield.cases[0]
+        .observations.mountedRecoveryDispatches = []
+    },
+    (report) => {
+      report.journeys[0].sceneEventShield.cases[0]
+        .observations.unmountRecoveryDispatches = []
+    },
+    (report) => {
+      report.journeys[0].sceneEventShield.cases[0]
+        .observations.dispatchPath = 'three-host-shield'
+    },
+  ]
+
+  assert.equal(journeyCombinationPassed(makeValidJourneyReport(), 'react', 'hand'), true)
+  for (const mutate of mutations) {
+    const report = makeValidJourneyReport()
+    mutate(report)
+    assert.equal(journeyCombinationPassed(report, 'react', 'hand'), false)
+  }
 })
