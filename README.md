@@ -137,3 +137,13 @@ or XR lifecycle reason.
 
 Only the package root, `/core`, `/three`, and `/react` are public. Deep imports
 are unsupported.
+
+## Primitive Workshop examples
+
+The repository includes independently bootstrapped vanilla Three.js and
+React/XR Example Variants under `examples/primitive-workshop`. Both consume a
+locally packed tarball through public package exports and share only their
+framework-neutral Workshop Model. Run `npm run examples:link`, then
+`npm run examples:dev:vanilla` or `npm run examples:dev:react`; see the
+[Primitive Workshop guide](examples/primitive-workshop/README.md) for the full
+journey and frozen-install restore workflow.

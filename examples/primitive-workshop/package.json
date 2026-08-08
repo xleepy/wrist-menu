@@ -1,0 +1,29 @@
+{
+  "name": "wrist-menu-primitive-workshop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build:vanilla": "vite build --config vanilla/vite.config.js",
+    "build:react": "vite build --config react/vite.config.js",
+    "build": "npm run typecheck && npm run build:vanilla && npm run build:react",
+    "dev:vanilla": "vite --config vanilla/vite.config.js",
+    "dev:react": "vite --config react/vite.config.js"
+  },
+  "dependencies": {
+    "@react-three/fiber": "9.6.1",
+    "@react-three/xr": "6.6.30",
+    "@xleepy/wrist-menu": "file:../../artifacts/xleepy-wrist-menu-0.0.0.tgz",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@types/three": "0.185.1",
+    "typescript": "5.9.3",
+    "vite": "7.1.3"
+  }
+}
