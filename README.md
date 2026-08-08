@@ -16,6 +16,12 @@ const snapshot = {
   wrist: 'left',
   // Optional values override the documented 35° / 50° and 300 / 200 ms defaults.
   comfort: { enterAngleDegrees: 30 },
+  theme: {
+    panelColor: 0x081415,
+    hoveredItemColor: 0x1d4438,
+    panelWidthMeters: 0.192,
+    viewportHeightMeters: 0.27,
+  },
   menuDefinition: [
     { type: 'action', id: 'reset', label: 'Reset workshop', iconKey: 'reset' },
     { type: 'separator', label: 'Scene' },
@@ -56,11 +62,13 @@ group, item, current value, and proposed value. The Wrist Menu Package never
 changes displayed Toggle or Choice state itself—the Host Application supplies
 the next complete snapshot.
 
-The current Renderer Integration preserves this complete semantic content on
-ordered rows and explicit Hit Regions, including portable labels, icon keys,
-values, selected state, and disabled reasons. The production Reach typography,
-procedural icon atlas, and virtualized viewport are a separate presentation
-milestone; they do not change this Host or event contract.
+The Renderer Integration preserves this complete semantic content on ordered
+rows and explicit Hit Regions, including portable labels, icon keys, values,
+selected state, and disabled reasons. Optional Host Snapshot `theme` values are
+validated and resolved over `defaultThemeTokens`; they restyle the default
+Command slab without changing Menu Definition or Selection Intent semantics.
+Colors are integer `0x000000`-`0xFFFFFF` values, while `panelWidthMeters` and
+`viewportHeightMeters` are positive finite dimensions no larger than 2 metres.
 
 Vanilla hosts create a Wrist Menu Instance with `createThreeWristMenuState`,
 attach its stable `presentation.group`, and call
@@ -70,6 +78,22 @@ Before handling a scene action, call
 cannot also affect content behind the menu. React hosts mount
 `<WristMenu snapshot={snapshot} onEvent={onEvent} />` inside their R3F tree; its
 managed Scene Event Shield stops synthetic events behind active Hit Regions.
+
+Advanced hosts can pass the same synchronous `presentationFactory` to
+`createThreeWristMenuState` or `<WristMenu>`. The factory receives only the
+frozen, curated `PresentationModel` and returns one disposable Three.js content
+root, explicit `{ itemId, object }` Hit Regions, a `scrollRegion`, and an
+`update(model)` method. Every declared target and scroll surface must be a
+descendant `Mesh` backed by `BoxGeometry`; visible presentation meshes are never
+implicit targets. Core behavior continues to own selection, scrolling, scene
+claims, and event delivery, so React does not need a parallel JSX behavior
+implementation.
+
+`replaceThreeWristMenuPresentation(state, nextFactory)` swaps only the inner
+presentation while retaining the package-owned attachment root. It disposes the
+prior presentation, clears targets, Selection and Scroll Ownership, and Scene
+Input Claims immediately, then requires fresh automatic reveal dwell. Changing
+the React `presentationFactory` prop uses the same replacement path.
 
 Tracked hands use the current frame's standard `wrist` joint. Motion
 controllers use `gripSpace` plus a Controller Wrist Proxy; `targetRaySpace`

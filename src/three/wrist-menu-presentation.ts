@@ -16,7 +16,9 @@ import type {
   PresentationModel,
   PresentationToggleItem,
   HandTargetObservation,
+  ThemeTokens,
 } from '../core/index.js'
+import { defaultThemeTokens } from '../core/index.js'
 import { VISIBLE_SLOTS } from '../core/scroll-state.js'
 
 const decorativeRaycast: Mesh['raycast'] = () => undefined
@@ -65,11 +67,14 @@ function rowsFor(items: readonly PresentationItem[]): readonly PresentationRow[]
   return rows
 }
 
-function baseColor(item: InteractivePresentationItem): number {
-  if (item.disabled) return 0x273031
-  if (item.type === 'toggle' && item.selected) return 0x245345
-  if (item.type === 'choice' && item.selected) return 0x245345
-  return 0x102020
+function baseColor(
+  item: InteractivePresentationItem,
+  theme: ThemeTokens,
+): number {
+  if (item.disabled) return theme.disabledItemColor
+  if (item.type === 'toggle' && item.selected) return theme.selectedItemColor
+  if (item.type === 'choice' && item.selected) return theme.selectedItemColor
+  return theme.itemColor
 }
 
 const POOL_SIZE = VISIBLE_SLOTS + 1
@@ -103,6 +108,8 @@ export class WristMenuPresentation {
   private readonly fingertipLocalPosition = new Vector3()
   private allRows: readonly PresentationRow[] = []
   private scrollOffset = 0
+  private theme = defaultThemeTokens
+  private modelRevision = -1
 
   constructor() {
     this.group.name = 'wrist-menu-attachment-root'
@@ -200,15 +207,17 @@ export class WristMenuPresentation {
             : undefined
 
       if (row.type === 'separator') {
-        slot.rowMaterial.color.setHex(0x355153)
+        slot.rowMaterial.color.setHex(this.theme.separatorColor)
       } else if (row.type === 'choice-group') {
-        slot.rowMaterial.color.setHex(0x183132)
+        slot.rowMaterial.color.setHex(this.theme.groupHeaderColor)
       } else {
-        slot.rowMaterial.color.setHex(baseColor(row))
+        slot.rowMaterial.color.setHex(baseColor(row, this.theme))
       }
 
       const scaleY = rowHeight / ROW_HEIGHT
-      slot.rowMesh.scale.set(1, scaleY, 1)
+      const rowWidth = Math.max(0.001, this.theme.panelWidthMeters - 0.016)
+      const scaleX = rowWidth / ROW_WIDTH
+      slot.rowMesh.scale.set(scaleX, scaleY, 1)
 
       slot.boundRow = row
       slot.boundItemId = row.type !== 'separator' && row.type !== 'choice-group' ? row.id : null
@@ -220,12 +229,14 @@ export class WristMenuPresentation {
       }
 
       const interactiveRow = row as InteractivePresentationItem
-      const fullyVisible = y >= -PANEL_HEIGHT / 2 + rowHeight / 2 - 0.001 &&
-                           y <= PANEL_HEIGHT / 2 - rowHeight / 2 + 0.001
+      const fullyVisible =
+        y >= -this.theme.viewportHeightMeters / 2 + rowHeight / 2 - 0.001 &&
+        y <= this.theme.viewportHeightMeters / 2 - rowHeight / 2 + 0.001
 
       if (fullyVisible) {
         slot.hitMesh.visible = true
         slot.hitMesh.position.set(0, y, HIT_Z)
+        slot.hitMesh.scale.set(scaleX, 1, 1)
         slot.hitMesh.userData['wristMenuItemId'] = interactiveRow.id
         slot.hitMesh.userData['wristMenuDisabled'] = interactiveRow.disabled
         slot.hitMesh.userData['wristMenuSelected'] =
@@ -239,6 +250,20 @@ export class WristMenuPresentation {
   }
 
   setModel(model: PresentationModel, targetable: boolean) {
+    this.theme = model.theme ?? defaultThemeTokens
+    this.panelMesh.scale.set(
+      this.theme.panelWidthMeters / PANEL_WIDTH,
+      this.theme.viewportHeightMeters / PANEL_HEIGHT,
+      1,
+    )
+    const panelMaterial = this.panelMesh.material as MeshBasicMaterial
+    panelMaterial.color.setHex(this.theme.panelColor)
+    if (this.modelRevision !== model.revision) {
+      this.modelRevision = model.revision
+      this.renderItems(model.items)
+    } else {
+      this.rebindPool()
+    }
     this.group.visible = model.visible
     this.setTargetable(targetable && model.visible && !model.scrollBarrierActive)
     for (const material of this.visualMaterials) {
@@ -260,12 +285,12 @@ export class WristMenuPresentation {
       if (item === undefined) continue
       slot.rowMaterial.color.setHex(
         item.interaction === 'armed'
-          ? 0x2e7d61
+          ? this.theme.armedItemColor
           : item.interaction === 'hovered'
             ? item.disabled
-              ? 0x3f4849
-              : 0x1d4438
-            : baseColor(item),
+              ? this.theme.hoveredDisabledItemColor
+              : this.theme.hoveredItemColor
+            : baseColor(item, this.theme),
       )
       slot.rowMesh.userData['wristMenuSelected'] =
         item.type === 'toggle' || item.type === 'choice' ? item.selected : false
@@ -341,7 +366,7 @@ export class WristMenuPresentation {
     ) {
       return null
     }
-    return this.fingertipLocalPosition.y
+    return this.fingertipLocalPosition.y * this.panelMesh.scale.y
   }
 
   dispose() {

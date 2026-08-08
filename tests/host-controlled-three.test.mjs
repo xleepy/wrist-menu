@@ -14,6 +14,14 @@ import {
   expectedControlledIntentOrder,
 } from '../fixtures/host-controlled-xr.mjs'
 
+function descendants(root, predicate) {
+  const matches = []
+  root.traverse((object) => {
+    if (object !== root && predicate(object)) matches.push(object)
+  })
+  return matches
+}
+
 test('vanilla renders all Host-controlled rows in order and emits semantic intents', () => {
   const events = []
   const fixture = createHostControlledXrFixture()
@@ -28,7 +36,10 @@ test('vanilla renders all Host-controlled rows in order and emits semantic inten
     advance: (time) => updateThreeWristMenu(menu, { time, frame: fixture.frame }),
   })
 
-  const rows = menu.presentation.group.children.filter(({ name }) => name.includes('-visual:'))
+  const rows = descendants(
+    menu.presentation.group,
+    ({ name }) => name.includes('-visual:'),
+  )
   assert.deepEqual(
     rows.map(({ name }) => name),
     [
@@ -103,11 +114,11 @@ test('complete presentation rows share reveal opacity and targeting barriers', (
 
   updateThreeWristMenu(menu, { time: 0, frame: fixture.frame })
   updateThreeWristMenu(menu, { time: 75, frame: fixture.frame })
-  const visualMaterials = menu.presentation.group.children
-    .filter(
-      ({ name }) =>
-        name === 'wrist-menu-command-slab' || name.includes('-visual:'),
-    )
+  const visualMaterials = descendants(
+    menu.presentation.group,
+    ({ name }) =>
+      name === 'wrist-menu-command-slab' || name.includes('-visual:'),
+  )
     .map(({ material }) => material)
   assert.ok(visualMaterials.length > 1)
   assert.ok(visualMaterials.every(({ opacity }) => opacity === 0.5))

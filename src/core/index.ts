@@ -40,6 +40,7 @@ import {
   resolveRevealConfiguration,
   type Vector3Tuple,
 } from './activation-config.js'
+import { resolveThemeTokens, type ThemeTokens } from './theme.js'
 import {
   advanceRevealState,
   createRevealState,
@@ -89,6 +90,12 @@ export {
   type RevealConfigurationOverrides,
   type Vector3Tuple,
 } from './activation-config.js'
+export {
+  defaultThemeTokens,
+  resolveThemeTokens,
+  type ThemeOverrides,
+  type ThemeTokens,
+} from './theme.js'
 export {
   resolveWristAnchor,
   type PoseSample,
@@ -183,6 +190,8 @@ export type PresentationModel = Readonly<{
   totalRows: number
   visibleSlots: number
   scrollBarrierActive: boolean
+  /** Fully resolved visual tokens; never changes Menu Definition semantics. */
+  theme: ThemeTokens
 }>
 
 export type CreateWristMenuRuntimeOptions = Readonly<{
@@ -478,6 +487,7 @@ export function stepWristMenuRuntime(
     totalRows: scrollResult.totalRows,
     visibleSlots: scrollResult.visibleSlots,
     scrollBarrierActive: scrollResult.barrierActive,
+    theme: resolveThemeTokens(state.snapshot.theme),
   })
 }
 
@@ -487,6 +497,26 @@ export function wristMenuRuntimeBlocksSceneInput(
 ): boolean {
   assertActive(state)
   return selectionBlocksSceneInput(state.selectionState, sourceId)
+}
+
+/**
+ * Release presentation-coupled interaction and require a fresh reveal
+ * acquisition without changing the Host-owned snapshot.
+ */
+export function resetWristMenuRuntimeForPresentationReplacement(
+  state: WristMenuRuntimeState,
+): void {
+  assertActive(state)
+  try {
+    cancelAllSelection(state, 'lifecycle-interrupted', state.lastTime)
+  } finally {
+    state.revealState = createRevealState()
+    state.revealWasInteractive = false
+    state.lastLifecycleRevision = undefined
+    state.targetableAfterSequence = undefined
+    state.revision += 1
+    resetScrollState(state.scrollState)
+  }
 }
 
 export function disposeWristMenuRuntime(
