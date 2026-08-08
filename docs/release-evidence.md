@@ -24,6 +24,9 @@ Example App commits, every participating lockfile, protocol, instrumentation,
 and baseline. A rerun may reuse an identity only when the canonical record is
 byte-for-byte identical. Missing reports and unmeasurable requirements fail
 closed; the failed record is retained and the command exits nonzero.
+The normal clean task preserves `artifacts/release-evidence/` while removing
+rebuildable package archives, so a later run can verify rather than overwrite a
+record with the same identity.
 
 The Primitive Workshop remains in this repository for maintenance, but release
 automation treats it as a public consumer: its frozen dependencies are installed
