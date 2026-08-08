@@ -1,0 +1,20 @@
+{
+  "name": "wrist-menu-candidate-docs-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@react-three/fiber": "9.6.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.7",
+    "@types/three": "0.185.1",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "test": "node public-import.mjs && tsc -p tsconfig.json && node executable-doc.mjs"
+  }
+}
