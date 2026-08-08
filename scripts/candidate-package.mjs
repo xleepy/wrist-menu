@@ -215,15 +215,50 @@ async function approvedPackageInputManifest(root) {
   )
 }
 
+function rewriteCandidatePackageReadme(markdown, sourceCommit) {
+  return markdown.replace(
+    /\[([^\]]*)\]\(([^)]+)\)/gu,
+    (link, label, untrimmedTarget) => {
+      const target = untrimmedTarget.trim()
+      if (/^(?:https?:|mailto:|#)/u.test(target)) return link
+      const [path, ...fragmentParts] = target.split('#')
+      const safePath = requireSafeRelativePath(
+        decodeURIComponent(path),
+        'candidate package README link',
+      )
+      const fragment =
+        fragmentParts.length === 0 ? '' : `#${fragmentParts.join('#')}`
+      return `[${label}](https://github.com/xleepy/wrist-menu/blob/${sourceCommit}/${encodeURI(safePath)}${fragment})`
+    },
+  )
+}
+
+async function stageCandidatePackage(root, destination, sourceCommit) {
+  await mkdir(destination)
+  for (const path of APPROVED_PACKAGE_FILES) {
+    const source = resolve(root, ...path.split('/'))
+    const target = resolve(destination, ...path.split('/'))
+    await mkdir(dirname(target), { recursive: true })
+    await cp(source, target)
+  }
+  const readmePath = resolve(destination, 'README.md')
+  await writeFile(
+    readmePath,
+    rewriteCandidatePackageReadme(await readFile(readmePath, 'utf8'), sourceCommit),
+  )
+}
+
 async function captureCandidateBuildInputs(root) {
   const versionedDocs = resolve(root, 'docs', '0.0.0')
   const fixture = resolve(root, 'fixtures', 'candidate-docs')
   const validationGates = await readFile(resolve(root, 'docs', 'validation-gates.md'))
+  const releaseEvidence = await readFile(resolve(root, 'docs', 'release-evidence.md'))
   return {
     packageSha256: sha256(canonicalJson(await approvedPackageInputManifest(root))),
     versionedDocsSha256: await directoryDigest(versionedDocs),
     fixtureSha256: await directoryDigest(fixture),
     validationGatesSha256: sha256(validationGates),
+    releaseEvidenceSha256: sha256(releaseEvidence),
   }
 }
 
@@ -251,32 +286,69 @@ async function writeCandidateManifest(bundleDirectory) {
   )
 }
 
-async function verifyVersionedDocumentationLinks(bundleDirectory) {
-  const docsDirectory = resolve(bundleDirectory, 'documentation', '0.0.0')
-  const markdownFiles = (await inventoryRegularFiles(docsDirectory)).filter(
-    (path) => path.endsWith('.md'),
+function markdownLinkTargets(markdown) {
+  const targets = []
+  const inlineLink =
+    /!?\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)\n]+))(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^\n)]*\)))?\s*\)/gu
+  for (const match of markdown.matchAll(inlineLink)) {
+    targets.push(match[1] ?? match[2])
+  }
+  const referenceDefinition =
+    /^\s{0,3}\[[^\]\n]+\]:\s*(?:<([^>\n]+)>|([^\s\n]+))(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^\n)]*\)))?\s*$/gmu
+  for (const match of markdown.matchAll(referenceDefinition)) {
+    targets.push(match[1] ?? match[2])
+  }
+  return targets
+}
+
+export async function verifyCandidateBundleMarkdownLinks(bundleDirectory) {
+  const markdownFiles = (await inventoryRegularFiles(bundleDirectory)).filter(
+    (path) => path.toLowerCase().endsWith('.md'),
   )
   for (const path of markdownFiles) {
-    const documentPath = resolve(docsDirectory, ...path.split('/'))
+    const documentPath = resolve(bundleDirectory, ...path.split('/'))
     const markdown = await readFile(documentPath, 'utf8')
-    for (const match of markdown.matchAll(/\[[^\]]*\]\(([^)]+)\)/gu)) {
-      const target = match[1].trim()
+    for (const untrimmedTarget of markdownLinkTargets(markdown)) {
+      const target = untrimmedTarget.trim()
       if (/^(?:https?:|mailto:|#)/u.test(target)) continue
       const pathWithoutFragment = target.split('#', 1)[0]
+      if (pathWithoutFragment.length === 0) continue
+      const decodedPath = decodeURIComponent(pathWithoutFragment)
+      if (
+        decodedPath.includes('\0') ||
+        decodedPath.includes('\\') ||
+        decodedPath.startsWith('/') ||
+        /^[A-Za-z]:/u.test(decodedPath)
+      ) {
+        throw new Error(`Markdown link target is unsafe: ${path} -> ${target}`)
+      }
       const resolvedTarget = resolve(
         dirname(documentPath),
-        ...decodeURIComponent(pathWithoutFragment).split('/'),
+        decodedPath,
       )
       const bundleRelative = relative(bundleDirectory, resolvedTarget).replaceAll(
         '\\',
         '/',
       )
-      if (bundleRelative === '..' || bundleRelative.startsWith('../')) {
-        throw new Error(`documentation link escapes the candidate bundle: ${target}`)
+      if (
+        bundleRelative === '' ||
+        bundleRelative === '..' ||
+        bundleRelative.startsWith('../') ||
+        bundleRelative.includes(':/')
+      ) {
+        throw new Error(`Markdown link target escapes the bundle: ${path} -> ${target}`)
       }
-      const stat = await lstat(resolvedTarget)
+      let stat
+      try {
+        stat = await lstat(resolvedTarget)
+      } catch (error) {
+        if (error?.code === 'ENOENT') {
+          throw new Error(`Markdown link target is missing: ${path} -> ${target}`)
+        }
+        throw error
+      }
       if (!stat.isFile() || stat.isSymbolicLink()) {
-        throw new Error(`documentation link is not a bundled file: ${target}`)
+        throw new Error(`Markdown link target is not a regular file: ${path} -> ${target}`)
       }
     }
   }
@@ -352,6 +424,12 @@ export async function verifyCandidateBundle(bundleDirectory) {
       ),
     },
     {
+      path: 'documentation/release-evidence.md',
+      sha256: sha256(
+        await readFile(resolve(bundleDirectory, 'documentation', 'release-evidence.md')),
+      ),
+    },
+    {
       path: 'fixtures/candidate-docs',
       sha256: await directoryDigest(
         resolve(bundleDirectory, 'fixtures', 'candidate-docs'),
@@ -359,7 +437,7 @@ export async function verifyCandidateBundle(bundleDirectory) {
     },
   ]
   assert.deepEqual(candidate.documentation.resources, expectedResources)
-  await verifyVersionedDocumentationLinks(bundleDirectory)
+  await verifyCandidateBundleMarkdownLinks(bundleDirectory)
 
   const evidenceDirectory = resolve(
     bundleDirectory,
@@ -449,10 +527,12 @@ export async function buildCandidateBundle({
   const stagingRoot = await mkdtemp(join(tmpdir(), 'wrist-menu-candidate-'))
 
   try {
+    const packageInput = resolve(stagingRoot, 'package-input')
+    await stageCandidatePackage(root, packageInput, sourceCommit)
     const packOutput = execFileSync(
       process.execPath,
       [npmCli, 'pack', '--json', '--pack-destination', stagingRoot],
-      { cwd: root, encoding: 'utf8' },
+      { cwd: packageInput, encoding: 'utf8' },
     )
     const [archive] = JSON.parse(packOutput)
     assert.ok(archive, 'npm pack did not report an archive')
@@ -472,6 +552,10 @@ export async function buildCandidateBundle({
           {
             path: 'documentation/validation-gates.md',
             sha256: inputsBefore.validationGatesSha256,
+          },
+          {
+            path: 'documentation/release-evidence.md',
+            sha256: inputsBefore.releaseEvidenceSha256,
           },
           {
             path: 'fixtures/candidate-docs',
@@ -507,6 +591,10 @@ export async function buildCandidateBundle({
     await cp(
       resolve(root, 'docs', 'validation-gates.md'),
       resolve(documentationDirectory, 'validation-gates.md'),
+    )
+    await cp(
+      resolve(root, 'docs', 'release-evidence.md'),
+      resolve(documentationDirectory, 'release-evidence.md'),
     )
     await mkdir(resolve(stagedBundle, 'fixtures'))
     await cp(
@@ -554,6 +642,10 @@ export async function buildCandidateBundle({
           {
             path: 'documentation/validation-gates.md',
             sha256: inputsBefore.validationGatesSha256,
+          },
+          {
+            path: 'documentation/release-evidence.md',
+            sha256: inputsBefore.releaseEvidenceSha256,
           },
           {
             path: 'fixtures/candidate-docs',

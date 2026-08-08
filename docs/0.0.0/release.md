@@ -27,6 +27,9 @@ source, tests, fixtures, examples, maps, and generated documentation sidecars
 are rejected. `candidate.json.documentation.revision` is an exact commit only
 for a clean worktree; a dirty build records `null` and `working-tree`. This
 avoids embedding a fake future commit or a self-referential archive digest.
+Before packing, the generator stages that approved payload and rewrites the
+staged README's repository-relative documentation links to exact GitHub URLs at
+the captured source commit. It never mutates the resulting npm archive.
 
 ## Extracted-candidate consumers
 

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 
 import { APPROVED_PACKAGE_FILES } from '../scripts/approved-package-files.mjs'
@@ -10,6 +10,7 @@ import {
   createCandidateEvidenceIndex,
   assertCandidateSourceUnchanged,
   captureCandidateSourceState,
+  verifyCandidateBundleMarkdownLinks,
   verifyCandidateFileList,
 } from '../scripts/candidate-package.mjs'
 
@@ -105,6 +106,59 @@ test('candidate source guard detects concurrent changes even when status paths s
     )
   } finally {
     await rm(repository, { recursive: true, force: true })
+  }
+})
+
+test('candidate bundle rejects broken links from every Markdown subtree', async () => {
+  const bundle = await mkdtemp(join(tmpdir(), 'wrist-menu-markdown-links-'))
+  const documents = [
+    'package/README.md',
+    'documentation/validation-gates.md',
+    'fixtures/candidate-docs/README.md',
+    'documentation/evidence/record/README.md',
+  ]
+  try {
+    for (const path of documents) {
+      const document = join(bundle, ...path.split('/'))
+      await mkdir(dirname(document), { recursive: true })
+      await writeFile(join(dirname(document), 'target.txt'), 'target\n')
+      await writeFile(document, '[target](target.txt)\n')
+    }
+    await assert.doesNotReject(() => verifyCandidateBundleMarkdownLinks(bundle))
+
+    for (const path of documents) {
+      const document = join(bundle, ...path.split('/'))
+      await writeFile(document, '[missing](missing.txt)\n')
+      await assert.rejects(
+        () => verifyCandidateBundleMarkdownLinks(bundle),
+        new RegExp(`Markdown link target is missing: ${path.replace('.', '\\.')}`),
+      )
+      await writeFile(document, '[target](target.txt)\n')
+    }
+
+    const packageReadme = join(bundle, 'package', 'README.md')
+    for (const target of [
+      '../../../../outside.md',
+      '/absolute.md',
+      'C:/windows.md',
+      '..%5C..%5Coutside.md',
+    ]) {
+      await writeFile(packageReadme, `[unsafe](${target})\n`)
+      await assert.rejects(
+        () => verifyCandidateBundleMarkdownLinks(bundle),
+        /Markdown link target (?:is unsafe|escapes the bundle)/,
+      )
+    }
+
+    await writeFile(packageReadme, '[target](target.txt "title")\n')
+    await assert.doesNotReject(() => verifyCandidateBundleMarkdownLinks(bundle))
+    await writeFile(packageReadme, '[missing][target]\n\n[target]: missing.txt\n')
+    await assert.rejects(
+      () => verifyCandidateBundleMarkdownLinks(bundle),
+      /Markdown link target is missing: package\/README\.md -> missing\.txt/,
+    )
+  } finally {
+    await rm(bundle, { recursive: true, force: true })
   }
 })
 
