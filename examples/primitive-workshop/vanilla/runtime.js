@@ -47,7 +47,6 @@ export function deriveWorkshopView(model, lifecycle, snapshotOptions = {}) {
       (!lifecycle.hasLiveSession || lifecycle.cursorAvailable),
   })
 }
-
 /**
  * Bind the Vanilla lifecycle directly to the production render seam.
  * @param {WorkshopRuntimeOptions} options
@@ -71,4 +70,3 @@ export function createWorkshopRuntime(options) {
     },
   })
 }
-
