@@ -14,6 +14,10 @@ import { fileURLToPath } from 'node:url'
 import { digestNamedCandidate } from './candidate-tarball.mjs'
 import { assertCompleteJourneyCoverage } from '../fixtures/consumers/journey-evidence.mjs'
 import {
+  evaluatePerformanceBaselineGate,
+  performanceBaselinePrerequisites,
+} from '../fixtures/consumers/performance-baseline.mjs'
+import {
   buildAutomatedEvidenceRecord,
   buildCandidateUnavailableEvidenceRecord,
   canonicalJson,
@@ -42,6 +46,11 @@ const instrumentationPaths = [
   resolve(root, 'fixtures', 'consumers', 'import-safety.mjs'),
   resolve(root, 'fixtures', 'consumers', 'journey-evidence.mjs'),
   resolve(root, 'fixtures', 'consumers', 'runtime-evidence.mjs'),
+  resolve(root, 'fixtures', 'consumers', 'performance-baseline.mjs'),
+  resolve(root, 'fixtures', 'consumers', 'performance-workload.mjs'),
+  resolve(root, 'fixtures', 'consumers', 'reach-scroll-workload.mjs'),
+  resolve(root, 'fixtures', 'consumers', 'react-performance-baseline.mjs'),
+  resolve(root, 'fixtures', 'consumers', 'react-renderer-harness.mjs'),
   resolve(root, 'fixtures', 'consumers', 'controller-action-journey.mjs'),
   resolve(root, 'fixtures', 'consumers', 'three', 'import-safety.mjs'),
   resolve(root, 'fixtures', 'consumers', 'three', 'smoke.mjs'),
@@ -467,6 +476,7 @@ async function main() {
         readJsonOr(resolve(rawDirectory, name), { status: 'failed' }),
       ),
     )
+    const performanceBaselinePolicy = await readJson(baselinePath)
 
     const laneStates = {
       'three-0.185.1': consumerLanePassed(consumerResult, threeReport, 'three-0.185.1', candidate.sha256),
@@ -581,6 +591,53 @@ async function main() {
       automatedResult.status === 'passed'
         ? automatedReport.gates?.[id]?.status
         : 'failed'
+    const evaluatedPerformanceBaseline = evaluatePerformanceBaselineGate(
+      performanceBaselinePolicy,
+      {
+        vanilla:
+          automatedReport.gates?.['performance-baseline']?.variants?.vanilla
+            ?.measurements,
+        'react-18.3.1-r3f-8.18.0':
+          react18Report.performanceBaseline?.measurements,
+        'react-19.2.7-r3f-9.6.1':
+          react19Report.performanceBaseline?.measurements,
+      },
+    )
+    const performancePrerequisites = performanceBaselinePrerequisites({
+      vanillaAutomatedReport: automatedReport,
+      react18PackedConsumer: consumerLanePassed(
+        consumerResult,
+        react18Report,
+        'react-18.3.1-r3f-8.18.0',
+        candidate.sha256,
+      ),
+      react19PackedConsumer: consumerLanePassed(
+        consumerResult,
+        react19Report,
+        'react-19.2.7-r3f-9.6.1',
+        candidate.sha256,
+      ),
+    })
+    const performanceBaselineReport = {
+      ...evaluatedPerformanceBaseline,
+      status:
+        evaluatedPerformanceBaseline.status === 'passed' &&
+        Object.values(performancePrerequisites).every(Boolean)
+          ? 'passed'
+          : 'failed',
+      failures: [
+        ...evaluatedPerformanceBaseline.failures,
+        ...Object.entries(performancePrerequisites)
+          .filter(([, passed]) => !passed)
+          .map(([prerequisite]) => `${prerequisite} prerequisite failed`),
+      ],
+      prerequisites: performancePrerequisites,
+    }
+    await writeFile(
+      resolve(rawDirectory, 'performance-baseline.json'),
+      canonicalJson(performanceBaselineReport),
+    )
+
     const gates = [
       gate(
         'deterministic-boundaries',
@@ -614,7 +671,6 @@ async function main() {
         'identical-frame-mutation',
         'resource-growth',
         'lifecycle-leak',
-        'performance-baseline',
       ].map((id) =>
         gate(
           id,
@@ -622,6 +678,12 @@ async function main() {
           'raw/automated-package-gates.json',
           automatedReport.gates?.[id]?.reason,
         ),
+      ),
+      gate(
+        'performance-baseline',
+        performanceBaselineReport.status,
+        'raw/performance-baseline.json',
+        performanceBaselineReport.failures[0],
       ),
       gate(
         'scene-event-shield',

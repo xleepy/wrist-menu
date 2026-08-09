@@ -18,6 +18,17 @@ import { reachScrollSnapshot } from '../../reach-scroll.mjs'
 import { createWristXrFixture } from '../../wrist-reveal-xr.mjs'
 import { writeLaneReport } from '../evidence-report.mjs'
 import {
+  evaluatePerformanceVariant,
+  performanceBaselineVariants,
+} from '../performance-baseline.mjs'
+import {
+  packageUpdateTimingObservation,
+  performanceMeasuredFrameSamples,
+  performanceWarmupFrameSamples,
+  sceneCounters,
+} from '../performance-workload.mjs'
+import { activeScrollPositionY } from '../reach-scroll-workload.mjs'
+import {
   allocationDelta,
   evaluateConstructionInvariants,
   identityGrowth,
@@ -40,40 +51,6 @@ function inventory(root) {
 
 function resourceCounts(root) {
   return inventory(root).counts
-}
-
-function sceneCounters(root) {
-  const resources = inventory(root)
-  let drawCalls = 0
-  let triangles = 0
-  let lines = 0
-  const visiblePrograms = new Set()
-  root.traverseVisible((object) => {
-    if (
-      (object.isMesh !== true && object.isLine !== true) ||
-      object.material?.visible === false
-    ) return
-    drawCalls += 1
-    const geometry = object.geometry
-    const count = geometry?.index?.count ?? geometry?.attributes?.position?.count ?? 0
-    if (object.isLine === true) lines += Math.max(0, count - 1)
-    else triangles += count / 3
-    const objectMaterials = Array.isArray(object.material)
-      ? object.material
-      : [object.material]
-    for (const material of objectMaterials) {
-      visiblePrograms.add(`${material.type}:${material.customProgramCacheKey()}`)
-    }
-  })
-  return {
-    drawCalls,
-    triangles,
-    lines,
-    geometries: resources.counts.geometries,
-    textures: resources.counts.textures,
-    programs: visiblePrograms.size,
-    atlasUploads: resources.counts.textureUploadVersions,
-  }
 }
 
 function rendererPolicyProbe(fixture) {
@@ -111,35 +88,19 @@ function rendererPolicyProbe(fixture) {
   return calls
 }
 
-function percentile(values, fraction) {
-  const sorted = [...values].sort((left, right) => left - right)
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]
-}
-
-function withinBaseline(measurement, baseline) {
-  const mappings = {
-    drawCalls: 'drawCallsMax',
-    triangles: 'trianglesMax',
-    lines: 'linesMax',
-    geometries: 'geometriesMax',
-    textures: 'texturesMax',
-    programs: 'programsMax',
-    atlasUploads: 'atlasUploadsMax',
-    packageUpdateP95Ms: 'packageUpdateP95MsMax',
-  }
-  return Object.entries(mappings).every(
-    ([measurementName, baselineName]) =>
-      measurement[measurementName] <= baseline[baselineName],
-  )
-}
-
 function measurePhaseWorkload(phase) {
-  const { fixture, menu } = createMenu()
+  const snapshot = {
+    ...reachScrollSnapshot,
+    activationMode: phase === 'hidden' ? 'forced-closed' : 'forced-open',
+  }
+  const { fixture, menu } = createMenu(snapshot)
   const activeScroll = phase === 'activeScroll'
-  const driveFrame = (index, time) => {
+  let activeScrollFrame = 0
+  const driveFrame = (_index, time) => {
     if (activeScroll) {
+      const positionY = activeScrollPositionY(activeScrollFrame)
       const origin = menu.presentation.group.localToWorld(
-        new Vector3(0.09, -0.03 * ((index % 20) / 20), 1),
+        new Vector3(0, positionY, 1),
       )
       const orientation = menu.presentation.group.getWorldQuaternion(
         new Quaternion(),
@@ -147,34 +108,30 @@ function measurePhaseWorkload(phase) {
       fixture.setTargetRayMatrix(
         new Matrix4().compose(origin, orientation, new Vector3(1, 1, 1)),
       )
+      activeScrollFrame += 1
     } else {
       fixture.setTargetRayMatrix(new Matrix4().makeTranslation(2, 2, 1))
     }
     updateThreeWristMenu(menu, { time, frame: fixture.frame })
   }
   try {
-    syncThreeWristMenu(menu, {
-      ...reachScrollSnapshot,
-      activationMode: phase === 'hidden' ? 'forced-closed' : 'forced-open',
-    })
     driveFrame(0, 2)
     driveFrame(1, 3)
-    const warmupFrames = 1_000
+    const warmupFrames = performanceWarmupFrameSamples
     for (let index = 0; index < warmupFrames; index += 1) {
       driveFrame(index, 4 + index)
     }
     const timings = []
-    for (let index = 0; index < 10_000; index += 1) {
+    for (let index = 0; index < performanceMeasuredFrameSamples; index += 1) {
       const started = performance.now()
       driveFrame(index, 4 + warmupFrames + index)
       timings.push(performance.now() - started)
     }
     return {
       ...sceneCounters(menu.presentation.group),
-      packageUpdateP95Ms: percentile(timings, 0.95),
+      ...packageUpdateTimingObservation(timings),
       workload: phase,
       warmupFrames,
-      measuredFrames: timings.length,
       menuVisible: menu.presentation.group.visible,
       scrollOwnerActive: menu.runtime.scrollState.ownerSourceId !== null,
       scrollOffset: menu.runtime.scrollState.offset,
@@ -184,17 +141,17 @@ function measurePhaseWorkload(phase) {
   }
 }
 
-function createMenu() {
+function createMenu(snapshot = reachScrollSnapshot) {
   const fixture = createWristXrFixture({ menuKind: 'controller' })
   const rendererPolicyCalls = rendererPolicyProbe(fixture)
   fixture.setWristMatrix(new Matrix4())
-  return { fixture, rendererPolicyCalls, menu: mountMenu(fixture) }
+  return { fixture, rendererPolicyCalls, menu: mountMenu(fixture, snapshot) }
 }
 
-function mountMenu(fixture) {
+function mountMenu(fixture, snapshot = reachScrollSnapshot) {
   const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
-    snapshot: reachScrollSnapshot,
+    snapshot,
     onEvent: () => undefined,
   })
   updateThreeWristMenu(menu, { time: 0, frame: fixture.frame })
@@ -457,23 +414,27 @@ const visibleIdle = measurePhaseWorkload('visibleIdle')
 const activeScroll = measurePhaseWorkload('activeScroll')
 
 const measurements = { hidden, visibleIdle, activeScroll }
+const vanillaEvaluation = evaluatePerformanceVariant(
+  performanceBaselineVariants.find(({ id }) => id === 'vanilla'),
+  measurements,
+  baselines.variants.vanilla,
+)
+const vanillaWorkloadFailures = Object.entries(measurements)
+  .filter(([phase, measurement]) =>
+    (phase === 'hidden' ? measurement.menuVisible : !measurement.menuVisible) ||
+    (phase === 'activeScroll' &&
+      !(measurement.scrollOwnerActive && measurement.scrollOffset > 0)),
+  )
+  .map(([phase]) => `${phase} workload was not realized`)
 const performanceVariants = {
   vanilla: {
-    status: Object.entries(measurements).every(([phase, measurement]) =>
-      withinBaseline(measurement, baselines.variants.vanilla[phase]) &&
-      (phase === 'hidden' ? !measurement.menuVisible : measurement.menuVisible) &&
-      (phase !== 'activeScroll' ||
-        (measurement.scrollOwnerActive && measurement.scrollOffset > 0)),
-    )
-      ? 'passed'
-      : 'failed',
+    status:
+      vanillaEvaluation.status === 'passed' &&
+      vanillaWorkloadFailures.length === 0
+        ? 'passed'
+        : 'failed',
+    failures: [...vanillaEvaluation.failures, ...vanillaWorkloadFailures],
     measurements,
-  },
-  react: {
-    status: 'failed',
-    reason:
-      'the packed React Example Variant does not yet expose direct package-update and renderer counters',
-    measurements: null,
   },
 }
 

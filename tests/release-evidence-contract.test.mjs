@@ -9,6 +9,18 @@ import {
   evidenceInvalidationReasons,
   validateCompatibilityManifest,
 } from '../scripts/release-evidence-lib.mjs'
+import {
+  evaluatePerformanceBaselineGate,
+  evaluatePerformanceVariant,
+  performanceBaselinePhases,
+  performanceBaselinePrerequisites,
+  performanceBaselineVariants,
+  performanceBaselineVariantIds,
+} from '../fixtures/consumers/performance-baseline.mjs'
+import {
+  installReactStateSetterProbe,
+  instrumentUniqueAddedFrameSubscription,
+} from '../fixtures/consumers/react-renderer-harness.mjs'
 
 const readJson = async (path) =>
   JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8'))
@@ -309,11 +321,261 @@ test('the automated protocol names every threshold triplet and fail-closed gate'
   ]) {
     assert.ok(protocol.requiredGateIds.includes(gate), gate)
   }
-  for (const variant of ['vanilla', 'react']) {
+  assert.deepEqual(
+    Object.keys(baselines.variants),
+    performanceBaselineVariantIds,
+  )
+  for (const variant of performanceBaselineVariantIds) {
     assert.deepEqual(Object.keys(baselines.variants[variant]), [
       'hidden',
       'visibleIdle',
       'activeScroll',
     ])
   }
+})
+
+test('the performance baseline gate fails closed on missing, exceeded, or React-updating measurements', async () => {
+  const baselines = await readJson('../evidence/baselines/performance-v1.json')
+  const laneId = 'react-18.3.1-r3f-8.18.0'
+  const variant = performanceBaselineVariants.find(({ id }) => id === laneId)
+  const measurement = (phase) => ({
+    workload: phase,
+    frameSamples: 10_000,
+    drawCalls: 0,
+    triangles: 0,
+    lines: 0,
+    geometries: 0,
+    textures: 0,
+    programs: 0,
+    atlasUploads: 0,
+    packageUpdateP95Ms: 0,
+    packageUpdateSamplesMs: Array.from({ length: 10_000 }, () => 0),
+    reactStateSetterCalls: 0,
+    reactCommits: 0,
+    reactStateSettersInstrumented: 2,
+  })
+  const measurements = Object.fromEntries(
+    performanceBaselinePhases.map((phase) => [phase, measurement(phase)]),
+  )
+
+  assert.equal(
+    evaluatePerformanceVariant(
+      variant,
+      measurements,
+      baselines.variants[laneId],
+    ).status,
+    'passed',
+  )
+
+  for (const mutate of [
+    (candidate) => { delete candidate.visibleIdle.triangles },
+    (candidate) => {
+      candidate.visibleIdle.drawCalls =
+        baselines.variants[laneId].visibleIdle.drawCallsMax + 1
+    },
+    (candidate) => { candidate.activeScroll.reactStateSetterCalls = 1 },
+    (candidate) => { candidate.hidden.reactCommits = 1 },
+    (candidate) => { candidate.hidden.reactStateSettersInstrumented = 0 },
+    (candidate) => { candidate.visibleIdle.packageUpdateSamplesMs.pop() },
+    (candidate) => { candidate.hidden.frameSamples = 9_999 },
+  ]) {
+    const candidate = structuredClone(measurements)
+    mutate(candidate)
+    assert.equal(
+      evaluatePerformanceVariant(
+        variant,
+        candidate,
+        baselines.variants[laneId],
+      ).status,
+      'failed',
+    )
+  }
+
+  assert.equal(
+    evaluatePerformanceVariant(
+      variant,
+      measurements,
+      { ...baselines.variants[laneId], activeScroll: undefined },
+    ).status,
+    'failed',
+  )
+  assert.equal(
+    evaluatePerformanceVariant(
+      { ...variant, renderer: 'three' },
+      measurements,
+      baselines.variants[laneId],
+    ).status,
+    'failed',
+  )
+
+  const variants = {
+    vanilla: Object.fromEntries(
+      performanceBaselinePhases.map((phase) => {
+        const {
+          reactStateSetterCalls,
+          reactCommits,
+          reactStateSettersInstrumented,
+          ...vanilla
+        } = measurements[phase]
+        return [phase, vanilla]
+      }),
+    ),
+    'react-18.3.1-r3f-8.18.0': measurements,
+    'react-19.2.7-r3f-9.6.1': structuredClone(measurements),
+  }
+  assert.equal(
+    evaluatePerformanceBaselineGate(baselines, variants).status,
+    'passed',
+  )
+  delete variants['react-19.2.7-r3f-9.6.1']
+  assert.equal(
+    evaluatePerformanceBaselineGate(baselines, variants).status,
+    'failed',
+  )
+})
+
+test('React performance evidence runs through both packed public consumer lanes without source coupling', async () => {
+  const [
+    react18,
+    react19,
+    instrumentation,
+    rendererHarness,
+    vanillaInstrumentation,
+    journey,
+    reachWorkload,
+  ] = await Promise.all([
+    readFile(new URL('../fixtures/consumers/react-18/smoke.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../fixtures/consumers/react-19/smoke.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../fixtures/consumers/react-performance-baseline.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../fixtures/consumers/react-renderer-harness.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../fixtures/consumers/three/automated-gates.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../fixtures/consumers/controller-action-journey.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../fixtures/consumers/reach-scroll-workload.mjs', import.meta.url), 'utf8'),
+  ])
+
+  for (const source of [react18, react19]) {
+    assert.match(source, /import\(['"]@xleepy\/wrist-menu\/react['"]\)/)
+    assert.match(source, /runPackedReactPerformanceBaseline/)
+    assert.ok(
+      source.indexOf('const stateSetterProbe = installReactStateSetterProbe') <
+        source.indexOf("import('@xleepy/wrist-menu/react')"),
+    )
+  }
+  assert.match(instrumentation, /from ['"]\.\/performance-workload\.mjs['"]/)
+  assert.match(vanillaInstrumentation, /from ['"]\.\.\/performance-workload\.mjs['"]/)
+  assert.match(instrumentation, /from ['"]\.\/reach-scroll-workload\.mjs['"]/)
+  assert.match(vanillaInstrumentation, /from ['"]\.\.\/reach-scroll-workload\.mjs['"]/)
+  assert.match(journey, /from ['"]\.\/react-renderer-harness\.mjs['"]/)
+  assert.match(journey, /from ['"]\.\/reach-scroll-workload\.mjs['"]/)
+  assert.doesNotMatch(instrumentation, /controller-action-journey/)
+  assert.match(instrumentation, /instrumentUniqueAddedFrameSubscription/)
+  assert.doesNotMatch(
+    instrumentation,
+    /(?:beforeFrameSample|afterFrameSample|-1001|-999)/,
+  )
+  assert.doesNotMatch(
+    journey,
+    /(?:function installIwerNodePrimitives|function createCanvas|fiber\.createRoot|createXRStore)/,
+  )
+  assert.doesNotMatch(
+    `${instrumentation}\n${vanillaInstrumentation}`,
+    /function (?:sceneCounters|percentile)\(/,
+  )
+  assert.doesNotMatch(
+    `${react18}\n${react19}\n${instrumentation}\n${rendererHarness}\n${journey}\n${reachWorkload}`,
+    /(?:\.\.\/)+src\//,
+  )
+})
+
+test('a package-owned state setter dispatch is counted when React bails out without a commit', () => {
+  let renders = 1
+  let currentState = 'unchanged'
+  const reactRuntime = {
+    useState() {
+      return [currentState, (nextState) => {
+        if (nextState !== currentState) {
+          currentState = nextState
+          renders += 1
+        }
+      }]
+    },
+  }
+  const probe = installReactStateSetterProbe(reactRuntime, {
+    ownsHook: () => true,
+  })
+  const [, setState] = reactRuntime.useState(currentState)
+
+  probe.beginFrameSamples()
+  setState('unchanged')
+  const observation = probe.endFrameSamples()
+  probe.restore()
+
+  assert.equal(renders, 1)
+  assert.equal(observation.reactStateSetterCalls, 1)
+})
+
+test('package timing excludes another same-priority frame callback', () => {
+  let clock = 0
+  const samePriorityHostSubscription = {
+    priority: -1000,
+    ref: { current: () => { clock += 100 } },
+  }
+  const packedWristMenuSubscription = {
+    priority: -1000,
+    ref: { current: () => { clock += 3 } },
+  }
+  const timingProbe = instrumentUniqueAddedFrameSubscription(
+    [samePriorityHostSubscription],
+    [samePriorityHostSubscription, packedWristMenuSubscription],
+    { now: () => clock },
+  )
+
+  timingProbe.start()
+  samePriorityHostSubscription.ref.current()
+  packedWristMenuSubscription.ref.current()
+  assert.deepEqual(timingProbe.stop(), [3])
+  timingProbe.restore()
+
+  assert.throws(
+    () => instrumentUniqueAddedFrameSubscription(
+      [samePriorityHostSubscription],
+      [
+        samePriorityHostSubscription,
+        packedWristMenuSubscription,
+        { priority: -1000, ref: { current: () => undefined } },
+      ],
+      { now: () => clock },
+    ),
+    /exactly one newly registered priority -1000 frame subscription/,
+  )
+})
+
+test('the performance Release Gate is independent from failed sibling automation gates', () => {
+  const vanillaAutomatedReport = {
+    gates: {
+      allocation: { status: 'failed' },
+      'performance-baseline': { status: 'passed' },
+    },
+  }
+
+  assert.deepEqual(
+    performanceBaselinePrerequisites({
+      vanillaAutomatedReport,
+      react18PackedConsumer: true,
+      react19PackedConsumer: true,
+    }),
+    {
+      vanillaPackedConsumer: true,
+      react18PackedConsumer: true,
+      react19PackedConsumer: true,
+    },
+  )
+  assert.equal(
+    performanceBaselinePrerequisites({
+      vanillaAutomatedReport: { gates: {} },
+      react18PackedConsumer: true,
+      react19PackedConsumer: true,
+    }).vanillaPackedConsumer,
+    false,
+  )
 })

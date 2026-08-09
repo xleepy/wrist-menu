@@ -9,216 +9,15 @@ import {
   semanticCaseIds,
   shieldCaseIds,
 } from './journey-evidence.mjs'
-
-function installIwerNodePrimitives() {
-  const names = [
-    'DOMPointReadOnly',
-    'localStorage',
-    'requestAnimationFrame',
-    'cancelAnimationFrame',
-    'fetch',
-  ]
-  const descriptors = new Map(
-    names.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
-  )
-
-  class Point {
-    constructor(x = 0, y = 0, z = 0, w = 1) {
-      Object.assign(this, { x, y, z, w })
-    }
-  }
-
-  Object.defineProperties(globalThis, {
-    DOMPointReadOnly: { configurable: true, value: Point },
-    localStorage: {
-      configurable: true,
-      value: { getItem: () => null, setItem: () => undefined },
-    },
-    requestAnimationFrame: { configurable: true, value: () => 1 },
-    cancelAnimationFrame: { configurable: true, value: () => undefined },
-    fetch: {
-      configurable: true,
-      value: async (url) => ({
-        ok: true,
-        async json() {
-          if (String(url).endsWith('profilesList.json')) {
-            return {
-              'meta-quest-touch-plus': {
-                path: 'meta-quest-touch-plus/profile.json',
-              },
-            }
-          }
-          return {
-            profileId: 'meta-quest-touch-plus',
-            layouts: {
-              left: {
-                assetPath: 'left.glb',
-                components: {},
-              },
-              right: {
-                assetPath: 'right.glb',
-                components: {},
-              },
-            },
-          }
-        },
-      }),
-    },
-  })
-
-  return () => {
-    for (const [name, descriptor] of descriptors) {
-      if (descriptor === undefined) delete globalThis[name]
-      else Object.defineProperty(globalThis, name, descriptor)
-    }
-  }
-}
-
-const oppositeWrist = (wrist) => (wrist === 'left' ? 'right' : 'left')
+import {
+  createIwerControllerFixture,
+  createIwerHandFixture,
+  createReactIwerRendererHarness,
+} from './react-renderer-harness.mjs'
+import { reachScrollGapYMeters } from './reach-scroll-workload.mjs'
 
 const REACH_ROW_STRIDE_METERS = 0.0225
 const REACH_VIEWPORT_TOP_METERS = 0.039
-const REACH_SCROLL_GAP_Y_METERS = Object.freeze([
-  0.01775,
-  -0.00475,
-  -0.02725,
-  -0.04976,
-])
-
-async function createIwerControllerFixture(iwer, menuWrist = 'left') {
-  const restoreGlobals = installIwerNodePrimitives()
-  const device = new iwer.XRDevice(iwer.metaQuest3, {
-    canvasContainer: { dataset: {}, style: {} },
-  })
-  device.primaryInputMode = 'controller'
-  const menuController = device.controllers[menuWrist]
-  menuController.position.set(0, 0, 0)
-  menuController.quaternion.set(0, -Math.SQRT1_2, 0, Math.SQRT1_2)
-  const controller = device.controllers[oppositeWrist(menuWrist)]
-  controller.position.set(0, 0, 1)
-  controller.quaternion.set(0, 0, 0, 1)
-
-  let session = new iwer.XRSession(device, 'immersive-vr', ['local-floor'])
-  let referenceSpace = await session.requestReferenceSpace('local-floor')
-  session[iwer.P_SESSION].updateActiveInputSources()
-  let sequence = 0
-
-  const nextFrame = (time) => {
-    sequence += 1
-    const frame = new iwer.XRFrame(session, sequence, true, true, time)
-    device[iwer.P_DEVICE].onFrameStart(frame)
-    session[iwer.P_SESSION].updateActiveInputSources()
-    return frame
-  }
-
-  return {
-    controller,
-    device,
-    get frameCount() {
-      return sequence
-    },
-    inputSource: controller.inputSource,
-    menuInput: menuController,
-    menuWrist,
-    get referenceSpace() {
-      return referenceSpace
-    },
-    get session() {
-      return session
-    },
-    nextFrame,
-    press(time) {
-      controller.updateButtonValue('trigger', 1)
-      return nextFrame(time)
-    },
-    release(time) {
-      controller.updateButtonValue('trigger', 0)
-      return nextFrame(time)
-    },
-    async endSession() {
-      await session.end()
-    },
-    async reenterSession() {
-      session = new iwer.XRSession(device, 'immersive-vr', ['local-floor'])
-      referenceSpace = await session.requestReferenceSpace('local-floor')
-      session[iwer.P_SESSION].updateActiveInputSources()
-      return session
-    },
-    restoreGlobals,
-  }
-}
-
-async function createIwerHandFixture(iwer, menuWrist = 'left') {
-  const restoreGlobals = installIwerNodePrimitives()
-  const device = new iwer.XRDevice(iwer.metaQuest3, {
-    canvasContainer: { dataset: {}, style: {} },
-  })
-  device.primaryInputMode = 'hand'
-  const menuHand = device.hands[menuWrist]
-  menuHand.position.set(-0.2, 1.2, -0.5)
-  menuHand.quaternion.set(0, 0, 0, 1)
-  const selectionHand = device.hands[oppositeWrist(menuWrist)]
-  selectionHand.position.set(0.5, 1.2, 0)
-  selectionHand.quaternion.set(0, 0, 0, 1)
-
-  let session = new iwer.XRSession(device, 'immersive-vr', [
-    'local-floor',
-    'hand-tracking',
-  ])
-  let referenceSpace = await session.requestReferenceSpace('local-floor')
-  session[iwer.P_SESSION].updateActiveInputSources()
-  let sequence = 0
-
-  const nextFrame = (time) => {
-    sequence += 1
-    const frame = new iwer.XRFrame(session, sequence, true, true, time)
-    device[iwer.P_DEVICE].onFrameStart(frame)
-    session[iwer.P_SESSION].updateActiveInputSources()
-    return frame
-  }
-
-  return {
-    device,
-    get frameCount() {
-      return sequence
-    },
-    inputSource: selectionHand.inputSource,
-    menuInput: menuHand,
-    menuWrist,
-    selectionInput: selectionHand,
-    get referenceSpace() {
-      return referenceSpace
-    },
-    get session() {
-      return session
-    },
-    nextFrame,
-    moveFingertipTo(frame, target) {
-      const fingertipSpace = selectionHand.inputSource.hand.get('index-finger-tip')
-      const pose = frame.getJointPose(fingertipSpace, referenceSpace)
-      assert.ok(pose)
-      selectionHand.position.set(
-        selectionHand.position.x + target.x - pose.transform.position.x,
-        selectionHand.position.y + target.y - pose.transform.position.y,
-        selectionHand.position.z + target.z - pose.transform.position.z,
-      )
-    },
-    async endSession() {
-      await session.end()
-    },
-    async reenterSession() {
-      session = new iwer.XRSession(device, 'immersive-vr', [
-        'local-floor',
-        'hand-tracking',
-      ])
-      referenceSpace = await session.requestReferenceSpace('local-floor')
-      session[iwer.P_SESSION].updateActiveInputSources()
-      return session
-    },
-    restoreGlobals,
-  }
-}
-
 function snapshotForWrist(snapshot, wrist) {
   return {
     ...snapshot,
@@ -728,13 +527,13 @@ async function runThreeSemanticMatrix({
           }
 
           releaseSource()
-          const firstDownwardDrag = REACH_SCROLL_GAP_Y_METERS.map(aimAtPanelY)
+          const firstDownwardDrag = reachScrollGapYMeters.map(aimAtPanelY)
           const ownershipAcquired =
             menu.runtime.scrollState.ownerSourceId !== null
           releaseSource()
           const ownershipReleased =
             menu.runtime.scrollState.ownerSourceId === null
-          const secondDownwardDrag = REACH_SCROLL_GAP_Y_METERS.map(aimAtPanelY)
+          const secondDownwardDrag = reachScrollGapYMeters.map(aimAtPanelY)
           const rearmed = menu.runtime.scrollState.ownerSourceId !== null
           const downwardSamples = [
             ...firstDownwardDrag,
@@ -744,7 +543,7 @@ async function runThreeSemanticMatrix({
           const bottomClamp = menu.runtime.scrollState.offset
 
           releaseSource()
-          const upwardGapYs = [...REACH_SCROLL_GAP_Y_METERS].reverse()
+          const upwardGapYs = [...reachScrollGapYMeters].reverse()
           const firstUpwardDrag = upwardGapYs.map(aimAtPanelY)
           releaseSource()
           const secondUpwardDrag = upwardGapYs.map(aimAtPanelY)
@@ -1353,43 +1152,6 @@ export async function runPackedThreeHandJourney({
   }
 }
 
-function createCanvas() {
-  const listeners = new Map()
-  const canvas = {
-    width: 1,
-    height: 1,
-    clientWidth: 1,
-    clientHeight: 1,
-    style: {},
-    addEventListener(type, listener) {
-      listeners.set(type, listener)
-    },
-    removeEventListener(type) {
-      listeners.delete(type)
-    },
-    setPointerCapture: () => undefined,
-    releasePointerCapture: () => undefined,
-    dispatch(type) {
-      const listener = listeners.get(type)
-      listener?.({
-        type,
-        offsetX: 0.5,
-        offsetY: 0.5,
-        pointerId: 1,
-        pointerType: 'mouse',
-        button: 0,
-        buttons: type === 'pointerdown' ? 1 : 0,
-        target: canvas,
-        currentTarget: canvas,
-        preventDefault: () => undefined,
-        stopPropagation: () => undefined,
-      })
-      return listener !== undefined
-    },
-  }
-  return canvas
-}
-
 async function createReactRendererHarness({
   React,
   WristMenu,
@@ -1401,59 +1163,16 @@ async function createReactRendererHarness({
   wrist,
   snapshot,
 }) {
-  const previousActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
-  const fixture = sourceKind === 'controller'
-    ? await createIwerControllerFixture(iwer, wrist)
-    : await createIwerHandFixture(iwer, wrist)
-  const canvas = createCanvas()
-  const xrManagerListeners = new Map()
-  const xrCamera = new three.PerspectiveCamera(75, 1, 0.1, 1000)
-  xrCamera.position.z = 5
-  const xrManager = {
-    enabled: false,
-    isPresenting: true,
-    getSession: () => fixture.session,
-    getReferenceSpace: () => fixture.referenceSpace,
-    getCamera: () => xrCamera,
-    setAnimationLoop: () => undefined,
-    setReferenceSpaceType: () => undefined,
-    setFoveation: () => undefined,
-    addEventListener(type, listener) {
-      const listeners = xrManagerListeners.get(type) ?? new Set()
-      listeners.add(listener)
-      xrManagerListeners.set(type, listeners)
-    },
-    removeEventListener(type, listener) {
-      xrManagerListeners.get(type)?.delete(listener)
-    },
-    dispatchSessionStart() {
-      for (const listener of xrManagerListeners.get('sessionstart') ?? []) {
-        listener({ type: 'sessionstart' })
-      }
-    },
-    dispatchSessionEnd() {
-      for (const listener of xrManagerListeners.get('sessionend') ?? []) {
-        listener({ type: 'sessionend' })
-      }
-    },
-  }
-  const renderer = {
-    xr: xrManager,
-    render: () => undefined,
-    setPixelRatio: () => undefined,
-    setSize: () => undefined,
-    outputColorSpace: '',
-    toneMapping: 0,
-  }
-  const root = fiber.createRoot(canvas)
-  fiber.extend(three)
-  await root.configure({
-    gl: renderer,
-    events: fiber.events,
-    frameloop: 'never',
-    size: { width: 1, height: 1, top: 0, left: 0 },
+  const base = await createReactIwerRendererHarness({
+    React,
+    fiber,
+    iwer,
+    three,
+    xr,
+    sourceKind,
+    wrist,
   })
+  const { canvas, fixture, state } = base
 
   const behindGeometry = new three.BoxGeometry(0.5, 0.5, 0.02)
   const behindMaterial = new three.MeshBasicMaterial()
@@ -1468,22 +1187,6 @@ async function createReactRendererHarness({
     contextmenu: 'onContextMenu',
   }
   const wristMenuEvents = []
-  const xrStore = sourceKind === 'controller'
-    ? xr.createXRStore({
-        baseAssetPath: 'https://fixtures.invalid/webxr-input-profiles/',
-        controller: {
-          model: false,
-          grabPointer: false,
-          rayPointer: { rayModel: false, cursorModel: false },
-        },
-        hand: false,
-        transientPointer: false,
-        gaze: false,
-        screenInput: false,
-        emulate: false,
-      })
-    : null
-  let store
   let currentSnapshot = snapshot
   let includeMenu = true
 
@@ -1505,35 +1208,16 @@ async function createReactRendererHarness({
       }
     }
     children.push(React.createElement('primitive', behindProps))
-    return sourceKind === 'controller'
-      ? React.createElement(xr.XR, { store: xrStore }, ...children)
-      : React.createElement(React.Fragment, null, ...children)
+    return React.createElement(React.Fragment, null, ...children)
   }
 
   const render = async (nextSnapshot = currentSnapshot, nextIncludeMenu = includeMenu) => {
     currentSnapshot = nextSnapshot
     includeMenu = nextIncludeMenu
-    await fiber.act(async () => {
-      const nextStore = root.render(tree())
-      store ??= nextStore
-    })
+    await base.render(tree())
   }
 
   await render()
-  if (sourceKind === 'controller') {
-    await fiber.act(async () => xrManager.dispatchSessionStart())
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      if (xrStore.getState().inputSourceStates.length > 0) break
-      await fiber.act(async () => Promise.resolve())
-    }
-  }
-
-  const state = store.getState()
-  const advance = async (time, frame) => {
-    await fiber.act(async () => {
-      fiber.advance(time / 1000, true, state, frame)
-    })
-  }
   const menuGroup = () => state.scene.children.find(
     ({ name }) => name === 'wrist-menu-attachment-root',
   )
@@ -1569,54 +1253,29 @@ async function createReactRendererHarness({
       interactionRegistered: state.internal.interaction.includes(behind),
     }
   })
-  const endAndReenterSession = async () => {
-    const previousSession = fixture.session
-    await fiber.act(async () => {
-      await fixture.endSession()
-      if (sourceKind === 'controller') xrManager.dispatchSessionEnd()
-    })
-    const endedStoreSession = sourceKind !== 'controller' ||
-      xrStore.getState().session == null
-    const nextSession = await fixture.reenterSession()
-    if (sourceKind === 'controller') {
-      await fiber.act(async () => xrManager.dispatchSessionStart())
-      for (let attempt = 0; attempt < 10; attempt += 1) {
-        if (xrStore.getState().session === nextSession) break
-        await fiber.act(async () => Promise.resolve())
-      }
-    }
-    return {
-      previousSession,
-      nextSession,
-      iwerSessionEnded: previousSession[iwer.P_SESSION].ended === true,
-      endedStoreSession,
-      reenteredStoreSession:
-        sourceKind !== 'controller' || xrStore.getState().session === nextSession,
-    }
-  }
   const dispose = async () => {
-    await fiber.act(async () => root.unmount())
-    behindGeometry.dispose()
-    behindMaterial.dispose()
-    xrStore?.destroy()
-    fixture.restoreGlobals()
-    if (previousActEnvironment === undefined) {
-      delete globalThis.IS_REACT_ACT_ENVIRONMENT
-    } else {
-      globalThis.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+    try {
+      await base.dispose()
+    } finally {
+      behindGeometry.dispose()
+      behindMaterial.dispose()
     }
   }
   return {
+    aimSelectionAtMenuLocal: base.aimSelectionAtMenuLocal,
     fixture,
     state,
     menuGroup,
     wristMenuEvents,
-    advance,
+    advance: base.advance,
+    nextFrame: base.nextFrame,
+    placeSelectionAway: base.placeSelectionAway,
+    releaseSelectionSource: base.releaseSelectionSource,
     render,
     placeBehindMenu,
     placeBehindOutsideMenu,
     dispatchSceneActions,
-    endAndReenterSession,
+    endAndReenterSession: base.endAndReenterSession,
     dispose,
   }
 }
@@ -1698,31 +1357,24 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
         } else if (id === 'scrolling') {
           let scrollTime = 32
           const releaseSource = async () => {
-            if (sourceKind === 'controller') harness.fixture.controller.position.x += 2
-            else harness.fixture.selectionInput.position.x += 2
-            await step(scrollTime, harness.fixture.nextFrame(scrollTime))
+            harness.releaseSelectionSource()
+            await step(scrollTime, harness.nextFrame(scrollTime))
             scrollTime += 16
             return observedPresentationScrollOffset(group)
           }
           const aimAtPanelY = async (positionY) => {
             if (sourceKind === 'controller') {
-              setControllerRayAtPanelLocal(
-                harness.fixture,
-                group,
-                three,
-                0,
-                positionY,
-              )
-              await step(scrollTime, harness.fixture.nextFrame(scrollTime))
+              harness.aimSelectionAtMenuLocal(group, { y: positionY })
+              await step(scrollTime, harness.nextFrame(scrollTime))
               scrollTime += 16
             } else {
-              const poseFrame = harness.fixture.nextFrame(scrollTime)
+              const poseFrame = harness.nextFrame(scrollTime)
               scrollTime += 16
-              harness.fixture.moveFingertipTo(
-                poseFrame,
-                group.localToWorld(new three.Vector3(0, positionY, 0.06)),
-              )
-              await step(scrollTime, harness.fixture.nextFrame(scrollTime))
+              harness.aimSelectionAtMenuLocal(group, {
+                y: positionY,
+                frame: poseFrame,
+              })
+              await step(scrollTime, harness.nextFrame(scrollTime))
               scrollTime += 16
             }
             return observedPresentationScrollOffset(group)
@@ -1730,7 +1382,7 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
 
           await releaseSource()
           const firstDownwardDrag = []
-          for (const positionY of REACH_SCROLL_GAP_Y_METERS) {
+          for (const positionY of reachScrollGapYMeters) {
             firstDownwardDrag.push(await aimAtPanelY(positionY))
           }
           const ownershipAcquired =
@@ -1738,7 +1390,7 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
           const releasedOffset = await releaseSource()
           const ownershipReleased = releasedOffset === firstDownwardDrag.at(-1)
           const secondDownwardDrag = []
-          for (const positionY of REACH_SCROLL_GAP_Y_METERS) {
+          for (const positionY of reachScrollGapYMeters) {
             secondDownwardDrag.push(await aimAtPanelY(positionY))
           }
           const rearmed =
@@ -1751,7 +1403,7 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
           const bottomClamp = observedPresentationScrollOffset(group)
 
           await releaseSource()
-          const upwardGapYs = [...REACH_SCROLL_GAP_Y_METERS].reverse()
+          const upwardGapYs = [...reachScrollGapYMeters].reverse()
           const firstUpwardDrag = []
           for (const positionY of upwardGapYs) {
             firstUpwardDrag.push(await aimAtPanelY(positionY))
@@ -1789,18 +1441,20 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
         } else if (id === 'invalid-disabled') {
           const before = harness.wristMenuEvents.filter(({ type }) => type === 'selection-intent').length
           if (sourceKind === 'controller') {
-            harness.fixture.controller.position.set(2, 2, 1)
+            harness.placeSelectionAway()
             await step(32, harness.fixture.press(32))
             await step(48, harness.fixture.release(48))
-            setControllerRayAtPanelLocal(harness.fixture, group, three, 0, -0.0225)
+            harness.aimSelectionAtMenuLocal(group, { y: -0.0225 })
             await step(64, harness.fixture.nextFrame(64))
             await step(80, harness.fixture.press(80))
             await step(96, harness.fixture.release(96))
           } else {
             const target = harness.fixture.nextFrame(32)
-            harness.fixture.moveFingertipTo(
-              target, group.localToWorld(new three.Vector3(0, -0.0225, 0.008)),
-            )
+            harness.aimSelectionAtMenuLocal(group, {
+              y: -0.0225,
+              handZ: 0.008,
+              frame: target,
+            })
             await step(48, harness.fixture.nextFrame(48))
           }
           const selectionIntents = harness.wristMenuEvents.filter(
@@ -1816,21 +1470,16 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
         } else if (id === 'input-switching') {
           const durableModelBefore = presentationModelSignature(group)
           if (sourceKind === 'controller') {
-            setControllerRayAtPanelLocal(
-              harness.fixture,
-              group,
-              three,
-              0,
-              0.0225,
-            )
+            harness.aimSelectionAtMenuLocal(group, { y: 0.0225 })
             await step(32, harness.fixture.nextFrame(32))
             await step(48, harness.fixture.press(48))
           } else {
             const hoverFrame = harness.fixture.nextFrame(32)
-            harness.fixture.moveFingertipTo(
-              hoverFrame,
-              group.localToWorld(new three.Vector3(0, 0.0225, 0.03)),
-            )
+            harness.aimSelectionAtMenuLocal(group, {
+              y: 0.0225,
+              handZ: 0.03,
+              frame: hoverFrame,
+            })
             await step(48, harness.fixture.nextFrame(48))
           }
           harness.placeBehindMenu()
@@ -1840,7 +1489,7 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
           if (sourceKind === 'controller') {
             await step(80, harness.fixture.release(80))
           } else {
-            harness.fixture.selectionInput.position.x += 2
+            harness.releaseSelectionSource()
             await step(80, harness.fixture.nextFrame(80))
           }
           const terminalEvents = terminalWristMenuEvents(
@@ -1931,13 +1580,7 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
             ({ type }) => type === 'selection-intent',
           ).length
           if (sourceKind === 'controller') {
-            setControllerRayAtPanelLocal(
-              harness.fixture,
-              group,
-              three,
-              0,
-              0.0225,
-            )
+            harness.aimSelectionAtMenuLocal(group, { y: 0.0225 })
             await step(780, withViewerPosition(
               harness.fixture.nextFrame(780), facingViewer, harness.fixture, sourceKind,
             ))
@@ -1951,20 +1594,22 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
             const hoverFrame = withViewerPosition(
               harness.fixture.nextFrame(780), facingViewer, harness.fixture, sourceKind,
             )
-            harness.fixture.moveFingertipTo(
-              hoverFrame,
-              group.localToWorld(new three.Vector3(0, 0.0225, 0.03)),
-            )
+            harness.aimSelectionAtMenuLocal(group, {
+              y: 0.0225,
+              handZ: 0.03,
+              frame: hoverFrame,
+            })
             await step(796, withViewerPosition(
               harness.fixture.nextFrame(796), facingViewer, harness.fixture, sourceKind,
             ))
             const pressFrame = withViewerPosition(
               harness.fixture.nextFrame(812), facingViewer, harness.fixture, sourceKind,
             )
-            harness.fixture.moveFingertipTo(
-              pressFrame,
-              group.localToWorld(new three.Vector3(0, 0.0225, 0.008)),
-            )
+            harness.aimSelectionAtMenuLocal(group, {
+              y: 0.0225,
+              handZ: 0.008,
+              frame: pressFrame,
+            })
             await step(828, withViewerPosition(
               harness.fixture.nextFrame(828), facingViewer, harness.fixture, sourceKind,
             ))
@@ -2047,19 +1692,23 @@ async function runReactShieldMatrix(dependencies, sourceKind) {
       const group = harness.menuGroup()
       assert.ok(group)
       if (sourceKind === 'controller') {
-        setControllerRayAtPanelLocal(harness.fixture, group, three, 0, 0.0225)
+        harness.aimSelectionAtMenuLocal(group, { y: 0.0225 })
         await step(32, harness.fixture.nextFrame(32))
         await step(48, harness.fixture.press(48))
       } else {
-        harness.fixture.moveFingertipTo(
-          initial, group.localToWorld(new three.Vector3(0, 0.0225, 0.03)),
-        )
+        harness.aimSelectionAtMenuLocal(group, {
+          y: 0.0225,
+          handZ: 0.03,
+          frame: initial,
+        })
         await step(32, harness.fixture.nextFrame(32))
         if (id === 'hold') {
           const pressed = harness.fixture.nextFrame(48)
-          harness.fixture.moveFingertipTo(
-            pressed, group.localToWorld(new three.Vector3(0, 0.0225, 0.008)),
-          )
+          harness.aimSelectionAtMenuLocal(group, {
+            y: 0.0225,
+            handZ: 0.008,
+            frame: pressed,
+          })
           await step(48, harness.fixture.nextFrame(48))
         }
       }
@@ -2090,37 +1739,43 @@ async function runReactShieldMatrix(dependencies, sourceKind) {
           neutralTransitions += 1
           recoveryTime = 192
         } else {
-          harness.fixture.controller.position.x += 2
+          harness.releaseSelectionSource()
           await step(112, harness.fixture.release(112))
           neutralTransitions += 1
         }
-        harness.fixture.controller.position.x += 2
+        harness.releaseSelectionSource()
         await step(recoveryTime - 16, harness.fixture.nextFrame(recoveryTime - 16))
       } else {
         if (id === 'commit' || id === 'rapid-actions') {
           const pressed = harness.fixture.nextFrame(112)
-          harness.fixture.moveFingertipTo(
-            pressed, group.localToWorld(new three.Vector3(0, 0.0225, 0.008)),
-          )
+          harness.aimSelectionAtMenuLocal(group, {
+            y: 0.0225,
+            handZ: 0.008,
+            frame: pressed,
+          })
           await step(112, harness.fixture.nextFrame(112))
         }
         if (id === 'rapid-actions') {
-          harness.fixture.selectionInput.position.x += 2
+          harness.releaseSelectionSource()
           await step(128, harness.fixture.nextFrame(128))
           neutralTransitions += 1
           const hover = harness.fixture.nextFrame(144)
-          harness.fixture.moveFingertipTo(
-            hover, group.localToWorld(new three.Vector3(0, 0.0225, 0.03)),
-          )
+          harness.aimSelectionAtMenuLocal(group, {
+            y: 0.0225,
+            handZ: 0.03,
+            frame: hover,
+          })
           await step(144, harness.fixture.nextFrame(144))
           const pressed = harness.fixture.nextFrame(160)
-          harness.fixture.moveFingertipTo(
-            pressed, group.localToWorld(new three.Vector3(0, 0.0225, 0.008)),
-          )
+          harness.aimSelectionAtMenuLocal(group, {
+            y: 0.0225,
+            handZ: 0.008,
+            frame: pressed,
+          })
           await step(160, harness.fixture.nextFrame(160))
           recoveryTime = 208
         }
-        harness.fixture.selectionInput.position.x += 2
+        harness.releaseSelectionSource()
         await step(recoveryTime - 16, harness.fixture.nextFrame(recoveryTime - 16))
         neutralTransitions += 1
       }
