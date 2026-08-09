@@ -14,11 +14,15 @@ function manyActions(count) {
   return Array.from({ length: count }, (_, index) => rowAction(index))
 }
 
-function visibleRowNames(presentation) {
+function boundRowNames(presentation) {
   return presentation.group.children
     .filter(
       (child) =>
-        child.name.startsWith('wrist-menu-action-visual:') && child.visible,
+        child.name.startsWith('wrist-menu-action-visual:'),
+    )
+    .sort(
+      (left, right) =>
+        left.userData.wristMenuPoolSlot - right.userData.wristMenuPoolSlot,
     )
     .map((child) => child.name)
 }
@@ -33,18 +37,33 @@ test('the WristMenuPresentation pool allocates exactly VISIBLE_SLOTS hit regions
 test('renderItems binds at most POOL_SIZE rows from the presentation model', () => {
   const presentation = new WristMenuPresentation()
   presentation.renderItems(manyActions(POOL_SIZE + 5))
-  const names = visibleRowNames(presentation)
-  assert.equal(names.length, POOL_SIZE)
+  const names = boundRowNames(presentation)
+  assert.equal(names.length, 6)
   assert.ok(names[0].endsWith(':row-0'))
+  assert.ok(names.at(-1).endsWith(':row-5'))
   presentation.dispose()
 })
 
-test('setScrollOffset rebinds the pool to the new scroll window', () => {
+test('setScrollOffset keeps one bound entry of overscan on both available sides', () => {
   const presentation = new WristMenuPresentation()
   presentation.renderItems(manyActions(POOL_SIZE + 5))
   presentation.setScrollOffset(2)
-  const names = visibleRowNames(presentation)
-  assert.ok(names[0].endsWith(':row-2'))
+  const names = boundRowNames(presentation)
+  assert.equal(names.length, 7)
+  assert.ok(names[0].endsWith(':row-1'))
+  assert.ok(names[1].endsWith(':row-2'))
+  assert.ok(names.at(-1).endsWith(':row-7'))
+  presentation.dispose()
+})
+
+test('the top boundary spends the unavailable preceding slot on following overscan', () => {
+  const presentation = new WristMenuPresentation()
+  presentation.renderItems(manyActions(POOL_SIZE + 5))
+
+  const names = boundRowNames(presentation)
+  assert.equal(names.length, 6)
+  assert.ok(names[0].endsWith(':row-0'))
+  assert.ok(names.at(-1).endsWith(':row-5'))
   presentation.dispose()
 })
 

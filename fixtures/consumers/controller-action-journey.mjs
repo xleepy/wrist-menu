@@ -76,6 +76,15 @@ function installIwerNodePrimitives() {
 
 const oppositeWrist = (wrist) => (wrist === 'left' ? 'right' : 'left')
 
+const REACH_ROW_STRIDE_METERS = 0.0225
+const REACH_VIEWPORT_TOP_METERS = 0.039
+const REACH_SCROLL_GAP_Y_METERS = Object.freeze([
+  0.01775,
+  -0.00475,
+  -0.02725,
+  -0.04976,
+])
+
 async function createIwerControllerFixture(iwer, menuWrist = 'left') {
   const restoreGlobals = installIwerNodePrimitives()
   const device = new iwer.XRDevice(iwer.metaQuest3, {
@@ -297,9 +306,11 @@ function observedPresentationScrollOffset(group) {
     }
   })
   if (firstVisual === undefined) return null
-  const startRow = Number(firstVisual.name.slice(firstVisual.name.lastIndexOf('-') + 1))
-  const firstSlotY = (12 - 1) * (0.0225 / 2)
-  return startRow + (firstVisual.position.y - firstSlotY) / 0.0225
+  const rowIndex = Number(firstVisual.name.slice(firstVisual.name.lastIndexOf('-') + 1))
+  const rowCenterAtTop = REACH_VIEWPORT_TOP_METERS - 0.01
+  const offset = rowIndex +
+    (firstVisual.position.y - rowCenterAtTop) / REACH_ROW_STRIDE_METERS
+  return Math.abs(offset) < 1e-9 ? 0 : offset
 }
 
 function terminalWristMenuEvents(events) {
@@ -684,13 +695,19 @@ async function runThreeSemanticMatrix({
 
         if (id === 'scrolling') {
           let scrollTime = 32
+          const releaseSource = () => {
+            if (sourceKind === 'controller') fixture.controller.position.x += 2
+            else fixture.selectionInput.position.x += 2
+            update(fixture.nextFrame(scrollTime), scrollTime)
+            scrollTime += 16
+          }
           const aimAtPanelY = (positionY) => {
             if (sourceKind === 'controller') {
               setControllerRayAtPanelLocal(
                 fixture,
                 menu.presentation.group,
                 three,
-                0.09,
+                0,
                 positionY,
               )
               update(fixture.nextFrame(scrollTime), scrollTime)
@@ -709,25 +726,32 @@ async function runThreeSemanticMatrix({
             }
             return menu.runtime.scrollState.offset
           }
-          const downwardSamples = [0.12, 0.08, 0.04, 0, -0.04, -0.08, -0.12]
-            .map(aimAtPanelY)
-          const offsetSamples = downwardSamples.slice(0, 4)
-          const bottomClamp = menu.runtime.scrollState.offset
+
+          releaseSource()
+          const firstDownwardDrag = REACH_SCROLL_GAP_Y_METERS.map(aimAtPanelY)
           const ownershipAcquired =
             menu.runtime.scrollState.ownerSourceId !== null
-
-          if (sourceKind === 'controller') fixture.controller.position.x += 2
-          else fixture.selectionInput.position.x += 2
-          update(fixture.nextFrame(scrollTime), scrollTime)
-          scrollTime += 16
+          releaseSource()
           const ownershipReleased =
             menu.runtime.scrollState.ownerSourceId === null
-
-          aimAtPanelY(-0.12)
-          aimAtPanelY(-0.1)
+          const secondDownwardDrag = REACH_SCROLL_GAP_Y_METERS.map(aimAtPanelY)
           const rearmed = menu.runtime.scrollState.ownerSourceId !== null
-          const returnSamples = [-0.06, -0.02, 0.02, 0.06, 0.1, 0.12]
-            .map(aimAtPanelY)
+          const downwardSamples = [
+            ...firstDownwardDrag,
+            ...secondDownwardDrag.slice(1),
+          ]
+          const offsetSamples = downwardSamples
+          const bottomClamp = menu.runtime.scrollState.offset
+
+          releaseSource()
+          const upwardGapYs = [...REACH_SCROLL_GAP_Y_METERS].reverse()
+          const firstUpwardDrag = upwardGapYs.map(aimAtPanelY)
+          releaseSource()
+          const secondUpwardDrag = upwardGapYs.map(aimAtPanelY)
+          const returnSamples = [
+            ...firstUpwardDrag,
+            ...secondUpwardDrag.slice(1),
+          ]
           const topClamp = menu.runtime.scrollState.offset
           const maxOffset = 18 - 12
           Object.assign(detail, {
@@ -1673,13 +1697,20 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
           Object.assign(detail, { wrist, visible: group.visible })
         } else if (id === 'scrolling') {
           let scrollTime = 32
+          const releaseSource = async () => {
+            if (sourceKind === 'controller') harness.fixture.controller.position.x += 2
+            else harness.fixture.selectionInput.position.x += 2
+            await step(scrollTime, harness.fixture.nextFrame(scrollTime))
+            scrollTime += 16
+            return observedPresentationScrollOffset(group)
+          }
           const aimAtPanelY = async (positionY) => {
             if (sourceKind === 'controller') {
               setControllerRayAtPanelLocal(
                 harness.fixture,
                 group,
                 three,
-                0.09,
+                0,
                 positionY,
               )
               await step(scrollTime, harness.fixture.nextFrame(scrollTime))
@@ -1696,33 +1727,44 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
             }
             return observedPresentationScrollOffset(group)
           }
-          const downwardSamples = []
-          for (const positionY of [0.12, 0.08, 0.04, 0, -0.04, -0.08, -0.12]) {
-            downwardSamples.push(await aimAtPanelY(positionY))
+
+          await releaseSource()
+          const firstDownwardDrag = []
+          for (const positionY of REACH_SCROLL_GAP_Y_METERS) {
+            firstDownwardDrag.push(await aimAtPanelY(positionY))
           }
-          const offsetSamples = downwardSamples.slice(0, 4)
-          const bottomClamp = observedPresentationScrollOffset(group)
           const ownershipAcquired =
-            bottomClamp !== null && bottomClamp > 0
-
-          if (sourceKind === 'controller') harness.fixture.controller.position.x += 2
-          else harness.fixture.selectionInput.position.x += 2
-          await step(scrollTime, harness.fixture.nextFrame(scrollTime))
-          scrollTime += 16
-          const releasedOffset = observedPresentationScrollOffset(group)
-          const ownershipReleased = releasedOffset === bottomClamp
-
-          await aimAtPanelY(-0.12)
-          const rearmBaseline = observedPresentationScrollOffset(group)
-          await aimAtPanelY(-0.1)
-          const rearmMoved = observedPresentationScrollOffset(group)
-          const rearmed =
-            rearmBaseline !== null && rearmMoved !== null &&
-            rearmMoved < rearmBaseline
-          const returnSamples = []
-          for (const positionY of [-0.06, -0.02, 0.02, 0.06, 0.1, 0.12]) {
-            returnSamples.push(await aimAtPanelY(positionY))
+            firstDownwardDrag.at(-1) > firstDownwardDrag[0]
+          const releasedOffset = await releaseSource()
+          const ownershipReleased = releasedOffset === firstDownwardDrag.at(-1)
+          const secondDownwardDrag = []
+          for (const positionY of REACH_SCROLL_GAP_Y_METERS) {
+            secondDownwardDrag.push(await aimAtPanelY(positionY))
           }
+          const rearmed =
+            secondDownwardDrag.at(-1) > secondDownwardDrag[0]
+          const downwardSamples = [
+            ...firstDownwardDrag,
+            ...secondDownwardDrag.slice(1),
+          ]
+          const offsetSamples = downwardSamples
+          const bottomClamp = observedPresentationScrollOffset(group)
+
+          await releaseSource()
+          const upwardGapYs = [...REACH_SCROLL_GAP_Y_METERS].reverse()
+          const firstUpwardDrag = []
+          for (const positionY of upwardGapYs) {
+            firstUpwardDrag.push(await aimAtPanelY(positionY))
+          }
+          await releaseSource()
+          const secondUpwardDrag = []
+          for (const positionY of upwardGapYs) {
+            secondUpwardDrag.push(await aimAtPanelY(positionY))
+          }
+          const returnSamples = [
+            ...firstUpwardDrag,
+            ...secondUpwardDrag.slice(1),
+          ]
           const topClamp = observedPresentationScrollOffset(group)
           const maxOffset = 18 - 12
           Object.assign(detail, {

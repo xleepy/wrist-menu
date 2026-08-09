@@ -9,12 +9,24 @@ export const ATLAS_HEIGHT = 2048
 export const ATLAS_BYTES = ATLAS_WIDTH * ATLAS_HEIGHT * 4
 
 const ROW_ASPECT = 0.176 / 0.02
+const ROW_WIDTH_METERS = 0.176
+const ROW_HEIGHT_METERS = 0.02
+const SEPARATOR_HEIGHT_METERS = 0.009
+const FOOTER_HEIGHT_METERS = 0.0065
+const VIEWPORT_HEIGHT_METERS = 0.108
 const PRIMARY_HEIGHT_METERS = 0.0065
 const SECONDARY_HEIGHT_METERS = 0.00475
 const CELL_GUTTER = 2
 
+export type AtlasRowType =
+  | 'action'
+  | 'toggle'
+  | 'choice'
+  | 'choice-group'
+  | 'separator'
+
 export type AtlasRow = Readonly<{
-  type: string
+  type: AtlasRowType
   label?: string
   iconKey?: string
   selected?: boolean
@@ -83,7 +95,19 @@ type AtlasLayout = Readonly<{
   rowsPerColumn: number
 }>
 
-const noRegion: AtlasUvRegion = Object.freeze({ u0: 0, u1: 1, v0: 0, v1: 1 })
+type AtlasBounds = Readonly<{
+  x: number
+  y: number
+  width: number
+  height: number
+}>
+
+const fullAtlasRegion: AtlasUvRegion = Object.freeze({
+  u0: 0,
+  u1: 1,
+  v0: 0,
+  v1: 1,
+})
 
 function canvasForAtlas(): AtlasCanvas {
   const documentLike = (
@@ -104,7 +128,11 @@ function atlasLayout(regionCount: number): AtlasLayout {
   let columns = 1
   while (true) {
     const cellWidth = Math.floor(ATLAS_WIDTH / columns)
-    const cellHeight = Math.max(1, Math.floor(cellWidth / ROW_ASPECT))
+    const contentWidth = Math.max(1, cellWidth - CELL_GUTTER * 2)
+    const cellHeight = Math.max(
+      1,
+      Math.ceil(contentWidth / ROW_ASPECT) + CELL_GUTTER * 2,
+    )
     const rowsPerColumn = Math.floor(ATLAS_HEIGHT / cellHeight)
     if (columns * rowsPerColumn >= regionCount) {
       return { columns, cellWidth, cellHeight, rowsPerColumn }
@@ -113,7 +141,7 @@ function atlasLayout(regionCount: number): AtlasLayout {
   }
 }
 
-function cellBounds(layout: AtlasLayout, index: number) {
+function cellBounds(layout: AtlasLayout, index: number): AtlasBounds {
   const column = Math.floor(index / layout.rowsPerColumn)
   const row = index % layout.rowsPerColumn
   return {
@@ -124,17 +152,41 @@ function cellBounds(layout: AtlasLayout, index: number) {
   }
 }
 
-function uvRegion(
-  bounds: Readonly<{ x: number; y: number; width: number; height: number }>,
-): AtlasUvRegion {
+function aspectMatchedBounds(
+  cell: AtlasBounds,
+  physicalWidth: number,
+  physicalHeight: number,
+): AtlasBounds {
+  const availableWidth = Math.max(1, cell.width - CELL_GUTTER * 2)
+  const availableHeight = Math.max(1, cell.height - CELL_GUTTER * 2)
+  const physicalAspect = physicalWidth / physicalHeight
+  const width = Math.min(availableWidth, availableHeight * physicalAspect)
+  const height = width / physicalAspect
   return Object.freeze({
-    u0: (bounds.x + CELL_GUTTER) / ATLAS_WIDTH,
-    u1: (bounds.x + bounds.width - CELL_GUTTER) / ATLAS_WIDTH,
-    v0:
-      1 -
-      (bounds.y + bounds.height - CELL_GUTTER) / ATLAS_HEIGHT,
-    v1: 1 - (bounds.y + CELL_GUTTER) / ATLAS_HEIGHT,
+    x: cell.x + (cell.width - width) / 2,
+    y: cell.y + (cell.height - height) / 2,
+    width,
+    height,
   })
+}
+
+function uvRegion(bounds: AtlasBounds): AtlasUvRegion {
+  return Object.freeze({
+    u0: bounds.x / ATLAS_WIDTH,
+    u1: (bounds.x + bounds.width) / ATLAS_WIDTH,
+    v0: 1 - (bounds.y + bounds.height) / ATLAS_HEIGHT,
+    v1: 1 - bounds.y / ATLAS_HEIGHT,
+  })
+}
+
+function rowWidth(theme: ThemeTokens): number {
+  return Math.max(0.001, theme.panelWidthMeters - 0.016)
+}
+
+function rowHeight(row: AtlasRow): number {
+  return row.type === 'separator'
+    ? SEPARATOR_HEIGHT_METERS
+    : ROW_HEIGHT_METERS
 }
 
 function linearChannel(channel: number): number {
@@ -324,20 +376,16 @@ function drawStateCue(
 function drawRow(
   context: AtlasContext,
   row: AtlasRow,
-  bounds: Readonly<{ x: number; y: number; width: number; height: number }>,
+  bounds: AtlasBounds,
+  physicalWidth: number,
   theme: ThemeTokens,
 ) {
   const background = rowBackground(row, theme)
   const ink = readableInk(background)
   context.fillStyle = cssColor(background)
-  context.fillRect(
-    bounds.x + CELL_GUTTER,
-    bounds.y + CELL_GUTTER,
-    bounds.width - CELL_GUTTER * 2,
-    bounds.height - CELL_GUTTER * 2,
-  )
+  context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
 
-  const pixelsPerMeter = bounds.width / 0.176
+  const pixelsPerMeter = bounds.width / physicalWidth
   const primaryPixels = Math.max(
     7,
     Math.round(PRIMARY_HEIGHT_METERS * pixelsPerMeter),
@@ -411,20 +459,17 @@ function drawRow(
 
 function drawFooter(
   context: AtlasContext,
-  bounds: Readonly<{ x: number; y: number; width: number; height: number }>,
+  bounds: AtlasBounds,
+  physicalWidth: number,
   rowCount: number,
   theme: ThemeTokens,
 ) {
   const ink = readableInk(theme.panelColor)
   context.fillStyle = cssColor(theme.panelColor)
-  context.fillRect(
-    bounds.x + CELL_GUTTER,
-    bounds.y + CELL_GUTTER,
-    bounds.width - CELL_GUTTER * 2,
-    bounds.height - CELL_GUTTER * 2,
-  )
+  context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
   context.fillStyle = cssColor(ink)
-  context.font = `600 ${Math.max(6, bounds.height * 0.24)}px WristMenuInter, Arial, sans-serif`
+  const pixelsPerMeter = bounds.width / physicalWidth
+  context.font = `600 ${Math.max(6, Math.round(SECONDARY_HEIGHT_METERS * pixelsPerMeter))}px WristMenuInter, Arial, sans-serif`
   context.textAlign = 'center'
   context.textBaseline = 'middle'
   context.fillText(
@@ -441,7 +486,7 @@ export class WristMenuPresentationAtlas {
   private readonly canvas: AtlasCanvas
   private readonly context: AtlasContext | null
   private rowRegions: readonly AtlasUvRegion[] = []
-  private footerUv: AtlasUvRegion = noRegion
+  private footerUv: AtlasUvRegion = fullAtlasRegion
 
   constructor(rows: readonly AtlasRow[], theme: ThemeTokens) {
     installEmbeddedInterFont()
@@ -457,7 +502,7 @@ export class WristMenuPresentationAtlas {
   }
 
   rowUv(index: number): AtlasUvRegion {
-    return this.rowRegions[index] ?? noRegion
+    return this.rowRegions[index] ?? fullAtlasRegion
   }
 
   footerRegion(): AtlasUvRegion {
@@ -472,17 +517,35 @@ export class WristMenuPresentationAtlas {
 
   private render(rows: readonly AtlasRow[], theme: ThemeTokens): void {
     const layout = atlasLayout(rows.length + 1)
+    const physicalWidth = rowWidth(theme)
     this.context?.clearRect(0, 0, ATLAS_WIDTH, ATLAS_HEIGHT)
     this.rowRegions = Object.freeze(
       rows.map((row, index) => {
-        const bounds = cellBounds(layout, index)
-        if (this.context !== null) drawRow(this.context, row, bounds, theme)
+        const bounds = aspectMatchedBounds(
+          cellBounds(layout, index),
+          physicalWidth,
+          rowHeight(row),
+        )
+        if (this.context !== null) {
+          drawRow(this.context, row, bounds, physicalWidth, theme)
+        }
         return uvRegion(bounds)
       }),
     )
-    const footerBounds = cellBounds(layout, rows.length)
+    const footerBounds = aspectMatchedBounds(
+      cellBounds(layout, rows.length),
+      physicalWidth,
+      FOOTER_HEIGHT_METERS *
+        (theme.viewportHeightMeters / VIEWPORT_HEIGHT_METERS),
+    )
     if (this.context !== null) {
-      drawFooter(this.context, footerBounds, rows.length, theme)
+      drawFooter(
+        this.context,
+        footerBounds,
+        physicalWidth,
+        rows.length,
+        theme,
+      )
     }
     this.footerUv = uvRegion(footerBounds)
   }

@@ -70,7 +70,7 @@ export const defaultThreeWristMenuPresentationFactory: ThreeWristMenuPresentatio
         })
       },
       menuViewport: {
-        object: presentation.panelMesh as Mesh<BoxGeometry>,
+        object: presentation.viewportMesh as Mesh<BoxGeometry>,
       },
       update(model) {
         presentation.setModel(model, false)

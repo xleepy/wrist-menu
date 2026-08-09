@@ -80,6 +80,34 @@ function atlasTexture(root) {
   return [...textures][0]
 }
 
+function physicalSize(mesh) {
+  return {
+    width: mesh.geometry.parameters.width * mesh.scale.x,
+    height: mesh.geometry.parameters.height * mesh.scale.y,
+  }
+}
+
+function atlasAspect(mesh) {
+  const uvs = mesh.geometry.getAttribute('uv').array
+  const u = []
+  const v = []
+  for (let index = 0; index < uvs.length; index += 2) {
+    u.push(uvs[index])
+    v.push(uvs[index + 1])
+  }
+  return (
+    ((Math.max(...u) - Math.min(...u)) * 1024) /
+    ((Math.max(...v) - Math.min(...v)) * 2048)
+  )
+}
+
+function approximately(actual, expected, tolerance = 1e-9) {
+  assert.ok(
+    Math.abs(actual - expected) <= tolerance,
+    `expected ${actual} to be within ${tolerance} of ${expected}`,
+  )
+}
+
 test('the default presentation passes the atlas construction Release Gate', () => {
   const presentation = defaultThreeWristMenuPresentationFactory(
     presentationModel(),
@@ -130,7 +158,7 @@ test('the default atlas records every text and non-color state role at readable 
   const visualRows = presentation.root.children.filter(({ name }) =>
     name.includes('-visual:'),
   )
-  assert.equal(visualRows.length, VISIBLE_SLOTS)
+  assert.ok(visualRows.length > 0 && visualRows.length <= VISIBLE_SLOTS)
   assert.ok(
     visualRows.some(
       ({ userData }) => userData.wristMenuAtlasStateCue === 'selected',
@@ -142,6 +170,65 @@ test('the default atlas records every text and non-color state role at readable 
     ),
   )
 
+  presentation.dispose()
+})
+
+test('the default presentation ships the accepted Reach geometry without stretching atlas slices', () => {
+  const presentation = defaultThreeWristMenuPresentationFactory(
+    presentationModel(),
+  )
+  const panel = presentation.root.getObjectByName('wrist-menu-command-slab')
+  const viewport = presentation.menuViewport.object
+  const action = presentation.root.getObjectByName(
+    'wrist-menu-action-visual:action-0',
+  )
+  const toggle = presentation.root.getObjectByName(
+    'wrist-menu-toggle-visual:toggle-grid',
+  )
+  const separator = presentation.root.getObjectByName(
+    'wrist-menu-separator-visual:separator-scene',
+  )
+  const footer = presentation.root.getObjectByName('wrist-menu-footer-atlas')
+
+  assert.deepEqual(physicalSize(panel), { width: 0.192, height: 0.158 })
+  assert.deepEqual(physicalSize(viewport), { width: 0.176, height: 0.108 })
+  assert.deepEqual(physicalSize(action), { width: 0.176, height: 0.02 })
+  assert.deepEqual(physicalSize(separator), { width: 0.176, height: 0.009 })
+  assert.deepEqual(physicalSize(footer), { width: 0.176, height: 0.0065 })
+  approximately(action.position.y - toggle.position.y, 0.0225)
+  approximately(
+    toggle.position.y - 0.01 - (separator.position.y + 0.0045),
+    0.0025,
+  )
+  approximately(atlasAspect(action), 0.176 / 0.02, 1e-4)
+  approximately(atlasAspect(separator), 0.176 / 0.009, 1e-4)
+  approximately(atlasAspect(footer), 0.176 / 0.0065, 1e-4)
+
+  presentation.dispose()
+})
+
+test('theme-resized presentation quads retain matching atlas aspect ratios', () => {
+  const presentation = defaultThreeWristMenuPresentationFactory(
+    presentationModel({
+      theme: {
+        ...defaultThemeTokens,
+        panelWidthMeters: 0.24,
+        viewportHeightMeters: 0.3,
+      },
+    }),
+  )
+  const action = presentation.root.getObjectByName(
+    'wrist-menu-action-visual:action-0',
+  )
+  const separator = presentation.root.getObjectByName(
+    'wrist-menu-separator-visual:separator-scene',
+  )
+  const footer = presentation.root.getObjectByName('wrist-menu-footer-atlas')
+
+  for (const mesh of [action, separator, footer]) {
+    const size = physicalSize(mesh)
+    approximately(atlasAspect(mesh), size.width / size.height, 1e-4)
+  }
   presentation.dispose()
 })
 
@@ -171,10 +258,32 @@ test('continuous scrolling only rebinds the fixed visual pool', () => {
   assert.equal(pool.length, VISIBLE_SLOTS * 2)
   assert.equal(
     presentation.root.children.filter(({ name }) => name.includes('-visual:'))
-      .length,
-    VISIBLE_SLOTS,
+      .length <= VISIBLE_SLOTS,
+    true,
   )
 
+  presentation.dispose()
+})
+
+test('one changed-scroll update mutates every bound UV buffer at most once', () => {
+  const initial = presentationModel()
+  const presentation = defaultThreeWristMenuPresentationFactory(initial)
+  const rows = presentation.root.children.filter(
+    ({ material, userData }) =>
+      material?.map?.isTexture === true &&
+      Object.hasOwn(userData, 'wristMenuPoolSlot'),
+  )
+  const before = rows.map(({ geometry }) => geometry.getAttribute('uv').version)
+
+  presentation.update({ ...initial, scrollOffset: 1.5 })
+
+  const mutations = rows.map(
+    ({ geometry }, index) =>
+      geometry.getAttribute('uv').version - before[index],
+  )
+  assert.equal(rows.length, VISIBLE_SLOTS)
+  assert.ok(mutations.some((count) => count === 1))
+  assert.ok(mutations.every((count) => count === 0 || count === 1))
   presentation.dispose()
 })
 

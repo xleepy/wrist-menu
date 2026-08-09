@@ -332,12 +332,16 @@ for (const presentationKind of ['default', 'custom']) {
       onEvent: () => undefined,
       presentationFactory: currentFactory,
     })
+    const currentGapY = presentationKind === 'default' ? 0.01775 : 0
+    fixture.setTargetRayMatrix(
+      new Matrix4().makeTranslation(0, currentGapY, 1),
+    )
 
     updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
     updateThreeWristMenu(menu, { time: 20, frame: fixture.frame })
     updateThreeWristMenu(menu, { time: 30, frame: fixture.frame })
     fixture.setTargetRayMatrix(
-      new Matrix4().makeTranslation(0, -ROW_SPACING, 1),
+      new Matrix4().makeTranslation(0, currentGapY - ROW_SPACING, 1),
     )
     updateThreeWristMenu(menu, { time: 40, frame: fixture.frame })
     assert.notEqual(menu.runtime.scrollState.ownerSourceId, null)
@@ -356,14 +360,26 @@ for (const presentationKind of ['default', 'custom']) {
       assert.equal(replacement.factoryModels[0].scrollOffset, 0)
     }
 
+    const replacementGapY = presentationKind === 'default' ? 0 : 0.01775
+    fixture.setTargetRayMatrix(
+      new Matrix4().makeTranslation(0, replacementGapY, 1),
+    )
     updateThreeWristMenu(menu, { time: 50, frame: fixture.frame })
     updateThreeWristMenu(menu, { time: 60, frame: fixture.frame })
     fixture.setTargetRayMatrix(
-      new Matrix4().makeTranslation(0, -2 * ROW_SPACING, 1),
+      new Matrix4().makeTranslation(
+        0,
+        replacementGapY - ROW_SPACING,
+        1,
+      ),
     )
     updateThreeWristMenu(menu, { time: 70, frame: fixture.frame })
     fixture.setTargetRayMatrix(
-      new Matrix4().makeTranslation(0, -3 * ROW_SPACING, 1),
+      new Matrix4().makeTranslation(
+        0,
+        replacementGapY - 2 * ROW_SPACING,
+        1,
+      ),
     )
     updateThreeWristMenu(menu, { time: 80, frame: fixture.frame })
     assert.ok(Math.abs(menu.runtime.scrollState.offset - 1) < 1e-9)
