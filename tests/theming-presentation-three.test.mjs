@@ -48,6 +48,7 @@ function presentationModel(overrides = {}) {
     scrollOffset: 0,
     totalRows: 1,
     visibleSlots: VISIBLE_SLOTS,
+    scrollOwned: false,
     scrollBarrierActive: false,
     theme: defaultThemeTokens,
     ...overrides,
@@ -78,7 +79,11 @@ test('resolved theme tokens restyle and resize the default Command slab', () => 
   const row = presentation.group.children.find(
     ({ name }) => name === 'wrist-menu-action-visual:spawn',
   )
-  assert.equal(row.material.color.getHex(), 0xabcdef)
+  assert.equal(row.material.color.getHex(), 0xffffff)
+  assert.equal(
+    row.material.map.userData.wristMenuAtlas.roles.hovered.background,
+    0xabcdef,
+  )
 
   presentation.dispose()
 })
@@ -219,6 +224,7 @@ test('a custom Menu Viewport drives the same continuous scroll state', () => {
   const fixture = createWristXrFixture({ menuKind: 'controller' })
   fixture.setWristMatrix(new Matrix4().makeRotationY(-Math.PI / 2))
   const observedOffsets = []
+  const observedOwnership = []
   const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: reachScrollSnapshot,
@@ -230,6 +236,7 @@ test('a custom Menu Viewport drives the same continuous scroll state', () => {
       const panel = new Mesh(geometry, material)
       root.add(panel)
       observedOffsets.push(initialModel.scrollOffset)
+      observedOwnership.push(initialModel.scrollOwned)
       return {
         root,
         hitRegions: [],
@@ -237,6 +244,7 @@ test('a custom Menu Viewport drives the same continuous scroll state', () => {
         update(model) {
           root.visible = model.visible
           observedOffsets.push(model.scrollOffset)
+          observedOwnership.push(model.scrollOwned)
         },
         dispose() {
           geometry.dispose()
@@ -256,6 +264,7 @@ test('a custom Menu Viewport drives the same continuous scroll state', () => {
   updateThreeWristMenu(menu, { time: 40, frame: fixture.frame })
 
   assert.equal(observedOffsets.at(-1), 1)
+  assert.equal(observedOwnership.at(-1), true)
   disposeThreeWristMenu(menu)
 })
 

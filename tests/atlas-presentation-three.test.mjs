@@ -56,6 +56,7 @@ function presentationModel(overrides = {}) {
     scrollOffset: 0,
     totalRows: items.length,
     visibleSlots: VISIBLE_SLOTS,
+    scrollOwned: false,
     scrollBarrierActive: false,
     theme: defaultThemeTokens,
     ...overrides,
@@ -132,8 +133,16 @@ test('the default presentation passes the atlas construction Release Gate', () =
 })
 
 test('the default atlas records every text and non-color state role at readable contrast', () => {
+  const initial = presentationModel()
+  const items = initial.items.map((item, index) =>
+    index === 0
+      ? { ...item, interaction: 'hovered' }
+      : index === 4
+        ? { ...item, interaction: 'armed' }
+        : item,
+  )
   const presentation = defaultThreeWristMenuPresentationFactory(
-    presentationModel(),
+    { ...initial, items, scrollOwned: true },
   )
   const atlas = atlasTexture(presentation.root).userData.wristMenuAtlas
 
@@ -142,9 +151,13 @@ test('the default atlas records every text and non-color state role at readable 
   assert.deepEqual(Object.keys(atlas.roles).sort(), [
     'disabled',
     'footer',
+    'hovered',
+    'hoveredDisabled',
     'primary',
+    'scrollOwnership',
     'secondary',
     'selected',
+    'selectionOwnership',
     'separator',
   ])
   for (const role of Object.values(atlas.roles)) {
@@ -152,24 +165,94 @@ test('the default atlas records every text and non-color state role at readable 
   }
   assert.deepEqual([...atlas.nonColorStateCues].sort(), [
     'disabled-label-and-slash',
+    'hovered-inset-outline',
+    'scroll-ownership-footer-label-and-outline',
     'selected-label-and-check',
+    'selection-ownership-double-outline',
   ])
 
   const visualRows = presentation.root.children.filter(({ name }) =>
     name.includes('-visual:'),
   )
   assert.ok(visualRows.length > 0 && visualRows.length <= VISIBLE_SLOTS)
-  assert.ok(
-    visualRows.some(
-      ({ userData }) => userData.wristMenuAtlasStateCue === 'selected',
+  const visibleCues = new Set(
+    visualRows.flatMap(
+      ({ userData }) => userData.wristMenuAtlasStateCues ?? [],
     ),
   )
-  assert.ok(
-    visualRows.some(
-      ({ userData }) => userData.wristMenuAtlasStateCue === 'disabled',
-    ),
-  )
+  assert.deepEqual([...visibleCues].sort(), [
+    'disabled',
+    'hovered',
+    'selected',
+    'selection-ownership',
+  ])
+  const footer = presentation.root.getObjectByName('wrist-menu-footer-atlas')
+  assert.deepEqual(footer.userData.wristMenuAtlasStateCues, [
+    'scroll-ownership',
+  ])
 
+  for (const mesh of [...visualRows, footer]) {
+    assert.equal(mesh.material.map, atlasTexture(presentation.root))
+    assert.equal(mesh.material.color.getHex(), 0xffffff)
+  }
+
+  presentation.dispose()
+})
+
+test('interaction and Scroll Ownership cues switch pre-rendered UVs without atlas uploads', () => {
+  const initial = presentationModel()
+  const presentation = defaultThreeWristMenuPresentationFactory(initial)
+  const atlas = atlasTexture(presentation.root)
+  const row = presentation.root.getObjectByName(
+    'wrist-menu-action-visual:action-0',
+  )
+  const footer = presentation.root.getObjectByName('wrist-menu-footer-atlas')
+  const rowUvs = () => Array.from(row.geometry.getAttribute('uv').array)
+  const footerUvs = () => Array.from(footer.geometry.getAttribute('uv').array)
+  const idleUvs = rowUvs()
+  const idleFooterUvs = footerUvs()
+  const atlasVersion = atlas.version
+
+  const hovered = {
+    ...initial,
+    items: initial.items.map((item, index) =>
+      index === 0 ? { ...item, interaction: 'hovered' } : item,
+    ),
+  }
+  presentation.update(hovered)
+  const hoveredUvs = rowUvs()
+  assert.notDeepEqual(hoveredUvs, idleUvs)
+  assert.deepEqual(row.userData.wristMenuAtlasStateCues, ['hovered'])
+  assert.equal(atlas.version, atlasVersion)
+
+  const armed = {
+    ...hovered,
+    items: hovered.items.map((item, index) =>
+      index === 0 ? { ...item, interaction: 'armed' } : item,
+    ),
+  }
+  presentation.update(armed)
+  const armedUvs = rowUvs()
+  assert.notDeepEqual(armedUvs, hoveredUvs)
+  assert.deepEqual(row.userData.wristMenuAtlasStateCues, [
+    'selection-ownership',
+  ])
+  assert.equal(atlas.version, atlasVersion)
+
+  const scrolling = { ...armed, scrollOwned: true }
+  presentation.update(scrolling)
+  assert.notDeepEqual(footerUvs(), idleFooterUvs)
+  assert.deepEqual(footer.userData.wristMenuAtlasStateCues, [
+    'scroll-ownership',
+  ])
+  assert.equal(atlas.version, atlasVersion)
+
+  const rowUvVersion = row.geometry.getAttribute('uv').version
+  const footerUvVersion = footer.geometry.getAttribute('uv').version
+  presentation.update(scrolling)
+  assert.equal(row.geometry.getAttribute('uv').version, rowUvVersion)
+  assert.equal(footer.geometry.getAttribute('uv').version, footerUvVersion)
+  assert.equal(atlas.version, atlasVersion)
   presentation.dispose()
 })
 

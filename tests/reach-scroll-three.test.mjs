@@ -152,6 +152,7 @@ test('setModel updates the bound interactive rows with the latest interaction st
       scrollOffset: 0,
       totalRows: 2,
       visibleSlots: VISIBLE_SLOTS,
+      scrollOwned: false,
       scrollBarrierActive: false,
     },
     true,
@@ -162,7 +163,10 @@ test('setModel updates the bound interactive rows with the latest interaction st
       child.name === 'wrist-menu-action-visual:spawn' && child.visible,
   )
   assert.ok(hoveredRow !== undefined)
-  assert.equal(hoveredRow.material.color.getHex(), 0x1d4438)
+  assert.equal(hoveredRow.material.color.getHex(), 0xffffff)
+  assert.deepEqual(hoveredRow.userData.wristMenuAtlasStateCues, [
+    'hovered',
+  ])
 
   const toggleRow = presentation.group.children.find(
     (child) =>

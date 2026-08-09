@@ -14,9 +14,18 @@ import type {
 import { defaultThemeTokens } from '../core/index.js'
 import { VISIBLE_SLOTS } from '../core/scroll-state.js'
 import {
+  classifyAtlasRowVisual,
   type AtlasUvRegion,
   WristMenuPresentationAtlas,
 } from './presentation-atlas.js'
+import {
+  reachFooterCenter,
+  reachHeightScale,
+  reachLayout,
+  reachRowWidth,
+  reachViewportCenter,
+  reachViewportTop,
+} from './reach-layout.js'
 
 const decorativeRaycast: Mesh['raycast'] = () => undefined
 const interactiveRaycast = Mesh.prototype.raycast
@@ -64,55 +73,16 @@ function rowsFor(items: readonly PresentationItem[]): readonly PresentationRow[]
   return rows
 }
 
-function baseColor(
-  item: InteractivePresentationItem,
-  theme: ThemeTokens,
-): number {
-  if (item.disabled) return theme.disabledItemColor
-  if (item.type === 'toggle' && item.selected) return theme.selectedItemColor
-  if (item.type === 'choice' && item.selected) return theme.selectedItemColor
-  return theme.itemColor
-}
-
 const POOL_SIZE = VISIBLE_SLOTS
-const ROW_HEIGHT = 0.02
-const SEPARATOR_HEIGHT = 0.009
-const ROW_GAP = 0.0025
-const PANEL_WIDTH = 0.192
-const PANEL_HEIGHT = 0.158
-const VIEWPORT_HEIGHT = 0.108
-const VIEWPORT_BOTTOM = -PANEL_HEIGHT / 2 + 0.01
-const VIEWPORT_TOP = VIEWPORT_BOTTOM + VIEWPORT_HEIGHT
-const VIEWPORT_CENTER = (VIEWPORT_TOP + VIEWPORT_BOTTOM) / 2
-const PANEL_DEPTH = 0.004
-const ROW_WIDTH = 0.176
-const ROW_DEPTH = 0.003
-const HIT_DEPTH = 0.008
-const HIT_Z = 0.008
-const FOOTER_HEIGHT = 0.0065
-const FOOTER_CENTER =
-  (VIEWPORT_BOTTOM - 0.0015 + (-PANEL_HEIGHT / 2 + 0.002)) / 2
-
-const idleAtlasRoles = Object.freeze(['primary', 'secondary'])
-const selectedAtlasRoles = Object.freeze([
-  'primary',
-  'secondary',
-  'selected',
-])
-const disabledAtlasRoles = Object.freeze([
-  'primary',
-  'secondary',
-  'disabled',
-])
 
 type PoolSlot = {
   rowMesh: Mesh
   hitMesh: Mesh
   rowGeometry: BoxGeometry
   baseUvs: Float32Array
-  rowMaterial: MeshBasicMaterial
   hitMaterial: MeshBasicMaterial
   boundRowIndex: number | null
+  boundInteraction: 'idle' | 'hovered' | 'armed' | null
 }
 
 type MeasuredRow = Readonly<{
@@ -122,7 +92,9 @@ type MeasuredRow = Readonly<{
 }>
 
 function physicalRowHeight(row: PresentationRow): number {
-  return row.type === 'separator' ? SEPARATOR_HEIGHT : ROW_HEIGHT
+  return row.type === 'separator'
+    ? reachLayout.separatorHeightMeters
+    : reachLayout.rowHeightMeters
 }
 
 function measureRows(rows: readonly PresentationRow[]): readonly MeasuredRow[] {
@@ -134,7 +106,7 @@ function measureRows(rows: readonly PresentationRow[]): readonly MeasuredRow[] {
       bottom: cursor + height,
       height,
     })
-    cursor = measured.bottom + ROW_GAP
+    cursor = measured.bottom + reachLayout.rowGapMeters
     return measured
   })
 }
@@ -150,7 +122,7 @@ function physicalScrollOffset(
   )
   const fraction = Math.min(1, Math.max(0, logicalOffset - baseIndex))
   const base = rows[baseIndex]!
-  return base.top + fraction * (base.height + ROW_GAP)
+  return base.top + fraction * (base.height + reachLayout.rowGapMeters)
 }
 
 function firstVisibleRow(
@@ -189,49 +161,6 @@ function applyAtlasUv(
   uvs.needsUpdate = true
 }
 
-type AtlasStateClassification = Readonly<{
-  roles: readonly string[]
-  cue: 'disabled' | 'selected' | undefined
-}>
-
-const idleAtlasState = Object.freeze({
-  roles: idleAtlasRoles,
-  cue: undefined,
-})
-const selectedAtlasState = Object.freeze({
-  roles: selectedAtlasRoles,
-  cue: 'selected' as const,
-})
-const disabledAtlasState = Object.freeze({
-  roles: disabledAtlasRoles,
-  cue: 'disabled' as const,
-})
-
-function classifyAtlasState(row: PresentationRow): AtlasStateClassification {
-  if ('disabled' in row && row.disabled) {
-    return disabledAtlasState
-  }
-  if (
-    (row.type === 'toggle' || row.type === 'choice') &&
-    row.selected
-  ) {
-    return selectedAtlasState
-  }
-  return idleAtlasState
-}
-
-function rowColor(row: PresentationRow, theme: ThemeTokens): number {
-  if (row.type === 'separator') return theme.separatorColor
-  if (row.type === 'choice-group') return theme.groupHeaderColor
-  if (row.interaction === 'armed') return theme.armedItemColor
-  if (row.interaction === 'hovered') {
-    return row.disabled
-      ? theme.hoveredDisabledItemColor
-      : theme.hoveredItemColor
-  }
-  return baseColor(row, theme)
-}
-
 export class WristMenuPresentation {
   readonly group = new Group()
   readonly hitRegions: Mesh[] = []
@@ -247,6 +176,7 @@ export class WristMenuPresentation {
   private allRows: readonly PresentationRow[] = []
   private measuredRows: readonly MeasuredRow[] = []
   private scrollOffset = 0
+  private scrollOwned = false
   private theme = defaultThemeTokens
   private modelRevision = -1
   private poolBound = false
@@ -261,7 +191,11 @@ export class WristMenuPresentation {
     this.atlas = new WristMenuPresentationAtlas(this.allRows, this.theme)
     this.resources.push(this.atlas)
 
-    const panelGeometry = new BoxGeometry(PANEL_WIDTH, PANEL_HEIGHT, PANEL_DEPTH)
+    const panelGeometry = new BoxGeometry(
+      reachLayout.panelWidthMeters,
+      reachLayout.panelHeightMeters,
+      reachLayout.panelDepthMeters,
+    )
     const panelMaterial = new MeshBasicMaterial({
       color: 0x081415,
       transparent: true,
@@ -276,8 +210,13 @@ export class WristMenuPresentation {
     this.visualMaterials.push(panelMaterial)
 
     for (let i = 0; i < POOL_SIZE; i++) {
-      const rowGeometry = new BoxGeometry(ROW_WIDTH, ROW_HEIGHT, ROW_DEPTH)
+      const rowGeometry = new BoxGeometry(
+        reachLayout.viewportWidthMeters,
+        reachLayout.rowHeightMeters,
+        reachLayout.rowDepthMeters,
+      )
       const rowMaterial = new MeshBasicMaterial({
+        color: 0xffffff,
         map: this.atlas.texture,
         transparent: true,
       })
@@ -289,7 +228,11 @@ export class WristMenuPresentation {
       this.resources.push(rowGeometry, rowMaterial)
       this.visualMaterials.push(rowMaterial)
 
-      const hitGeometry = new BoxGeometry(ROW_WIDTH, ROW_HEIGHT, HIT_DEPTH)
+      const hitGeometry = new BoxGeometry(
+        reachLayout.viewportWidthMeters,
+        reachLayout.rowHeightMeters,
+        reachLayout.hitDepthMeters,
+      )
       const hitMaterial = new MeshBasicMaterial({ visible: false })
       const hitMesh = new Mesh(hitGeometry, hitMaterial)
       hitMesh.raycast = decorativeRaycast
@@ -305,25 +248,30 @@ export class WristMenuPresentation {
         hitMesh,
         rowGeometry,
         baseUvs: new Float32Array(rowGeometry.getAttribute('uv').array),
-        rowMaterial,
         hitMaterial,
         boundRowIndex: null,
+        boundInteraction: null,
       })
     }
 
     this.viewportMesh = new Mesh(panelGeometry, this.slots[0]!.hitMaterial)
     this.viewportMesh.name = 'wrist-menu-reach-viewport'
-    this.viewportMesh.position.set(0, VIEWPORT_CENTER, 0.002)
+    this.viewportMesh.position.set(0, reachViewportCenter, 0.002)
     this.viewportMesh.scale.set(
-      ROW_WIDTH / PANEL_WIDTH,
-      VIEWPORT_HEIGHT / PANEL_HEIGHT,
+      reachLayout.viewportWidthMeters / reachLayout.panelWidthMeters,
+      reachLayout.viewportHeightMeters / reachLayout.panelHeightMeters,
       1,
     )
     this.viewportMesh.raycast = decorativeRaycast
     this.group.add(this.viewportMesh)
 
-    this.footerGeometry = new BoxGeometry(ROW_WIDTH, FOOTER_HEIGHT, ROW_DEPTH)
+    this.footerGeometry = new BoxGeometry(
+      reachLayout.viewportWidthMeters,
+      reachLayout.footerHeightMeters,
+      reachLayout.rowDepthMeters,
+    )
     const footerMaterial = new MeshBasicMaterial({
+      color: 0xffffff,
       map: this.atlas.texture,
       transparent: true,
     })
@@ -332,7 +280,7 @@ export class WristMenuPresentation {
     this.footerMesh.raycast = decorativeRaycast
     this.footerMesh.position.set(
       0,
-      FOOTER_CENTER,
+      reachFooterCenter,
       0.002,
     )
     this.footerBaseUvs = new Float32Array(
@@ -341,8 +289,12 @@ export class WristMenuPresentation {
     applyAtlasUv(
       this.footerGeometry,
       this.footerBaseUvs,
-      this.atlas.footerRegion(),
+      this.atlas.footerRegion(false),
     )
+    this.footerMesh.userData['wristMenuAtlasRoles'] = Object.freeze([
+      'footer',
+    ])
+    this.footerMesh.userData['wristMenuAtlasStateCues'] = Object.freeze([])
     this.group.add(this.footerMesh)
     this.resources.push(this.footerGeometry, footerMaterial)
     this.visualMaterials.push(footerMaterial)
@@ -350,15 +302,30 @@ export class WristMenuPresentation {
     if (initialModel !== undefined) this.setModel(initialModel, false)
   }
 
+  private updateFooterAtlasState(scrollOwned: boolean, force = false) {
+    if (!force && this.scrollOwned === scrollOwned) return
+    this.scrollOwned = scrollOwned
+    applyAtlasUv(
+      this.footerGeometry,
+      this.footerBaseUvs,
+      this.atlas.footerRegion(scrollOwned),
+    )
+    this.footerMesh.userData['wristMenuAtlasRoles'] = Object.freeze([
+      'footer',
+      ...(scrollOwned ? ['scrollOwnership'] : []),
+    ])
+    const cues = Object.freeze(
+      scrollOwned ? ['scroll-ownership'] : [],
+    )
+    this.footerMesh.userData['wristMenuAtlasStateCues'] = cues
+    this.footerMesh.userData['wristMenuAtlasStateCue'] = cues[0]
+  }
+
   renderItems(items: readonly PresentationItem[]) {
     this.allRows = rowsFor(items)
     this.measuredRows = measureRows(this.allRows)
     this.atlas.redraw(this.allRows, this.theme)
-    applyAtlasUv(
-      this.footerGeometry,
-      this.footerBaseUvs,
-      this.atlas.footerRegion(),
-    )
+    this.updateFooterAtlasState(this.scrollOwned, true)
     this.updatePool(true)
   }
 
@@ -377,12 +344,12 @@ export class WristMenuPresentation {
       ? firstVisibleRow(measuredRows, physicalOffset)
       : 0
     const startRow = Math.max(0, firstVisible - 1)
-    const heightScale = this.theme.viewportHeightMeters / VIEWPORT_HEIGHT
+    const heightScale = reachHeightScale(this.theme)
     const contentHeight = measuredRows.at(-1)?.bottom ?? 0
     const viewportTop =
       contentHeight <= this.theme.viewportHeightMeters
         ? contentHeight / 2
-        : VIEWPORT_TOP * heightScale
+        : reachViewportTop * heightScale
     const viewportEnd = physicalOffset + this.theme.viewportHeightMeters
     const endRow = rebindLayout
       ? Math.min(
@@ -406,10 +373,18 @@ export class WristMenuPresentation {
         slot.hitMesh.raycast = decorativeRaycast
         slot.hitMesh.userData['wristMenuItemId'] = null
         slot.boundRowIndex = null
+        slot.boundInteraction = null
         continue
       }
 
       const row = this.allRows[rowIndex]!
+      const interaction =
+        ('interaction' in row ? row.interaction : 'idle') ?? 'idle'
+      const atlasVisual = classifyAtlasRowVisual(
+        row,
+        interaction,
+        this.theme,
+      )
       const rowHeight = physicalRowHeight(row)
       let y = slot.rowMesh.position.y
       let fullyVisible = slot.hitMesh.visible
@@ -424,29 +399,26 @@ export class WristMenuPresentation {
         slot.rowMesh.userData['wristMenuLabel'] = row.label
         slot.rowMesh.userData['wristMenuIconKey'] =
           'iconKey' in row ? row.iconKey : undefined
-        applyAtlasUv(
-          slot.rowGeometry,
-          slot.baseUvs,
-          this.atlas.rowUv(rowIndex),
-        )
-
-        const scaleY = rowHeight / ROW_HEIGHT
-        const rowWidth = Math.max(
-          0.001,
-          this.theme.panelWidthMeters - 0.016,
-        )
-        const scaleX = rowWidth / ROW_WIDTH
+        const scaleY = rowHeight / reachLayout.rowHeightMeters
+        const rowWidth = reachRowWidth(this.theme)
+        const scaleX = rowWidth / reachLayout.viewportWidthMeters
         slot.rowMesh.scale.set(scaleX, scaleY, 1)
         slot.boundRowIndex = rowIndex
         fullyVisible =
           measured.top >= physicalOffset - 1e-7 &&
           measured.bottom <= viewportEnd + 1e-7
-        slot.hitMesh.position.set(0, y, HIT_Z)
+        slot.hitMesh.position.set(0, y, reachLayout.hitZMeters)
         slot.hitMesh.scale.set(scaleX, scaleY, 1)
       }
 
-      const atlasState = classifyAtlasState(row)
-      slot.rowMaterial.color.setHex(rowColor(row, this.theme))
+      if (rebindLayout || slot.boundInteraction !== interaction) {
+        applyAtlasUv(
+          slot.rowGeometry,
+          slot.baseUvs,
+          this.atlas.rowUv(rowIndex, interaction),
+        )
+        slot.boundInteraction = interaction
+      }
       slot.rowMesh.userData['wristMenuValue'] =
         row.type === 'toggle' || row.type === 'choice'
           ? row.value
@@ -457,8 +429,10 @@ export class WristMenuPresentation {
         row.type === 'toggle' || row.type === 'choice' ? row.selected : false
       slot.rowMesh.userData['wristMenuDisabledReason'] =
         'disabledReason' in row ? row.disabledReason : undefined
-      slot.rowMesh.userData['wristMenuAtlasRoles'] = atlasState.roles
-      slot.rowMesh.userData['wristMenuAtlasStateCue'] = atlasState.cue
+      slot.rowMesh.userData['wristMenuAtlasRoles'] = atlasVisual.roles
+      slot.rowMesh.userData['wristMenuAtlasStateCues'] = atlasVisual.cues
+      slot.rowMesh.userData['wristMenuAtlasStateCue'] =
+        atlasVisual.cues.length === 1 ? atlasVisual.cues[0] : undefined
 
       if (row.type === 'separator' || row.type === 'choice-group') {
         slot.hitMesh.visible = false
@@ -488,21 +462,25 @@ export class WristMenuPresentation {
 
   setModel(model: PresentationModel, targetable: boolean) {
     this.theme = model.theme ?? defaultThemeTokens
-    const heightScale = this.theme.viewportHeightMeters / VIEWPORT_HEIGHT
-    const rowWidth = Math.max(0.001, this.theme.panelWidthMeters - 0.016)
+    const heightScale = reachHeightScale(this.theme)
+    const rowWidth = reachRowWidth(this.theme)
     this.panelMesh.scale.set(
-      this.theme.panelWidthMeters / PANEL_WIDTH,
+      this.theme.panelWidthMeters / reachLayout.panelWidthMeters,
       heightScale,
       1,
     )
     this.viewportMesh.scale.set(
-      rowWidth / PANEL_WIDTH,
-      this.theme.viewportHeightMeters / PANEL_HEIGHT,
+      rowWidth / reachLayout.panelWidthMeters,
+      this.theme.viewportHeightMeters / reachLayout.panelHeightMeters,
       1,
     )
-    this.viewportMesh.position.y = VIEWPORT_CENTER * heightScale
-    this.footerMesh.scale.set(rowWidth / ROW_WIDTH, heightScale, 1)
-    this.footerMesh.position.y = FOOTER_CENTER * heightScale
+    this.viewportMesh.position.y = reachViewportCenter * heightScale
+    this.footerMesh.scale.set(
+      rowWidth / reachLayout.viewportWidthMeters,
+      heightScale,
+      1,
+    )
+    this.footerMesh.position.y = reachFooterCenter * heightScale
     const panelMaterial = this.panelMesh.material as MeshBasicMaterial
     panelMaterial.color.setHex(this.theme.panelColor)
     const structureChanged = this.modelRevision !== model.revision
@@ -511,12 +489,8 @@ export class WristMenuPresentation {
       this.modelRevision = model.revision
       this.measuredRows = measureRows(this.allRows)
       this.atlas.redraw(this.allRows, this.theme)
-      applyAtlasUv(
-        this.footerGeometry,
-        this.footerBaseUvs,
-        this.atlas.footerRegion(),
-      )
     }
+    this.updateFooterAtlasState(model.scrollOwned ?? false, structureChanged)
     const scrollChanged = this.scrollOffset !== model.scrollOffset
     this.scrollOffset = model.scrollOffset
     this.updatePool(structureChanged || scrollChanged || !this.poolBound)

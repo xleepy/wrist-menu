@@ -1,19 +1,20 @@
 import { LinearFilter } from 'three/src/constants.js'
 import { CanvasTexture } from 'three/src/textures/CanvasTexture.js'
 
-import type { ThemeTokens } from '../core/index.js'
+import type { MenuInteraction, ThemeTokens } from '../core/index.js'
 import { installEmbeddedInterFont } from './embedded-inter-font.js'
+import {
+  reachFooterHeight,
+  reachLayout,
+  reachRowWidth,
+} from './reach-layout.js'
 
 export const ATLAS_WIDTH = 1024
 export const ATLAS_HEIGHT = 2048
 export const ATLAS_BYTES = ATLAS_WIDTH * ATLAS_HEIGHT * 4
 
-const ROW_ASPECT = 0.176 / 0.02
-const ROW_WIDTH_METERS = 0.176
-const ROW_HEIGHT_METERS = 0.02
-const SEPARATOR_HEIGHT_METERS = 0.009
-const FOOTER_HEIGHT_METERS = 0.0065
-const VIEWPORT_HEIGHT_METERS = 0.108
+const ROW_ASPECT =
+  reachLayout.viewportWidthMeters / reachLayout.rowHeightMeters
 const PRIMARY_HEIGHT_METERS = 0.0065
 const SECONDARY_HEIGHT_METERS = 0.00475
 const CELL_GUTTER = 2
@@ -29,9 +30,25 @@ export type AtlasRow = Readonly<{
   type: AtlasRowType
   label?: string
   iconKey?: string
+  interaction?: MenuInteraction
   selected?: boolean
   disabled?: boolean
   disabledReason?: string
+}>
+
+export type AtlasRowCue =
+  | 'hovered'
+  | 'selected'
+  | 'disabled'
+  | 'selection-ownership'
+
+export type AtlasRowVisual = Readonly<{
+  interaction: MenuInteraction
+  background: number
+  ink: number
+  secondary: string
+  cues: readonly AtlasRowCue[]
+  roles: readonly string[]
 }>
 
 export type AtlasUvRegion = Readonly<{
@@ -179,14 +196,10 @@ function uvRegion(bounds: AtlasBounds): AtlasUvRegion {
   })
 }
 
-function rowWidth(theme: ThemeTokens): number {
-  return Math.max(0.001, theme.panelWidthMeters - 0.016)
-}
-
 function rowHeight(row: AtlasRow): number {
   return row.type === 'separator'
-    ? SEPARATOR_HEIGHT_METERS
-    : ROW_HEIGHT_METERS
+    ? reachLayout.separatorHeightMeters
+    : reachLayout.rowHeightMeters
 }
 
 function linearChannel(channel: number): number {
@@ -231,6 +244,87 @@ function role(name: string, background: number) {
   })
 }
 
+const cueRole = Object.freeze({
+  hovered: 'hovered',
+  selected: 'selected',
+  disabled: 'disabled',
+  'selection-ownership': 'selectionOwnership',
+} satisfies Readonly<Record<AtlasRowCue, string>>)
+
+type AtlasSemanticState = 'idle' | 'selected' | 'disabled'
+
+function semanticState(row: AtlasRow): AtlasSemanticState {
+  if (row.disabled === true) return 'disabled'
+  if (row.selected === true) return 'selected'
+  return 'idle'
+}
+
+function defaultSecondary(row: AtlasRow): string {
+  if (row.type === 'toggle') return 'TOGGLE'
+  if (row.type === 'choice') return 'OPTION'
+  if (row.type === 'choice-group') return 'CHOICE GROUP'
+  return 'ACTION'
+}
+
+/** One policy for atlas background, text, roles, and non-color row cues. */
+export function classifyAtlasRowVisual(
+  row: AtlasRow,
+  interaction: MenuInteraction,
+  theme: ThemeTokens,
+): AtlasRowVisual {
+  const semantic = semanticState(row)
+  const cues: AtlasRowCue[] = []
+  if (semantic !== 'idle') cues.push(semantic)
+
+  if (interaction === 'hovered') cues.push('hovered')
+  else if (interaction === 'armed' && semantic !== 'disabled') {
+    cues.push('selection-ownership')
+  }
+
+  const background =
+    row.type === 'separator'
+      ? theme.separatorColor
+      : row.type === 'choice-group'
+        ? theme.groupHeaderColor
+        : semantic === 'disabled'
+          ? interaction === 'hovered'
+            ? theme.hoveredDisabledItemColor
+            : theme.disabledItemColor
+          : interaction === 'armed'
+            ? theme.armedItemColor
+            : interaction === 'hovered'
+              ? theme.hoveredItemColor
+              : semantic === 'selected'
+                ? theme.selectedItemColor
+                : theme.itemColor
+  const secondary =
+    semantic === 'disabled'
+      ? row.disabledReason ?? 'DISABLED'
+      : interaction === 'armed'
+        ? 'SELECTION OWNED'
+        : interaction === 'hovered'
+          ? 'HOVER'
+          : semantic === 'selected'
+            ? 'SELECTED'
+            : defaultSecondary(row)
+  const baseRoles =
+    row.type === 'separator'
+      ? ['separator']
+      : ['primary', 'secondary']
+
+  return Object.freeze({
+    interaction,
+    background,
+    ink: readableInk(background),
+    secondary,
+    cues: Object.freeze(cues),
+    roles: Object.freeze([
+      ...baseRoles,
+      ...cues.map((cue) => cueRole[cue]),
+    ]),
+  })
+}
+
 function atlasMetadata(theme: ThemeTokens) {
   return Object.freeze({
     kind: 'single-package-owned-rgba-atlas',
@@ -244,12 +338,25 @@ function atlasMetadata(theme: ThemeTokens) {
       secondary: role('secondary', theme.itemColor),
       separator: role('separator', theme.separatorColor),
       footer: role('footer', theme.panelColor),
+      hovered: role('hovered', theme.hoveredItemColor),
+      hoveredDisabled: role(
+        'hoveredDisabled',
+        theme.hoveredDisabledItemColor,
+      ),
       selected: role('selected', theme.selectedItemColor),
       disabled: role('disabled', theme.disabledItemColor),
+      selectionOwnership: role(
+        'selectionOwnership',
+        theme.armedItemColor,
+      ),
+      scrollOwnership: role('scrollOwnership', theme.panelColor),
     }),
     nonColorStateCues: Object.freeze([
+      'hovered-inset-outline',
       'selected-label-and-check',
       'disabled-label-and-slash',
+      'selection-ownership-double-outline',
+      'scroll-ownership-footer-label-and-outline',
     ]),
   })
 }
@@ -329,48 +436,62 @@ function drawIcon(
   context.restore()
 }
 
-function rowBackground(row: AtlasRow, theme: ThemeTokens): number {
-  if (row.type === 'separator') return theme.separatorColor
-  if (row.type === 'choice-group') return theme.groupHeaderColor
-  if (row.disabled === true) return theme.disabledItemColor
-  if (row.selected === true) return theme.selectedItemColor
-  return theme.itemColor
-}
-
-function secondaryText(row: AtlasRow): string {
-  if (row.disabled === true) return row.disabledReason ?? 'DISABLED'
-  if (row.selected === true) return 'SELECTED'
-  if (row.type === 'toggle') return 'TOGGLE'
-  if (row.type === 'choice') return 'OPTION'
-  if (row.type === 'choice-group') return 'CHOICE GROUP'
-  return 'ACTION'
-}
-
-function drawStateCue(
+function drawRowCues(
   context: AtlasContext,
-  row: AtlasRow,
-  x: number,
-  y: number,
-  size: number,
-  color: number,
+  visual: AtlasRowVisual,
+  bounds: AtlasBounds,
+  padding: number,
+  iconSize: number,
 ) {
-  context.save()
-  context.translate(x, y)
-  context.strokeStyle = cssColor(color)
-  context.lineWidth = Math.max(1, size * 0.11)
-  context.lineCap = 'round'
-  context.beginPath()
-  if (row.disabled === true) {
-    context.arc(0, 0, size * 0.38, 0, Math.PI * 2)
-    context.moveTo(-size * 0.3, size * 0.3)
-    context.lineTo(size * 0.3, -size * 0.3)
-  } else if (row.selected === true) {
-    context.moveTo(-size * 0.38, 0)
-    context.lineTo(-size * 0.08, size * 0.3)
-    context.lineTo(size * 0.42, -size * 0.34)
+  const centerY = bounds.y + bounds.height / 2
+  for (const cue of visual.cues) {
+    context.save()
+    context.strokeStyle = cssColor(visual.ink)
+    context.lineWidth = Math.max(1, iconSize * 0.11)
+    context.lineCap = 'round'
+    context.lineJoin = 'round'
+    context.beginPath()
+    if (cue === 'hovered') {
+      const inset = Math.max(2, padding * 0.45)
+      context.rect(
+        bounds.x + inset,
+        bounds.y + inset,
+        bounds.width - inset * 2,
+        bounds.height - inset * 2,
+      )
+    } else if (cue === 'selection-ownership') {
+      const outerInset = Math.max(2, padding * 0.35)
+      const innerInset = Math.max(4, padding * 0.85)
+      context.rect(
+        bounds.x + outerInset,
+        bounds.y + outerInset,
+        bounds.width - outerInset * 2,
+        bounds.height - outerInset * 2,
+      )
+      context.rect(
+        bounds.x + innerInset,
+        bounds.y + innerInset,
+        bounds.width - innerInset * 2,
+        bounds.height - innerInset * 2,
+      )
+    } else {
+      context.translate(
+        bounds.x + bounds.width - padding - iconSize / 2,
+        centerY,
+      )
+      if (cue === 'disabled') {
+        context.arc(0, 0, iconSize * 0.38, 0, Math.PI * 2)
+        context.moveTo(-iconSize * 0.3, iconSize * 0.3)
+        context.lineTo(iconSize * 0.3, -iconSize * 0.3)
+      } else {
+        context.moveTo(-iconSize * 0.38, 0)
+        context.lineTo(-iconSize * 0.08, iconSize * 0.3)
+        context.lineTo(iconSize * 0.42, -iconSize * 0.34)
+      }
+    }
+    context.stroke()
+    context.restore()
   }
-  context.stroke()
-  context.restore()
 }
 
 function drawRow(
@@ -378,11 +499,9 @@ function drawRow(
   row: AtlasRow,
   bounds: AtlasBounds,
   physicalWidth: number,
-  theme: ThemeTokens,
+  visual: AtlasRowVisual,
 ) {
-  const background = rowBackground(row, theme)
-  const ink = readableInk(background)
-  context.fillStyle = cssColor(background)
+  context.fillStyle = cssColor(visual.background)
   context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
 
   const pixelsPerMeter = bounds.width / physicalWidth
@@ -398,7 +517,7 @@ function drawRow(
   const padding = Math.max(4, bounds.width * 0.018)
 
   if (row.type === 'separator') {
-    context.strokeStyle = cssColor(ink)
+    context.strokeStyle = cssColor(visual.ink)
     context.lineWidth = Math.max(1, bounds.height * 0.035)
     context.beginPath()
     context.moveTo(bounds.x + padding, centerY)
@@ -406,7 +525,7 @@ function drawRow(
     context.moveTo(bounds.x + bounds.width * 0.72, centerY)
     context.lineTo(bounds.x + bounds.width - padding, centerY)
     context.stroke()
-    context.fillStyle = cssColor(ink)
+    context.fillStyle = cssColor(visual.ink)
     context.font = `600 ${secondaryPixels}px WristMenuInter, Arial, sans-serif`
     context.textAlign = 'center'
     context.textBaseline = 'middle'
@@ -427,9 +546,9 @@ function drawRow(
     12,
     bounds.x + bounds.width - trailingWidth - textX,
   )
-  drawIcon(context, row.iconKey, iconX, centerY, iconSize, ink)
+  drawIcon(context, row.iconKey, iconX, centerY, iconSize, visual.ink)
 
-  context.fillStyle = cssColor(ink)
+  context.fillStyle = cssColor(visual.ink)
   context.textAlign = 'left'
   context.textBaseline = 'middle'
   context.font = `600 ${primaryPixels}px WristMenuInter, Arial, sans-serif`
@@ -440,21 +559,12 @@ function drawRow(
   )
   context.font = `400 ${secondaryPixels}px WristMenuInter, Arial, sans-serif`
   context.fillText(
-    fitText(context, secondaryText(row), maximumTextWidth),
+    fitText(context, visual.secondary, maximumTextWidth),
     textX,
     centerY + primaryPixels * 0.42,
   )
 
-  if (row.selected === true || row.disabled === true) {
-    drawStateCue(
-      context,
-      row,
-      bounds.x + bounds.width - padding - iconSize / 2,
-      centerY,
-      iconSize,
-      ink,
-    )
-  }
+  drawRowCues(context, visual, bounds, padding, iconSize)
 }
 
 function drawFooter(
@@ -462,6 +572,7 @@ function drawFooter(
   bounds: AtlasBounds,
   physicalWidth: number,
   rowCount: number,
+  scrollOwned: boolean,
   theme: ThemeTokens,
 ) {
   const ink = readableInk(theme.panelColor)
@@ -473,11 +584,44 @@ function drawFooter(
   context.textAlign = 'center'
   context.textBaseline = 'middle'
   context.fillText(
-    `${rowCount} ITEMS  ·  WRIST MENU`,
+    scrollOwned
+      ? `SCROLL OWNED  ·  ${rowCount} ITEMS`
+      : `${rowCount} ITEMS  ·  WRIST MENU`,
     bounds.x + bounds.width / 2,
     bounds.y + bounds.height / 2,
   )
+  if (scrollOwned) {
+    const inset = Math.max(2, bounds.height * 0.14)
+    context.strokeStyle = cssColor(ink)
+    context.lineWidth = Math.max(1, bounds.height * 0.08)
+    context.beginPath()
+    context.rect(
+      bounds.x + inset,
+      bounds.y + inset,
+      bounds.width - inset * 2,
+      bounds.height - inset * 2,
+    )
+    context.stroke()
+  }
   context.textAlign = 'left'
+}
+
+const interactionVariants = Object.freeze<MenuInteraction[]>([
+  'idle',
+  'hovered',
+  'armed',
+])
+
+type AtlasRowRegions = Readonly<Record<MenuInteraction, AtlasUvRegion>>
+type AtlasFooterRegions = Readonly<{
+  idle: AtlasUvRegion
+  scrollOwned: AtlasUvRegion
+}>
+
+function atlasInteractions(row: AtlasRow): readonly MenuInteraction[] {
+  return row.type === 'separator' || row.type === 'choice-group'
+    ? ['idle']
+    : interactionVariants
 }
 
 /** One bounded, package-owned CanvasTexture populated only at snapshot seams. */
@@ -485,8 +629,11 @@ export class WristMenuPresentationAtlas {
   readonly texture: CanvasTexture
   private readonly canvas: AtlasCanvas
   private readonly context: AtlasContext | null
-  private rowRegions: readonly AtlasUvRegion[] = []
-  private footerUv: AtlasUvRegion = fullAtlasRegion
+  private rowRegions: readonly AtlasRowRegions[] = []
+  private footerRegions: AtlasFooterRegions = Object.freeze({
+    idle: fullAtlasRegion,
+    scrollOwned: fullAtlasRegion,
+  })
 
   constructor(rows: readonly AtlasRow[], theme: ThemeTokens) {
     installEmbeddedInterFont()
@@ -501,12 +648,17 @@ export class WristMenuPresentationAtlas {
     this.texture.userData['wristMenuAtlas'] = atlasMetadata(theme)
   }
 
-  rowUv(index: number): AtlasUvRegion {
-    return this.rowRegions[index] ?? fullAtlasRegion
+  rowUv(
+    index: number,
+    interaction: MenuInteraction = 'idle',
+  ): AtlasUvRegion {
+    return this.rowRegions[index]?.[interaction] ?? fullAtlasRegion
   }
 
-  footerRegion(): AtlasUvRegion {
-    return this.footerUv
+  footerRegion(scrollOwned = false): AtlasUvRegion {
+    return scrollOwned
+      ? this.footerRegions.scrollOwned
+      : this.footerRegions.idle
   }
 
   redraw(rows: readonly AtlasRow[], theme: ThemeTokens): void {
@@ -516,38 +668,68 @@ export class WristMenuPresentationAtlas {
   }
 
   private render(rows: readonly AtlasRow[], theme: ThemeTokens): void {
-    const layout = atlasLayout(rows.length + 1)
-    const physicalWidth = rowWidth(theme)
+    const plannedRows = rows.flatMap((row, rowIndex) =>
+      atlasInteractions(row).map((interaction) => ({
+        row,
+        rowIndex,
+        interaction,
+      })),
+    )
+    const layout = atlasLayout(plannedRows.length + 2)
+    const physicalWidth = reachRowWidth(theme)
     this.context?.clearRect(0, 0, ATLAS_WIDTH, ATLAS_HEIGHT)
-    this.rowRegions = Object.freeze(
-      rows.map((row, index) => {
-        const bounds = aspectMatchedBounds(
-          cellBounds(layout, index),
+    const regionsByRow: Array<Partial<Record<MenuInteraction, AtlasUvRegion>>> =
+      rows.map(() => ({}))
+    plannedRows.forEach(({ row, rowIndex, interaction }, regionIndex) => {
+      const bounds = aspectMatchedBounds(
+        cellBounds(layout, regionIndex),
+        physicalWidth,
+        rowHeight(row),
+      )
+      if (this.context !== null) {
+        drawRow(
+          this.context,
+          row,
+          bounds,
           physicalWidth,
-          rowHeight(row),
+          classifyAtlasRowVisual(row, interaction, theme),
         )
-        if (this.context !== null) {
-          drawRow(this.context, row, bounds, physicalWidth, theme)
-        }
-        return uvRegion(bounds)
+      }
+      regionsByRow[rowIndex]![interaction] = uvRegion(bounds)
+    })
+    this.rowRegions = Object.freeze(
+      regionsByRow.map((regions) => {
+        const idle = regions.idle ?? fullAtlasRegion
+        return Object.freeze({
+          idle,
+          hovered: regions.hovered ?? idle,
+          armed: regions.armed ?? idle,
+        })
       }),
     )
-    const footerBounds = aspectMatchedBounds(
-      cellBounds(layout, rows.length),
-      physicalWidth,
-      FOOTER_HEIGHT_METERS *
-        (theme.viewportHeightMeters / VIEWPORT_HEIGHT_METERS),
-    )
-    if (this.context !== null) {
-      drawFooter(
-        this.context,
-        footerBounds,
+
+    const footerRegions = [false, true].map((scrollOwned, footerIndex) => {
+      const footerBounds = aspectMatchedBounds(
+        cellBounds(layout, plannedRows.length + footerIndex),
         physicalWidth,
-        rows.length,
-        theme,
+        reachFooterHeight(theme),
       )
-    }
-    this.footerUv = uvRegion(footerBounds)
+      if (this.context !== null) {
+        drawFooter(
+          this.context,
+          footerBounds,
+          physicalWidth,
+          rows.length,
+          scrollOwned,
+          theme,
+        )
+      }
+      return uvRegion(footerBounds)
+    })
+    this.footerRegions = Object.freeze({
+      idle: footerRegions[0]!,
+      scrollOwned: footerRegions[1]!,
+    })
   }
 
   dispose(): void {

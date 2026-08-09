@@ -38,6 +38,8 @@ export const APPROVED_PACKAGE_FILES = Object.freeze([
   'dist/three/presentation-atlas.js',
   'dist/three/presentation.d.ts',
   'dist/three/presentation.js',
+  'dist/three/reach-layout.d.ts',
+  'dist/three/reach-layout.js',
   'dist/three/wrist-menu-presentation.d.ts',
   'dist/three/wrist-menu-presentation.js',
   'package.json',
