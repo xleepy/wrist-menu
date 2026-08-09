@@ -1,6 +1,7 @@
 /** Exact version-0 package payload; paths are relative to the npm package root. */
 export const APPROVED_PACKAGE_FILES = Object.freeze([
   'LICENSE',
+  'LICENSE-INTER',
   'README.md',
   'compatibility.json',
   'dist/core/activation-config.d.ts',
@@ -27,8 +28,14 @@ export const APPROVED_PACKAGE_FILES = Object.freeze([
   'dist/react/index.js',
   'dist/three/index.d.ts',
   'dist/three/index.js',
+  'dist/three/embedded-inter-font.d.ts',
+  'dist/three/embedded-inter-font.js',
+  'dist/three/inter-font-data.d.ts',
+  'dist/three/inter-font-data.js',
   'dist/three/oriented-box.d.ts',
   'dist/three/oriented-box.js',
+  'dist/three/presentation-atlas.d.ts',
+  'dist/three/presentation-atlas.js',
   'dist/three/presentation.d.ts',
   'dist/three/presentation.js',
   'dist/three/wrist-menu-presentation.d.ts',

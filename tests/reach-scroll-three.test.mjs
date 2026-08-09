@@ -4,7 +4,7 @@ import test from 'node:test'
 import { WristMenuPresentation } from '../dist/three/wrist-menu-presentation.js'
 import { VISIBLE_SLOTS } from '../dist/core/scroll-state.js'
 
-const POOL_SIZE = VISIBLE_SLOTS + 1
+const POOL_SIZE = VISIBLE_SLOTS
 
 function rowAction(index) {
   return { type: 'action', id: `row-${index}`, label: `Row ${index}`, disabled: false }
@@ -23,7 +23,7 @@ function visibleRowNames(presentation) {
     .map((child) => child.name)
 }
 
-test('the WristMenuPresentation pool allocates exactly VISIBLE_SLOTS + 1 hit regions', () => {
+test('the WristMenuPresentation pool allocates exactly VISIBLE_SLOTS hit regions', () => {
   const presentation = new WristMenuPresentation()
   assert.equal(presentation.hitRegions.length, POOL_SIZE)
   assert.equal(presentation.panelMesh.name, 'wrist-menu-command-slab')
@@ -90,8 +90,8 @@ test('only fully-on-panel interactive rows expose visible hit regions', () => {
 
   const visibleHits = presentation.hitRegions.filter((hit) => hit.visible)
   assert.ok(
-    visibleHits.length > 0 && visibleHits.length < POOL_SIZE,
-    `expected a subset of hit regions to be visible, got ${visibleHits.length}`,
+    visibleHits.length > 0 && visibleHits.length <= POOL_SIZE,
+    `expected only pooled hit regions to be visible, got ${visibleHits.length}`,
   )
   for (const hit of visibleHits) {
     assert.equal(typeof hit.userData['wristMenuItemId'], 'string')

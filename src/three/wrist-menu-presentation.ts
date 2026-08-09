@@ -13,6 +13,10 @@ import type {
 } from '../core/index.js'
 import { defaultThemeTokens } from '../core/index.js'
 import { VISIBLE_SLOTS } from '../core/scroll-state.js'
+import {
+  type AtlasUvRegion,
+  WristMenuPresentationAtlas,
+} from './presentation-atlas.js'
 
 const decorativeRaycast: Mesh['raycast'] = () => undefined
 const interactiveRaycast = Mesh.prototype.raycast
@@ -70,7 +74,7 @@ function baseColor(
   return theme.itemColor
 }
 
-const POOL_SIZE = VISIBLE_SLOTS + 1
+const POOL_SIZE = VISIBLE_SLOTS
 const ROW_HEIGHT = 0.02
 const SEPARATOR_HEIGHT = 0.009
 const ROW_SPACING = 0.0225
@@ -81,30 +85,97 @@ const ROW_WIDTH = 0.176
 const ROW_DEPTH = 0.003
 const HIT_DEPTH = 0.008
 const HIT_Z = 0.008
+const FOOTER_HEIGHT = 0.009
+
+const idleAtlasRoles = Object.freeze(['primary', 'secondary'])
+const selectedAtlasRoles = Object.freeze([
+  'primary',
+  'secondary',
+  'selected',
+])
+const disabledAtlasRoles = Object.freeze([
+  'primary',
+  'secondary',
+  'disabled',
+])
 
 type PoolSlot = {
   rowMesh: Mesh
   hitMesh: Mesh
+  rowGeometry: BoxGeometry
+  baseUvs: Float32Array
   rowMaterial: MeshBasicMaterial
   hitMaterial: MeshBasicMaterial
   boundRow: PresentationRow | null
   boundItemId: string | null
 }
 
+function applyAtlasUv(
+  geometry: BoxGeometry,
+  baseUvs: Float32Array,
+  region: AtlasUvRegion,
+): void {
+  const uvs = geometry.getAttribute('uv')
+  for (let index = 0; index < uvs.count; index += 1) {
+    const source = index * 2
+    const baseU = baseUvs[source] ?? 0
+    const baseV = baseUvs[source + 1] ?? 0
+    uvs.setXY(
+      index,
+      region.u0 + baseU * (region.u1 - region.u0),
+      region.v0 + baseV * (region.v1 - region.v0),
+    )
+  }
+  uvs.needsUpdate = true
+}
+
+function atlasRoles(row: PresentationRow): readonly string[] {
+  if ('disabled' in row && row.disabled) return disabledAtlasRoles
+  if (
+    (row.type === 'toggle' || row.type === 'choice') &&
+    row.selected
+  ) {
+    return selectedAtlasRoles
+  }
+  return idleAtlasRoles
+}
+
+function atlasStateCue(
+  row: PresentationRow,
+): 'disabled' | 'selected' | undefined {
+  if ('disabled' in row && row.disabled) return 'disabled'
+  if (
+    (row.type === 'toggle' || row.type === 'choice') &&
+    row.selected
+  ) {
+    return 'selected'
+  }
+  return undefined
+}
+
 export class WristMenuPresentation {
   readonly group = new Group()
   readonly hitRegions: Mesh[] = []
   readonly panelMesh: Mesh
+  readonly atlas: WristMenuPresentationAtlas
   private readonly resources: Array<{ dispose(): void }> = []
   private readonly slots: PoolSlot[] = []
   private readonly visualMaterials: MeshBasicMaterial[] = []
+  private readonly footerMesh: Mesh<BoxGeometry, MeshBasicMaterial>
+  private readonly footerGeometry: BoxGeometry
+  private readonly footerBaseUvs: Float32Array
   private allRows: readonly PresentationRow[] = []
   private scrollOffset = 0
   private theme = defaultThemeTokens
   private modelRevision = -1
 
-  constructor() {
+  constructor(initialModel?: PresentationModel) {
     this.group.name = 'wrist-menu-attachment-root'
+    this.theme = initialModel?.theme ?? defaultThemeTokens
+    this.allRows = rowsFor(initialModel?.items ?? [])
+    this.modelRevision = initialModel?.revision ?? -1
+    this.atlas = new WristMenuPresentationAtlas(this.allRows, this.theme)
+    this.resources.push(this.atlas)
 
     const panelGeometry = new BoxGeometry(PANEL_WIDTH, PANEL_HEIGHT, PANEL_DEPTH)
     const panelMaterial = new MeshBasicMaterial({
@@ -122,10 +193,14 @@ export class WristMenuPresentation {
 
     for (let i = 0; i < POOL_SIZE; i++) {
       const rowGeometry = new BoxGeometry(ROW_WIDTH, ROW_HEIGHT, ROW_DEPTH)
-      const rowMaterial = new MeshBasicMaterial({ transparent: true })
+      const rowMaterial = new MeshBasicMaterial({
+        map: this.atlas.texture,
+        transparent: true,
+      })
       const rowMesh = new Mesh(rowGeometry, rowMaterial)
       rowMesh.raycast = decorativeRaycast
       rowMesh.visible = false
+      rowMesh.userData['wristMenuPoolSlot'] = i
       this.group.add(rowMesh)
       this.resources.push(rowGeometry, rowMaterial)
       this.visualMaterials.push(rowMaterial)
@@ -135,6 +210,8 @@ export class WristMenuPresentation {
       const hitMesh = new Mesh(hitGeometry, hitMaterial)
       hitMesh.raycast = decorativeRaycast
       hitMesh.visible = false
+      hitMesh.userData['wristMenuPoolSlot'] = i
+      hitMesh.userData['wristMenuItemId'] = null
       this.group.add(hitMesh)
       this.resources.push(hitGeometry, hitMaterial)
       this.hitRegions.push(hitMesh)
@@ -142,16 +219,63 @@ export class WristMenuPresentation {
       this.slots.push({
         rowMesh,
         hitMesh,
+        rowGeometry,
+        baseUvs: new Float32Array(rowGeometry.getAttribute('uv').array),
         rowMaterial,
         hitMaterial,
         boundRow: null,
         boundItemId: null,
       })
     }
+
+    this.footerGeometry = new BoxGeometry(ROW_WIDTH, FOOTER_HEIGHT, ROW_DEPTH)
+    const footerMaterial = new MeshBasicMaterial({
+      map: this.atlas.texture,
+      transparent: true,
+    })
+    this.footerMesh = new Mesh(this.footerGeometry, footerMaterial)
+    this.footerMesh.name = 'wrist-menu-footer-atlas'
+    this.footerMesh.raycast = decorativeRaycast
+    this.footerMesh.position.set(
+      0,
+      -this.theme.viewportHeightMeters / 2 + FOOTER_HEIGHT / 2,
+      0.002,
+    )
+    this.footerBaseUvs = new Float32Array(
+      this.footerGeometry.getAttribute('uv').array,
+    )
+    applyAtlasUv(
+      this.footerGeometry,
+      this.footerBaseUvs,
+      this.atlas.footerRegion(),
+    )
+    this.group.add(this.footerMesh)
+    this.resources.push(this.footerGeometry, footerMaterial)
+    this.visualMaterials.push(footerMaterial)
+
+    const stagingGeometry = new BoxGeometry(0.001, 0.001, 0.001)
+    const stagingMaterial = new MeshBasicMaterial({
+      map: this.atlas.texture,
+      transparent: true,
+    })
+    const stagingMesh = new Mesh(stagingGeometry, stagingMaterial)
+    stagingMesh.name = 'wrist-menu-atlas-staging'
+    stagingMesh.visible = false
+    stagingMesh.raycast = decorativeRaycast
+    this.group.add(stagingMesh)
+    this.resources.push(stagingGeometry, stagingMaterial)
+
+    if (initialModel !== undefined) this.setModel(initialModel, false)
   }
 
   renderItems(items: readonly PresentationItem[]) {
     this.allRows = rowsFor(items)
+    this.atlas.redraw(this.allRows, this.theme)
+    applyAtlasUv(
+      this.footerGeometry,
+      this.footerBaseUvs,
+      this.atlas.footerRegion(),
+    )
     this.rebindPool()
   }
 
@@ -197,6 +321,13 @@ export class WristMenuPresentation {
           : row.type === 'choice-group'
             ? row.selectedValue
             : undefined
+      slot.rowMesh.userData['wristMenuAtlasRoles'] = atlasRoles(row)
+      slot.rowMesh.userData['wristMenuAtlasStateCue'] = atlasStateCue(row)
+      applyAtlasUv(
+        slot.rowGeometry,
+        slot.baseUvs,
+        this.atlas.rowUv(rowIndex),
+      )
 
       if (row.type === 'separator') {
         slot.rowMaterial.color.setHex(this.theme.separatorColor)
@@ -217,6 +348,7 @@ export class WristMenuPresentation {
       if (row.type === 'separator' || row.type === 'choice-group') {
         slot.hitMesh.visible = false
         slot.hitMesh.raycast = decorativeRaycast
+        slot.hitMesh.userData['wristMenuItemId'] = null
         continue
       }
 
@@ -237,6 +369,7 @@ export class WristMenuPresentation {
       } else {
         slot.hitMesh.visible = false
         slot.hitMesh.raycast = decorativeRaycast
+        slot.hitMesh.userData['wristMenuItemId'] = interactiveRow.id
       }
     }
   }
@@ -248,6 +381,10 @@ export class WristMenuPresentation {
       this.theme.viewportHeightMeters / PANEL_HEIGHT,
       1,
     )
+    this.footerMesh.scale.x =
+      Math.max(0.001, this.theme.panelWidthMeters - 0.016) / ROW_WIDTH
+    this.footerMesh.position.y =
+      -this.theme.viewportHeightMeters / 2 + FOOTER_HEIGHT / 2
     const panelMaterial = this.panelMesh.material as MeshBasicMaterial
     panelMaterial.color.setHex(this.theme.panelColor)
     if (this.modelRevision !== model.revision) {
@@ -289,6 +426,8 @@ export class WristMenuPresentation {
       slot.rowMesh.userData['wristMenuValue'] =
         item.type === 'toggle' || item.type === 'choice' ? item.value : undefined
       slot.rowMesh.userData['wristMenuDisabledReason'] = item.disabledReason
+      slot.rowMesh.userData['wristMenuAtlasRoles'] = atlasRoles(item)
+      slot.rowMesh.userData['wristMenuAtlasStateCue'] = atlasStateCue(item)
     }
   }
 
