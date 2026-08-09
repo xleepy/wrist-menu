@@ -205,6 +205,8 @@ export type WristMenuRuntimeState = {
   lastLifecycleRevision: number | undefined
   selectionState: ReturnType<typeof createSelectionState>
   scrollState: ScrollState
+  /** @internal Package-owned cache for the settled-frame adapter fast path. */
+  lastPresentationModel: PresentationModel | undefined
 }
 
 function selectionIntentFor(
@@ -261,6 +263,7 @@ export function createWristMenuRuntimeState(
     lastLifecycleRevision: undefined,
     selectionState: createSelectionState(),
     scrollState: createScrollState(),
+    lastPresentationModel: undefined,
   }
 }
 
@@ -430,7 +433,7 @@ export function stepWristMenuRuntime(
     }
   }
 
-  return createPresentationModel({
+  const model = createPresentationModel({
     snapshot: state.snapshot,
     visible,
     targetable,
@@ -449,6 +452,8 @@ export function stepWristMenuRuntime(
     scrollOwned: scrollResult.scrollOwned,
     scrollBarrierActive: scrollResult.barrierActive,
   })
+  state.lastPresentationModel = model
+  return model
 }
 
 export function wristMenuRuntimeBlocksSceneInput(

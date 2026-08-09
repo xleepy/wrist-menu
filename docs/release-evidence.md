@@ -19,6 +19,39 @@ Run `npm run evidence` only from a clean, committed worktree. The command:
    and candidate-resolved compatibility view under the ignored
    `artifacts/release-evidence/` directory.
 
+Before the Node allocation lane imports its packed candidate, automation
+classifies every package-owned JavaScript allocation site represented by the
+emitted package AST in that evidence copy. The versioned marker records the
+complete exact and guarded-unsupported kind catalogs, every classified site,
+per-file AST-node and site totals, and source/instrumented digests. Its stable
+site identifiers feed a preallocated counter and produce exact per-site counts
+while the public Three integration processes 10,000 successive steady Frame
+Samples.
+
+Exact sites are language-level package-source constructions: object and array
+literals; ordinary function, arrow, class, regular-expression, and `new`
+expressions; and the explicitly global, fixed-cardinality `Object.create`,
+`Object.keys`, `Object.values`, and `Array.of` calls. Validated weights include
+constructor prototypes and method closures. Function declarations are charged
+when their containing scope executes, and class declarations are charged at
+declaration evaluation. Dependency-owned objects and engine-internal objects
+that are not language-level package-source constructions are outside this
+package-owned count.
+
+Any construct whose package-source object cardinality cannot be proven uses an
+execution-time sentinel. Rest arrays, destructuring and spread iteration,
+object rest/spread, `for...of`, explicit iterator/result calls, iterable
+collection constructors, `arguments`, async/generator/Promise paths, dynamic
+import, tagged templates, dynamic constructors, callable object factories, and
+dynamic or variable-cardinality calls are guarded unsupported. In particular,
+`Object.entries`, `Object.fromEntries`, `Array.from`, `match`, and `matchAll`
+are never assigned a fixed weight. If a
+guarded unsupported site executes inside the measured window, the exact report
+is unavailable and the Release Gate fails; an unexecuted site does not taint a
+different measured path. Shipped candidate bytes remain unchanged. Missing,
+incompatible, partial-coverage, or digest-mismatched instrumentation fails
+closed instead of falling back to Three resource deltas or heap sampling.
+
 The record identity includes the candidate digest, source and in-repository
 Example App commits, every participating lockfile, protocol, instrumentation,
 baseline, Tested Lanes, Validation Combinations, gate results, resolved-policy

@@ -12,6 +12,7 @@ import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { digestNamedCandidate } from './candidate-tarball.mjs'
+import { EXACT_ALLOCATION_INSTRUMENTATION } from '../fixtures/consumers/exact-allocation-evidence.mjs'
 import {
   evaluateAutomatedReleaseGates,
   finalizeAutomatedReleaseEvidence,
@@ -25,6 +26,7 @@ import {
   validateCompatibilityManifest,
   verifyImmutableEvidenceBundle,
 } from './release-evidence-lib.mjs'
+import { instrumentExactPackageAllocations } from './instrument-exact-allocations.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const npmCli = process.env.npm_execpath
@@ -39,8 +41,10 @@ const lockfilePaths = [
   'examples/primitive-workshop/package-lock.json',
 ]
 const instrumentationPaths = [
+  resolve(root, 'scripts', 'instrument-exact-allocations.mjs'),
   resolve(root, 'scripts', 'deterministic-release-traces.mjs'),
   resolve(root, 'scripts', 'release-gate-evaluation.mjs'),
+  resolve(root, 'fixtures', 'consumers', 'exact-allocation-evidence.mjs'),
   resolve(root, 'fixtures', 'consumers', 'import-safety.mjs'),
   resolve(root, 'fixtures', 'consumers', 'journey-evidence.mjs'),
   resolve(root, 'fixtures', 'consumers', 'runtime-evidence.mjs'),
@@ -138,6 +142,11 @@ async function compositeDigest(paths) {
 }
 
 async function releaseIdentity(protocol) {
+  assert.deepEqual(
+    protocol.allocationInstrumentation,
+    EXACT_ALLOCATION_INSTRUMENTATION,
+    'allocation instrumentation identity must match the automated protocol',
+  )
   return {
     lockfiles: await Promise.all(
       lockfilePaths.map(async (path) => ({
@@ -150,6 +159,7 @@ async function releaseIdentity(protocol) {
       version: protocol.instrumentationVersion,
       sha256: await compositeDigest(instrumentationPaths),
       baselineSha256: await fileDigest(baselinePath),
+      allocation: protocol.allocationInstrumentation,
       node: process.version,
       platform: `${process.platform}-${process.arch}`,
     },
@@ -342,6 +352,44 @@ async function main() {
     await writeCommandLog(
       resolve(rawDirectory, 'packed-consumers-command.json'),
       consumerResult,
+    )
+
+    let allocationInstrumentationResult
+    try {
+      const marker = await instrumentExactPackageAllocations(
+        resolve(
+          root,
+          'fixtures',
+          'consumers',
+          'three',
+          'node_modules',
+          '@xleepy',
+          'wrist-menu',
+        ),
+      )
+      allocationInstrumentationResult = {
+        command: 'instrument packed candidate for exact package allocations',
+        status: 'passed',
+        exitCode: 0,
+        stdout: JSON.stringify({
+          instrumentation: marker.instrumentation,
+          files: marker.files.length,
+          allocationSites: marker.siteCount,
+        }),
+        stderr: '',
+      }
+    } catch (error) {
+      allocationInstrumentationResult = {
+        command: 'instrument packed candidate for exact package allocations',
+        status: 'failed',
+        exitCode: 1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+      }
+    }
+    await writeCommandLog(
+      resolve(rawDirectory, 'exact-allocation-instrumentation-command.json'),
+      allocationInstrumentationResult,
     )
 
     const automatedResult = runNode(

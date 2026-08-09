@@ -1,19 +1,13 @@
 import { performance } from 'node:perf_hooks'
 import { readFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import * as three from 'three'
 import { BufferGeometry as InstrumentedBufferGeometry } from 'three/src/core/BufferGeometry.js'
 import { Group as InstrumentedGroup } from 'three/src/objects/Group.js'
 import { Material as InstrumentedMaterial } from 'three/src/materials/Material.js'
 import { Texture as InstrumentedTexture } from 'three/src/textures/Texture.js'
 
-import {
-  createThreeWristMenuState,
-  defaultThreeWristMenuPresentationFactory,
-  disposeThreeWristMenu,
-  replaceThreeWristMenuPresentation,
-  syncThreeWristMenu,
-  updateThreeWristMenu,
-} from '@xleepy/wrist-menu/three'
 import { reachScrollSnapshot } from '../../reach-scroll.mjs'
 import { createWristXrFixture } from '../../wrist-reveal-xr.mjs'
 import { writeLaneReport } from '../evidence-report.mjs'
@@ -36,6 +30,28 @@ import {
   listenerInventory,
   sampleThreeAllocationOrdinals,
 } from '../runtime-evidence.mjs'
+import {
+  exactAllocationGate,
+  prepareExactPackageAllocationEvidence,
+} from '../exact-allocation-evidence.mjs'
+
+const fixtureRoot = dirname(fileURLToPath(import.meta.url))
+const candidatePackageRoot = resolve(
+  fixtureRoot,
+  'node_modules',
+  '@xleepy',
+  'wrist-menu',
+)
+const exactAllocationEvidence =
+  await prepareExactPackageAllocationEvidence(candidatePackageRoot)
+const {
+  createThreeWristMenuState,
+  defaultThreeWristMenuPresentationFactory,
+  disposeThreeWristMenu,
+  replaceThreeWristMenuPresentation,
+  syncThreeWristMenu,
+  updateThreeWristMenu,
+} = await import('@xleepy/wrist-menu/three')
 
 const { Matrix4, Quaternion, Vector3 } = three
 const instrumentedThree = {
@@ -319,15 +335,23 @@ const constructionGate = evaluateConstructionInvariants(
 )
 const allocationStart = resourceCounts(menu.presentation.group)
 const allocationOrdinalsStart = sampleThreeAllocationOrdinals(instrumentedThree)
-for (let index = 0; index < 10_000; index += 1) {
-  updateThreeWristMenu(menu, { time: 1, frame: fixture.frame })
+const allocationWarmupFrames = 1_000
+for (let index = 0; index < allocationWarmupFrames; index += 1) {
+  updateThreeWristMenu(menu, { time: index + 2, frame: fixture.frame })
 }
+exactAllocationEvidence.begin()
+for (let index = 0; index < 10_000; index += 1) {
+  updateThreeWristMenu(menu, {
+    time: allocationWarmupFrames + index + 2,
+    frame: fixture.frame,
+  })
+}
+const exactAllocationReport = exactAllocationEvidence.finish()
 const allocationEnd = resourceCounts(menu.presentation.group)
 const allocationOrdinalsEnd = sampleThreeAllocationOrdinals(instrumentedThree)
 const allocationGate = {
-  status: 'failed',
-  reason: 'exact JavaScript object-allocation instrumentation is unavailable in the Node lane',
-  frames: 10_000,
+  ...exactAllocationGate(exactAllocationReport, 10_000),
+  warmupFrames: allocationWarmupFrames,
   packageOwnedResourceDelta: Object.fromEntries(
     Object.keys(allocationStart).map((key) => [key, allocationEnd[key] - allocationStart[key]]),
   ),
@@ -445,6 +469,7 @@ const report = {
   gates: {
     allocation: allocationGate,
     'identical-frame-mutation': identicalMutationGate,
+    construction: constructionGate,
     'resource-growth': resourceGrowthGate,
     'lifecycle-leak': lifecycleProbe(),
     'performance-baseline': {

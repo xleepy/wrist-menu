@@ -29,6 +29,11 @@ function gate(id, status, report, detail) {
   }
 }
 
+/** Interpret one retained automation gate without allowing unknown states through. */
+export function automatedRawGateStatus(report, id) {
+  return report.gates?.[id]?.status === 'passed' ? 'passed' : 'failed'
+}
+
 function resolveCompatibilityEvidence(
   compatibility,
   candidate,
@@ -311,7 +316,7 @@ export function evaluateAutomatedReleaseGates({
   })
   const automatedGate = (id) =>
     automatedResult.status === 'passed'
-      ? automatedReport.gates?.[id]?.status
+      ? automatedRawGateStatus(automatedReport, id)
       : 'failed'
   const failedTestedLanes = compatibility.testedLanes
     .map(({ id }) => id)
@@ -346,6 +351,7 @@ export function evaluateAutomatedReleaseGates({
     ...[
       'allocation',
       'identical-frame-mutation',
+      'construction',
       'resource-growth',
       'lifecycle-leak',
     ].map((id) => gate(

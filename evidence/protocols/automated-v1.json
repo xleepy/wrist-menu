@@ -1,7 +1,11 @@
 {
   "id": "automated-release",
   "version": 1,
-  "instrumentationVersion": 3,
+  "instrumentationVersion": 4,
+  "allocationInstrumentation": {
+    "id": "node-static-package-allocation-counter",
+    "version": 2
+  },
   "frameSchedules": ["60hz", "72hz", "90hz", "120hz", "irregular"],
   "deterministicTraces": [
     { "id": "enter-angle-below", "boundary": "enter-angle-35-degrees", "position": "below", "value": 34.999 },
@@ -41,6 +45,7 @@
     "iwer-four-lanes",
     "allocation",
     "identical-frame-mutation",
+    "construction",
     "resource-growth",
     "lifecycle-leak",
     "scene-event-shield",

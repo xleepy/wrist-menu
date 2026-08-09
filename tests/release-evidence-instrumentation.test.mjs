@@ -1,4 +1,15 @@
 import assert from 'node:assert/strict'
+import {
+  appendFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
 import * as three from 'three'
 import {
@@ -28,6 +39,16 @@ import {
   evaluateAutomatedReleaseGates,
   finalizeAutomatedReleaseEvidence,
 } from '../scripts/release-gate-evaluation.mjs'
+import {
+  exactAllocationGate,
+  EXACT_ALLOCATION_COVERAGE_PROTOCOL,
+  EXACT_ALLOCATION_INSTRUMENTATION,
+  EXACT_ALLOCATION_MARKER_FILENAME,
+  prepareExactPackageAllocationEvidence,
+} from '../fixtures/consumers/exact-allocation-evidence.mjs'
+import { instrumentExactPackageAllocations } from '../scripts/instrument-exact-allocations.mjs'
+import { reachScrollSnapshot } from '../fixtures/reach-scroll.mjs'
+import { createWristXrFixture } from '../fixtures/wrist-reveal-xr.mjs'
 
 const semanticCaseIds = [
   'fresh-reveal-hide-dwell',
@@ -53,6 +74,236 @@ const terminalEventsByShieldCase = {
   'leave-before-release': ['selection-cancellation'],
   'rapid-actions': ['selection-intent', 'selection-intent'],
 }
+
+test('the Node allocation lane classifies every exact and guarded-unsupported construct', async () => {
+  const temporaryRoot = mkdtempSync(resolve(tmpdir(), 'wrist-menu-exact-allocation-'))
+  const packageRoot = resolve(temporaryRoot, 'package')
+  const dist = resolve(packageRoot, 'dist')
+  try {
+    mkdirSync(dist, { recursive: true })
+    cpSync(
+      new URL(
+        '../fixtures/consumers/exact-allocation-probe-package.mjs',
+        import.meta.url,
+      ),
+      resolve(dist, 'probe.js'),
+    )
+    const marker = await instrumentExactPackageAllocations(packageRoot)
+    assert.deepEqual(
+      marker.coverage.exactKinds,
+      EXACT_ALLOCATION_COVERAGE_PROTOCOL.exactKinds,
+    )
+    assert.deepEqual(
+      marker.coverage.unsupportedKinds,
+      EXACT_ALLOCATION_COVERAGE_PROTOCOL.unsupportedKinds,
+    )
+    for (const kind of EXACT_ALLOCATION_COVERAGE_PROTOCOL.exactKinds) {
+      assert.ok(
+        marker.sites.some(
+          (site) => site.classification === 'exact' && site.kind === kind,
+        ),
+        `missing exact positive control: ${kind}`,
+      )
+    }
+    for (const kind of EXACT_ALLOCATION_COVERAGE_PROTOCOL.unsupportedKinds) {
+      assert.ok(
+        marker.sites.some(
+          (site) => site.classification === 'unsupported' && site.kind === kind,
+        ),
+        `missing unsupported negative control: ${kind}`,
+      )
+    }
+    const evidence = await prepareExactPackageAllocationEvidence(packageRoot)
+    assert.equal(evidence.status, 'available')
+    const probe = await import(pathToFileURL(resolve(packageRoot, 'dist', 'probe.js')).href)
+    for (let index = 0; index < 20_000; index += 1) {
+      probe.exerciseExactAllocations()
+    }
+    evidence.begin()
+    assert.equal(probe.exerciseExactAllocations(), 13)
+    const exact = evidence.finish()
+    assert.equal(exact.status, 'available')
+    assert.deepEqual(exact.instrumentation, EXACT_ALLOCATION_INSTRUMENTATION)
+    assert.deepEqual(exact.coverage, marker.coverage)
+    assert.equal(exact.observedPackageObjectAllocations, 23)
+    for (const kind of EXACT_ALLOCATION_COVERAGE_PROTOCOL.exactKinds) {
+      assert.ok(
+        exact.sites.some((site) => site.kind === kind),
+        `exact category did not execute: ${kind}`,
+      )
+    }
+    assert.equal(
+      exact.sites.reduce(
+        (total, site) => total + site.observedAllocations,
+        0,
+      ),
+      23,
+    )
+
+    const unsupportedControls = [
+      ['rest-array', () => probe.unsupportedRestArray(1)],
+      ['destructuring-iteration', () => probe.unsupportedArrayDestructuring([1])],
+      ['destructuring-assignment', () => probe.unsupportedDestructuringAssignment([1])],
+      ['object-rest', () => probe.unsupportedObjectRest({ retained: 1 })],
+      ['spread-iteration', () => probe.unsupportedSpreadIteration([1])],
+      ['object-spread', () => probe.unsupportedObjectSpread({ retained: 1 })],
+      ['for-of-iteration', () => probe.unsupportedForOf([1])],
+      ['for-of-iteration', () => probe.unsupportedExplicitIterator([1])],
+      ['for-of-iteration', () => probe.unsupportedIterableConstructor([1])],
+      ['variable-cardinality-call', () =>
+        probe.unsupportedIteratorNext([1][Symbol.iterator]())],
+      ['async-path', () => probe.unsupportedAsyncPath()],
+      ['generator-path', () => probe.unsupportedGeneratorPath().next()],
+      ['promise-path', () => probe.unsupportedPromisePath()],
+      ['variable-cardinality-call', () => probe.unsupportedObjectEntries({ retained: 1 })],
+      ['variable-cardinality-call', () => probe.unsupportedDynamicFunctionConstructor()],
+      ['variable-cardinality-call', () => probe.unsupportedCallableObjectFactory()],
+      ['variable-cardinality-call', () => probe.unsupportedMatchAll('allocation')],
+      ['dynamic-import', () => probe.unsupportedDynamicImport()],
+      ['tagged-template', () => probe.unsupportedTaggedTemplate()],
+      ['arguments-object', () => probe.unsupportedArgumentsObject(1)],
+    ]
+    for (const [kind, invoke] of unsupportedControls) {
+      evidence.begin()
+      await invoke()
+      const unsupported = evidence.finish()
+      assert.equal(unsupported.status, 'unavailable', kind)
+      assert.ok(
+        unsupported.unsupportedSites.some((site) => site.kind === kind),
+        kind,
+      )
+    }
+
+    const markerPath = resolve(packageRoot, EXACT_ALLOCATION_MARKER_FILENAME)
+    writeFileSync(markerPath, JSON.stringify({
+      ...marker,
+      coverage: { ...marker.coverage, status: 'partial' },
+    }))
+    const partialCoverage = await prepareExactPackageAllocationEvidence(
+      packageRoot,
+    )
+    assert.equal(partialCoverage.status, 'unavailable')
+    assert.match(partialCoverage.report.reason, /incompatible identity or shape/)
+    writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`)
+
+    appendFileSync(resolve(packageRoot, 'dist', 'probe.js'), '\n')
+    const tampered = await prepareExactPackageAllocationEvidence(packageRoot)
+    assert.equal(tampered.status, 'unavailable')
+    assert.match(tampered.report.reason, /instrumented package file digest changed/)
+
+    rmSync(resolve(packageRoot, EXACT_ALLOCATION_MARKER_FILENAME))
+    const missing = await prepareExactPackageAllocationEvidence(packageRoot)
+    assert.equal(missing.status, 'unavailable')
+    assert.match(missing.report.reason, /instrumented package manifest is unavailable/)
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true })
+  }
+})
+
+test('the allocation Release Gate passes only an available exact zero count', () => {
+  assert.deepEqual(
+    exactAllocationGate({
+      instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
+      status: 'available',
+      observedPackageObjectAllocations: 0,
+      sites: [],
+    }, 10_000),
+    {
+      instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
+      status: 'passed',
+      frames: 10_000,
+      observedPackageObjectAllocations: 0,
+      sites: [],
+    },
+  )
+  for (const report of [
+    {
+      instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
+      status: 'available',
+      observedPackageObjectAllocations: 1,
+      sites: [{ id: 4, observedAllocations: 1 }],
+    },
+    {
+      instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
+      status: 'unavailable',
+      reason: 'instrumented package manifest is unavailable',
+    },
+  ]) {
+    const gate = exactAllocationGate(report, 10_000)
+    assert.equal(gate.status, 'failed')
+    assert.equal(gate.frames, 10_000)
+  }
+})
+
+test('the public Three steady Frame Sample path allocates zero package objects across advancing frames', async () => {
+  const artifactRoot = fileURLToPath(new URL('../artifacts/', import.meta.url))
+  mkdirSync(artifactRoot, { recursive: true })
+  const temporaryRoot = mkdtempSync(resolve(
+    artifactRoot,
+    'wrist-menu-steady-frame-',
+  ))
+  const packageRoot = resolve(temporaryRoot, 'package')
+  try {
+    cpSync(new URL('../dist/', import.meta.url), resolve(packageRoot, 'dist'), {
+      recursive: true,
+    })
+    await instrumentExactPackageAllocations(packageRoot)
+    const evidence = await prepareExactPackageAllocationEvidence(packageRoot)
+    assert.equal(evidence.status, 'available')
+    const candidate = await import(
+      pathToFileURL(resolve(packageRoot, 'dist', 'three', 'index.js')).href
+    )
+    const fixture = createWristXrFixture({ menuKind: 'controller' })
+    fixture.setWristMatrix(new three.Matrix4())
+    const menu = candidate.createThreeWristMenuState({
+      renderer: fixture.renderer,
+      snapshot: reachScrollSnapshot,
+      onEvent: () => undefined,
+    })
+    candidate.updateThreeWristMenu(menu, { time: 0, frame: fixture.frame })
+    candidate.updateThreeWristMenu(menu, { time: 1, frame: fixture.frame })
+    for (let index = 0; index < 1_000; index += 1) {
+      candidate.updateThreeWristMenu(menu, {
+        time: index + 2,
+        frame: fixture.frame,
+      })
+    }
+    const poseCallsBefore = fixture.poseCalls.length
+    evidence.begin()
+    for (let index = 0; index < 10_000; index += 1) {
+      candidate.updateThreeWristMenu(menu, {
+        time: index + 1_002,
+        frame: fixture.frame,
+      })
+    }
+    const report = evidence.finish()
+    menu.presentation.group.visible = false
+    candidate.updateThreeWristMenu(menu, {
+      time: 11_002,
+      frame: fixture.frame,
+    })
+    assert.equal(menu.presentation.group.visible, true)
+    assert.throws(
+      () => candidate.updateThreeWristMenu(menu, {
+        time: Number.NaN,
+        frame: fixture.frame,
+      }),
+      /Frame Sample sequence and time must be finite/,
+    )
+    candidate.disposeThreeWristMenu(menu)
+
+    assert.equal(report.status, 'available')
+    assert.equal(report.observedPackageObjectAllocations, 0)
+    assert.ok(
+      fixture.poseCalls.length > poseCallsBefore,
+      'successive steady frames must continue sampling raw XR poses',
+    )
+    assert.equal(menu.runtime.lastTime, 11_002)
+    assert.equal(menu.runtime.scrollState.lastSequence, menu.frameSequence)
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true })
+  }
+})
 
 function makeValidSemanticCases() {
   return semanticCaseIds.map((id) => ({

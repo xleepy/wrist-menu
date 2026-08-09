@@ -163,7 +163,8 @@ A custom Canvas event manager is unverified unless its exact fixture is added to
 The default presentation has these exact invariant gates:
 
 - after construction and application of a Host Snapshot, the core steady-frame
-  path allocates zero objects across 10,000 Frame Samples;
+  path executes no exact package-source object construction and no guarded
+  unsupported allocation construct across 10,000 successive Frame Samples;
 - an identical Frame Sample after stabilization causes zero package-owned Three
   property writes;
 - one package-owned RGBA atlas is at most 1024 by 2048 pixels and 8 MiB;
@@ -284,6 +285,12 @@ Automated, import, consumer, IWER, allocation, and resource Evidence Records are
 regenerated from the exact release commit, candidate tarball, and lockfile on
 every release candidate.
 
+The allocation instrumentation identity and version are recorded in the
+Evidence Record alongside the digest of the instrumenter and retained raw
+reports. Changing the identity, version, implementation, or instrumented-file
+digest invalidates prior allocation evidence; an unavailable or unverifiable
+instrumented candidate never passes through resource-delta proxies.
+
 Physical smoke and performance records must match the candidate runtime digest,
 current device OS/browser combination, Example App lockfile, protocol, and
 instrumentation used for the Compatibility Claim. A prerelease record may carry
@@ -302,6 +309,7 @@ authoritative:
 | Core state machine or event ordering | Deterministic, adapter, and physical functional records |
 | Presentation, type, clipping, Hit Regions, or atlas | Legibility, targeting, resource, and physical performance records |
 | Controller Wrist Proxy offset | Controller reveal, parity, targeting, and comfort records |
+| Allocation instrumentation identity, version, implementation, or instrumented-file digest | Allocation records |
 | Fixture, protocol, or instrumentation | Its baseline and all comparisons using the prior version |
 
 `compatibility.json` records declared peers, exact Tested Lanes, claim status,

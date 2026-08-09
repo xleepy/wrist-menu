@@ -399,6 +399,11 @@ export class ManagedWristMenuPresentation {
     this.appliedTargetable = targetable
   }
 
+  invalidateModelCache(): void {
+    this.appliedModel = undefined
+    this.appliedTargetable = undefined
+  }
+
   setTargetable(targetable: boolean): void {
     if (this.appliedModel === undefined) return
     this.instance.update(withTargetability(this.appliedModel, targetable))
