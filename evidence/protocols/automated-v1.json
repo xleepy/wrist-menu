@@ -4,7 +4,7 @@
   "instrumentationVersion": 4,
   "allocationInstrumentation": {
     "id": "node-static-package-allocation-counter",
-    "version": 2
+    "version": 4
   },
   "frameSchedules": ["60hz", "72hz", "90hz", "120hz", "irregular"],
   "deterministicTraces": [

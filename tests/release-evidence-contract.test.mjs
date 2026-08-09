@@ -350,7 +350,7 @@ test('the automated protocol names every threshold triplet and fail-closed gate'
   assert.deepEqual(protocol.frameSchedules, ['60hz', '72hz', '90hz', '120hz', 'irregular'])
   assert.deepEqual(protocol.allocationInstrumentation, {
     id: 'node-static-package-allocation-counter',
-    version: 2,
+    version: 4,
   })
   for (const gate of [
     'import-safety',

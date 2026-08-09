@@ -135,6 +135,36 @@ test('controller raycasts use the current-frame wrist transform instead of stale
   disposeThreeWristMenu(menu)
 })
 
+test('lifecycle clears keep the preallocated steady observation input references current', () => {
+  const fixture = createWristXrFixture({ menuKind: 'controller' })
+  const menu = createThreeWristMenuState({
+    renderer: fixture.renderer,
+    snapshot: reachScrollSnapshot,
+    onEvent: () => undefined,
+  })
+  updateThreeWristMenu(menu, { time: 0, frame: fixture.frame })
+
+  const priorPressed = menu.sourcePressed
+  const priorCompleted = menu.sourceCompleted
+  fixture.session.dispatch('inputsourceschange')
+  assert.notEqual(menu.sourcePressed, priorPressed)
+  assert.notEqual(menu.sourceCompleted, priorCompleted)
+  assert.equal(menu.steadyFrameContext.sourcePressed, menu.sourcePressed)
+  assert.equal(menu.steadyFrameContext.sourceCompleted, menu.sourceCompleted)
+
+  fixture.session.dispatch('selectstart', fixture.selectionSource)
+  fixture.session.dispatch('select', fixture.selectionSource)
+  assert.equal(
+    menu.steadyFrameContext.sourcePressed.get(fixture.selectionSource),
+    true,
+  )
+  assert.equal(
+    menu.steadyFrameContext.sourceCompleted.has(fixture.selectionSource),
+    true,
+  )
+  disposeThreeWristMenu(menu)
+})
+
 test('an identical stabilized Frame Sample performs zero instrumented Three property writes', () => {
   const fixture = createWristXrFixture({ menuKind: 'controller' })
   fixture.setWristMatrix(new Matrix4())

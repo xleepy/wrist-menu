@@ -44,8 +44,8 @@ export type SteadyFrameSignature = {
 
 export type SteadyFrameObservationContext = {
   readonly group: Object3D<Object3DEventMap>
-  readonly sourcePressed: WeakMap<XRInputSource, boolean>
-  readonly sourceCompleted: WeakSet<XRInputSource>
+  sourcePressed: WeakMap<XRInputSource, boolean>
+  sourceCompleted: WeakSet<XRInputSource>
   frame: XRFrame | null
   session: XRSession | null
   referenceSpace: XRReferenceSpace | null
@@ -102,11 +102,15 @@ export function setSteadyFrameObservationContext(
   session: XRSession | null,
   referenceSpace: XRReferenceSpace | null,
   parent: Object3D<Object3DEventMap> | null,
+  sourcePressed: WeakMap<XRInputSource, boolean>,
+  sourceCompleted: WeakSet<XRInputSource>,
 ): void {
   context.frame = frame
   context.session = session
   context.referenceSpace = referenceSpace
   context.parent = parent
+  context.sourcePressed = sourcePressed
+  context.sourceCompleted = sourceCompleted
 }
 
 function createSourceSignature(inputSource: XRInputSource): SourceSignature {

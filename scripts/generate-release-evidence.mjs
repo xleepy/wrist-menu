@@ -12,7 +12,11 @@ import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { digestNamedCandidate } from './candidate-tarball.mjs'
-import { EXACT_ALLOCATION_INSTRUMENTATION } from '../fixtures/consumers/exact-allocation-evidence.mjs'
+import {
+  EXACT_ALLOCATION_INSTRUMENTATION,
+  EXACT_ALLOCATION_MARKER_FILENAME,
+  EXACT_ALLOCATION_MARKER_SHA256_ENV,
+} from '../fixtures/consumers/exact-allocation-evidence.mjs'
 import {
   evaluateAutomatedReleaseGates,
   finalizeAutomatedReleaseEvidence,
@@ -354,18 +358,26 @@ async function main() {
       consumerResult,
     )
 
+    const instrumentedCandidateRoot = resolve(
+      root,
+      'fixtures',
+      'consumers',
+      'three',
+      'node_modules',
+      '@xleepy',
+      'wrist-menu',
+    )
+    let trustedAllocationMarkerSha256
     let allocationInstrumentationResult
     try {
       const marker = await instrumentExactPackageAllocations(
-        resolve(
-          root,
-          'fixtures',
-          'consumers',
-          'three',
-          'node_modules',
-          '@xleepy',
-          'wrist-menu',
-        ),
+        instrumentedCandidateRoot,
+      )
+      trustedAllocationMarkerSha256 = sha256(
+        await readFile(resolve(
+          instrumentedCandidateRoot,
+          EXACT_ALLOCATION_MARKER_FILENAME,
+        )),
       )
       allocationInstrumentationResult = {
         command: 'instrument packed candidate for exact package allocations',
@@ -375,6 +387,7 @@ async function main() {
           instrumentation: marker.instrumentation,
           files: marker.files.length,
           allocationSites: marker.siteCount,
+          markerSha256: trustedAllocationMarkerSha256,
         }),
         stderr: '',
       }
@@ -391,11 +404,30 @@ async function main() {
       resolve(rawDirectory, 'exact-allocation-instrumentation-command.json'),
       allocationInstrumentationResult,
     )
+    await writeFile(
+      resolve(rawDirectory, 'exact-allocation-marker-trust.json'),
+      canonicalJson({
+        candidateSha256: candidate.sha256,
+        instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
+        marker: EXACT_ALLOCATION_MARKER_FILENAME,
+        markerSha256: trustedAllocationMarkerSha256 ?? null,
+        status:
+          trustedAllocationMarkerSha256 === undefined ? 'failed' : 'passed',
+      }),
+    )
 
     const automatedResult = runNode(
       'automated-gates.mjs',
       [],
-      evidenceEnvironment,
+      {
+        ...evidenceEnvironment,
+        ...(trustedAllocationMarkerSha256 === undefined
+          ? {}
+          : {
+              [EXACT_ALLOCATION_MARKER_SHA256_ENV]:
+                trustedAllocationMarkerSha256,
+            }),
+      },
       resolve(root, 'fixtures', 'consumers', 'three'),
     )
     await writeCommandLog(

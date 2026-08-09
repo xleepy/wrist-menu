@@ -1,9 +1,15 @@
 let retained
 
-class ProbeValue {
-  constructor(value) {
-    this.value = value
-  }
+function knownAllocationFreeProbe(value) {
+  return value
+}
+
+export function exerciseAllocationFreeCall() {
+  return knownAllocationFreeProbe(1)
+}
+
+export function unsupportedKnownCalleeOutsideProofScope() {
+  return knownAllocationFreeProbe(1)
 }
 
 export function exerciseExactAllocations() {
@@ -15,11 +21,6 @@ export function exerciseExactAllocations() {
   const functionExpression = function () { return 1 }
   const classExpression = class { method() { return 1 } }
   const pattern = /allocation-control/
-  const created = globalThis.Object.create(null)
-  const keys = globalThis.Object.keys({ key: true })
-  const values = globalThis.Object.values({ value: true })
-  const arrayOf = globalThis.Array.of(1)
-  const instance = new ProbeValue(3)
   retained = [
     LocalFunction,
     LocalClass,
@@ -29,11 +30,6 @@ export function exerciseExactAllocations() {
     functionExpression,
     classExpression,
     pattern,
-    created,
-    keys,
-    values,
-    arrayOf,
-    instance,
   ]
   return retained.length
 }
@@ -92,6 +88,10 @@ export function* unsupportedGeneratorPath() {
   yield 1
 }
 
+export function unsupportedGeneratorInvocation() {
+  return unsupportedGeneratorPath()
+}
+
 export function unsupportedPromisePath() {
   return Promise.resolve(1)
 }
@@ -106,6 +106,47 @@ export function unsupportedDynamicFunctionConstructor() {
 
 export function unsupportedCallableObjectFactory() {
   return Object()
+}
+
+export function unsupportedGlobalThisObjectFactory() {
+  return globalThis.Object()
+}
+
+export function unsupportedGlobalThisArrayFactory() {
+  return globalThis.Array()
+}
+
+export function unsupportedGlobalThisFunctionFactory() {
+  return globalThis.Function('return 1')
+}
+
+const aliasedObjectFactory = Object
+export function unsupportedAliasedObjectFactory() {
+  return aliasedObjectFactory()
+}
+
+export function unsupportedGetOwnPropertyNames(value) {
+  return Object.getOwnPropertyNames(value)
+}
+
+export function unsupportedReflectOwnKeys(value) {
+  return Reflect.ownKeys(value)
+}
+
+export function unsupportedTypedArrayNew() {
+  return new Uint8Array(1)
+}
+
+export function unsupportedTypedArraySubarray(value) {
+  return value.subarray(0, 1)
+}
+
+export function unsupportedTypedArrayFrom(value) {
+  return Uint8Array.from(value)
+}
+
+export function unsupportedUnknownPropertyCall(value) {
+  return value.allocateMaybe()
 }
 
 export function unsupportedMatchAll(value) {

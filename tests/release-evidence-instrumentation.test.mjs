@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import {
   appendFileSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -44,6 +46,7 @@ import {
   EXACT_ALLOCATION_COVERAGE_PROTOCOL,
   EXACT_ALLOCATION_INSTRUMENTATION,
   EXACT_ALLOCATION_MARKER_FILENAME,
+  EXACT_ALLOCATION_RUNTIME_PROTOCOL,
   prepareExactPackageAllocationEvidence,
 } from '../fixtures/consumers/exact-allocation-evidence.mjs'
 import { instrumentExactPackageAllocations } from '../scripts/instrument-exact-allocations.mjs'
@@ -75,6 +78,9 @@ const terminalEventsByShieldCase = {
   'rapid-actions': ['selection-intent', 'selection-intent'],
 }
 
+const fileSha256 = (path) =>
+  createHash('sha256').update(readFileSync(path)).digest('hex')
+
 test('the Node allocation lane classifies every exact and guarded-unsupported construct', async () => {
   const temporaryRoot = mkdtempSync(resolve(tmpdir(), 'wrist-menu-exact-allocation-'))
   const packageRoot = resolve(temporaryRoot, 'package')
@@ -89,6 +95,8 @@ test('the Node allocation lane classifies every exact and guarded-unsupported co
       resolve(dist, 'probe.js'),
     )
     const marker = await instrumentExactPackageAllocations(packageRoot)
+    const markerPath = resolve(packageRoot, EXACT_ALLOCATION_MARKER_FILENAME)
+    const trustedMarkerSha256 = fileSha256(markerPath)
     assert.deepEqual(
       marker.coverage.exactKinds,
       EXACT_ALLOCATION_COVERAGE_PROTOCOL.exactKinds,
@@ -97,6 +105,41 @@ test('the Node allocation lane classifies every exact and guarded-unsupported co
       marker.coverage.unsupportedKinds,
       EXACT_ALLOCATION_COVERAGE_PROTOCOL.unsupportedKinds,
     )
+    assert.deepEqual(
+      marker.coverage.allocationFreeKinds,
+      EXACT_ALLOCATION_COVERAGE_PROTOCOL.allocationFreeKinds,
+    )
+    assert.equal(
+      marker.coverage.callExpressionCount,
+      marker.coverage.callDescriptorCount,
+    )
+    assert.equal(
+      marker.coverage.newExpressionCount,
+      marker.coverage.newDescriptorCount,
+    )
+    assert.ok(marker.coverage.callExpressionCount > 0)
+    assert.ok(marker.coverage.newExpressionCount > 0)
+    assert.equal(
+      marker.sites.filter((site) => site.nodeKind === 'CallExpression').length,
+      marker.coverage.callExpressionCount,
+    )
+    assert.equal(
+      marker.sites.filter((site) => site.nodeKind === 'NewExpression').length,
+      marker.coverage.newExpressionCount,
+    )
+    for (const site of marker.sites.filter(
+      ({ nodeKind }) => nodeKind === 'CallExpression' || nodeKind === 'NewExpression',
+    )) {
+      assert.ok(
+        ['exact', 'allocation-free', 'unsupported'].includes(site.classification),
+      )
+      assert.equal(typeof site.descriptorId, 'string')
+      assert.ok(site.descriptorId.length > 0)
+      assert.equal(typeof site.identity, 'string')
+      assert.ok(site.identity.length > 0)
+      assert.equal(typeof site.reason, 'string')
+      assert.ok(site.reason.length > 0)
+    }
     for (const kind of EXACT_ALLOCATION_COVERAGE_PROTOCOL.exactKinds) {
       assert.ok(
         marker.sites.some(
@@ -113,19 +156,34 @@ test('the Node allocation lane classifies every exact and guarded-unsupported co
         `missing unsupported negative control: ${kind}`,
       )
     }
-    const evidence = await prepareExactPackageAllocationEvidence(packageRoot)
+    for (const kind of EXACT_ALLOCATION_COVERAGE_PROTOCOL.allocationFreeKinds) {
+      assert.ok(
+        marker.sites.some(
+          (site) =>
+            site.classification === 'allocation-free' && site.kind === kind,
+        ),
+        `missing allocation-free positive control: ${kind}`,
+      )
+    }
+    const missingTrust = await prepareExactPackageAllocationEvidence(packageRoot)
+    assert.equal(missingTrust.status, 'unavailable')
+    assert.match(missingTrust.report.reason, /trusted.*digest is unavailable/)
+    const evidence = await prepareExactPackageAllocationEvidence(
+      packageRoot,
+      trustedMarkerSha256,
+    )
     assert.equal(evidence.status, 'available')
     const probe = await import(pathToFileURL(resolve(packageRoot, 'dist', 'probe.js')).href)
     for (let index = 0; index < 20_000; index += 1) {
       probe.exerciseExactAllocations()
     }
     evidence.begin()
-    assert.equal(probe.exerciseExactAllocations(), 13)
+    assert.equal(probe.exerciseExactAllocations(), 8)
     const exact = evidence.finish()
     assert.equal(exact.status, 'available')
     assert.deepEqual(exact.instrumentation, EXACT_ALLOCATION_INSTRUMENTATION)
     assert.deepEqual(exact.coverage, marker.coverage)
-    assert.equal(exact.observedPackageObjectAllocations, 23)
+    assert.equal(exact.observedPackageObjectAllocations, 16)
     for (const kind of EXACT_ALLOCATION_COVERAGE_PROTOCOL.exactKinds) {
       assert.ok(
         exact.sites.some((site) => site.kind === kind),
@@ -137,8 +195,14 @@ test('the Node allocation lane classifies every exact and guarded-unsupported co
         (total, site) => total + site.observedAllocations,
         0,
       ),
-      23,
+      16,
     )
+
+    evidence.begin()
+    assert.equal(probe.exerciseAllocationFreeCall(), 1)
+    const allocationFree = evidence.finish()
+    assert.equal(allocationFree.status, 'available')
+    assert.equal(allocationFree.observedPackageObjectAllocations, 0)
 
     const unsupportedControls = [
       ['rest-array', () => probe.unsupportedRestArray(1)],
@@ -148,17 +212,31 @@ test('the Node allocation lane classifies every exact and guarded-unsupported co
       ['spread-iteration', () => probe.unsupportedSpreadIteration([1])],
       ['object-spread', () => probe.unsupportedObjectSpread({ retained: 1 })],
       ['for-of-iteration', () => probe.unsupportedForOf([1])],
-      ['for-of-iteration', () => probe.unsupportedExplicitIterator([1])],
-      ['for-of-iteration', () => probe.unsupportedIterableConstructor([1])],
-      ['variable-cardinality-call', () =>
+      ['call-expression', () => probe.unsupportedExplicitIterator([1])],
+      ['new-expression', () => probe.unsupportedIterableConstructor([1])],
+      ['call-expression', () =>
         probe.unsupportedIteratorNext([1][Symbol.iterator]())],
       ['async-path', () => probe.unsupportedAsyncPath()],
-      ['generator-path', () => probe.unsupportedGeneratorPath().next()],
-      ['promise-path', () => probe.unsupportedPromisePath()],
-      ['variable-cardinality-call', () => probe.unsupportedObjectEntries({ retained: 1 })],
-      ['variable-cardinality-call', () => probe.unsupportedDynamicFunctionConstructor()],
-      ['variable-cardinality-call', () => probe.unsupportedCallableObjectFactory()],
-      ['variable-cardinality-call', () => probe.unsupportedMatchAll('allocation')],
+      ['generator-path', () => probe.unsupportedGeneratorPath()],
+      ['call-expression', () => probe.unsupportedPromisePath()],
+      ['call-expression', () => probe.unsupportedObjectEntries({ retained: 1 })],
+      ['new-expression', () => probe.unsupportedDynamicFunctionConstructor()],
+      ['call-expression', () => probe.unsupportedCallableObjectFactory()],
+      ['call-expression', () => probe.unsupportedGlobalThisObjectFactory()],
+      ['call-expression', () => probe.unsupportedGlobalThisArrayFactory()],
+      ['call-expression', () => probe.unsupportedGlobalThisFunctionFactory()],
+      ['call-expression', () => probe.unsupportedAliasedObjectFactory()],
+      ['call-expression', () =>
+        probe.unsupportedKnownCalleeOutsideProofScope()],
+      ['call-expression', () => probe.unsupportedGetOwnPropertyNames({ retained: 1 })],
+      ['call-expression', () => probe.unsupportedReflectOwnKeys({ retained: 1 })],
+      ['new-expression', () => probe.unsupportedTypedArrayNew()],
+      ['call-expression', () => probe.unsupportedTypedArraySubarray(new Uint8Array(1))],
+      ['call-expression', () => probe.unsupportedTypedArrayFrom([1])],
+      ['call-expression', () => probe.unsupportedUnknownPropertyCall({
+        allocateMaybe() { return 1 },
+      })],
+      ['call-expression', () => probe.unsupportedMatchAll('allocation')],
       ['dynamic-import', () => probe.unsupportedDynamicImport()],
       ['tagged-template', () => probe.unsupportedTaggedTemplate()],
       ['arguments-object', () => probe.unsupportedArgumentsObject(1)],
@@ -174,25 +252,142 @@ test('the Node allocation lane classifies every exact and guarded-unsupported co
       )
     }
 
-    const markerPath = resolve(packageRoot, EXACT_ALLOCATION_MARKER_FILENAME)
+    const globalObjectSite = marker.sites.find(
+      (site) =>
+        site.classification === 'unsupported' &&
+        site.identity.endsWith(':globalThis.Object'),
+    )
+    assert.ok(globalObjectSite)
+    const globalObjectFile = marker.files.find(
+      ({ path }) => path === globalObjectSite.path,
+    )
+    assert.ok(globalObjectFile)
+    const reclassifiedMarker = {
+      ...marker,
+      coverage: {
+        ...marker.coverage,
+        allocationFreeSiteCount: marker.coverage.allocationFreeSiteCount + 1,
+        unsupportedSiteCount: marker.coverage.unsupportedSiteCount - 1,
+      },
+      files: marker.files.map((file) =>
+        file.path === globalObjectFile.path
+          ? {
+              ...file,
+              allocationFreeSiteCount: file.allocationFreeSiteCount + 1,
+              unsupportedSiteCount: file.unsupportedSiteCount - 1,
+            }
+          : file,
+      ),
+      sites: marker.sites.map((site) =>
+        site.id === globalObjectSite.id
+          ? {
+              ...site,
+              classification: 'allocation-free',
+              kind: 'call-expression',
+              descriptorId: 'tampered.free.global-object',
+              reason: 'tampered marker-only allocation-free claim',
+            }
+          : site,
+      ),
+    }
+    writeFileSync(markerPath, `${JSON.stringify(reclassifiedMarker, null, 2)}\n`)
+    const markerOnlyReclassification =
+      await prepareExactPackageAllocationEvidence(
+        packageRoot,
+        trustedMarkerSha256,
+      )
+    assert.equal(markerOnlyReclassification.status, 'unavailable')
+    assert.match(markerOnlyReclassification.report.reason, /marker digest changed/)
+    const dispositionReclassification =
+      await prepareExactPackageAllocationEvidence(
+        packageRoot,
+        fileSha256(markerPath),
+      )
+    assert.equal(dispositionReclassification.status, 'unavailable')
+    assert.match(
+      dispositionReclassification.report.reason,
+      /runtime sentinel disposition changed/,
+    )
+
+    const globalObjectPath = resolve(packageRoot, globalObjectSite.path)
+    const originalInstrumentedSource = readFileSync(globalObjectPath, 'utf8')
+    const unsupportedSentinel =
+      `${EXACT_ALLOCATION_RUNTIME_PROTOCOL.recorderName}(` +
+      `"${EXACT_ALLOCATION_RUNTIME_PROTOCOL.unsupportedToken}", ` +
+      `${globalObjectSite.id}, 0), `
+    assert.ok(originalInstrumentedSource.includes(unsupportedSentinel))
+    const coherentlyTamperedSource = originalInstrumentedSource.replace(
+      unsupportedSentinel,
+      '',
+    )
+    writeFileSync(globalObjectPath, coherentlyTamperedSource)
+    const coherentMarker = {
+      ...reclassifiedMarker,
+      files: reclassifiedMarker.files.map((file) =>
+        file.path === globalObjectSite.path
+          ? {
+              ...file,
+              instrumentedSha256: fileSha256(globalObjectPath),
+            }
+          : file,
+      ),
+    }
+    writeFileSync(markerPath, `${JSON.stringify(coherentMarker, null, 2)}\n`)
+    const coherentMarkerCodeAndDigestTamper =
+      await prepareExactPackageAllocationEvidence(
+        packageRoot,
+        trustedMarkerSha256,
+      )
+    assert.equal(coherentMarkerCodeAndDigestTamper.status, 'unavailable')
+    assert.match(
+      coherentMarkerCodeAndDigestTamper.report.reason,
+      /marker digest changed/,
+    )
+    writeFileSync(globalObjectPath, originalInstrumentedSource)
+
     writeFileSync(markerPath, JSON.stringify({
       ...marker,
       coverage: { ...marker.coverage, status: 'partial' },
     }))
     const partialCoverage = await prepareExactPackageAllocationEvidence(
       packageRoot,
+      fileSha256(markerPath),
     )
     assert.equal(partialCoverage.status, 'unavailable')
     assert.match(partialCoverage.report.reason, /incompatible identity or shape/)
     writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`)
 
+    writeFileSync(markerPath, JSON.stringify({
+      ...marker,
+      coverage: {
+        ...marker.coverage,
+        callDescriptorCount: marker.coverage.callDescriptorCount - 1,
+      },
+    }))
+    const incompleteInvocations = await prepareExactPackageAllocationEvidence(
+      packageRoot,
+      fileSha256(markerPath),
+    )
+    assert.equal(incompleteInvocations.status, 'unavailable')
+    assert.match(
+      incompleteInvocations.report.reason,
+      /incompatible identity or shape/,
+    )
+    writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`)
+
     appendFileSync(resolve(packageRoot, 'dist', 'probe.js'), '\n')
-    const tampered = await prepareExactPackageAllocationEvidence(packageRoot)
+    const tampered = await prepareExactPackageAllocationEvidence(
+      packageRoot,
+      trustedMarkerSha256,
+    )
     assert.equal(tampered.status, 'unavailable')
     assert.match(tampered.report.reason, /instrumented package file digest changed/)
 
     rmSync(resolve(packageRoot, EXACT_ALLOCATION_MARKER_FILENAME))
-    const missing = await prepareExactPackageAllocationEvidence(packageRoot)
+    const missing = await prepareExactPackageAllocationEvidence(
+      packageRoot,
+      trustedMarkerSha256,
+    )
     assert.equal(missing.status, 'unavailable')
     assert.match(missing.report.reason, /instrumented package manifest is unavailable/)
   } finally {
@@ -248,7 +443,10 @@ test('the public Three steady Frame Sample path allocates zero package objects a
       recursive: true,
     })
     await instrumentExactPackageAllocations(packageRoot)
-    const evidence = await prepareExactPackageAllocationEvidence(packageRoot)
+    const evidence = await prepareExactPackageAllocationEvidence(
+      packageRoot,
+      fileSha256(resolve(packageRoot, EXACT_ALLOCATION_MARKER_FILENAME)),
+    )
     assert.equal(evidence.status, 'available')
     const candidate = await import(
       pathToFileURL(resolve(packageRoot, 'dist', 'three', 'index.js')).href
@@ -292,7 +490,7 @@ test('the public Three steady Frame Sample path allocates zero package objects a
     )
     candidate.disposeThreeWristMenu(menu)
 
-    assert.equal(report.status, 'available')
+    assert.equal(report.status, 'available', JSON.stringify(report, null, 2))
     assert.equal(report.observedPackageObjectAllocations, 0)
     assert.ok(
       fixture.poseCalls.length > poseCallsBefore,

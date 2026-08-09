@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import ts from 'typescript'
@@ -10,194 +10,351 @@ import {
   EXACT_ALLOCATION_GLOBAL_SYMBOL,
   EXACT_ALLOCATION_INSTRUMENTATION,
   EXACT_ALLOCATION_MARKER_PROTOCOL,
+  EXACT_ALLOCATION_RUNTIME_PROTOCOL,
   exactPackageJavaScriptFiles,
 } from '../fixtures/consumers/exact-allocation-evidence.mjs'
 
-const recorderName = '__wristMenuExactAllocation'
-const variableCardinalityMethods = new Set([
-  'bind',
-  'concat',
-  'entries',
-  'exec',
-  'filter',
-  'flat',
-  'flatMap',
-  'intersectObject',
-  'intersectObjects',
-  'keys',
-  'map',
-  'match',
-  'matchAll',
-  'next',
-  'slice',
-  'splice',
-  'split',
-  'toReversed',
-  'toSorted',
-  'toSpliced',
-  'values',
-])
-const variableCardinalityStaticMethods = new Map([
-  ['Array', new Set(['from'])],
-  ['JSON', new Set(['parse'])],
-  ['Map', new Set(['groupBy'])],
-  ['Object', new Set([
-    'entries',
-    'fromEntries',
-    'getOwnPropertyDescriptor',
-    'getOwnPropertyDescriptors',
-    'groupBy',
-  ])],
-  ['Proxy', new Set(['revocable'])],
-  ['Reflect', new Set(['construct'])],
-])
-const exactStaticMethods = new Map([
-  ['Array', new Set(['of'])],
-  ['Object', new Set(['create', 'keys', 'values'])],
-])
-const promiseMethods = new Set([
-  'all',
-  'allSettled',
-  'any',
-  'catch',
-  'finally',
-  'race',
-  'reject',
-  'resolve',
-  'then',
-  'try',
-  'withResolvers',
-])
-const iterableConstructors = new Set(['Map', 'Set', 'WeakMap', 'WeakSet'])
-const dynamicConstructors = new Set([
-  'AggregateError',
-  'AsyncFunction',
-  'AsyncGeneratorFunction',
-  'Function',
-  'GeneratorFunction',
-])
-const callableObjectFactories = new Set([
-  'Array',
-  'Error',
-  'EvalError',
-  'Function',
-  'Object',
-  'RangeError',
-  'ReferenceError',
-  'RegExp',
-  'SyntaxError',
-  'TypeError',
-  'URIError',
-  'eval',
-  'structuredClone',
-])
+const recorderName = EXACT_ALLOCATION_RUNTIME_PROTOCOL.recorderName
 
 const sha256 = (bytes) =>
   createHash('sha256').update(bytes).digest('hex')
 
-function propertyOwnerName(expression) {
-  if (!ts.isPropertyAccessExpression(expression)) return undefined
-  const owner = expression.expression
-  if (ts.isIdentifier(owner)) return { name: owner.text, explicitGlobal: false }
-  if (
-    ts.isPropertyAccessExpression(owner) &&
-    ts.isIdentifier(owner.expression) &&
-    owner.expression.text === 'globalThis'
-  ) {
-    return { name: owner.name.text, explicitGlobal: true }
+/**
+ * Calls admitted by the zero-allocation protocol. Each entry names one emitted
+ * package callee identity; everything else is guarded unsupported. Keep this
+ * registry deliberately narrow and evidence-specific.
+ */
+const packageCallReason =
+  'resolved ordinary synchronous package call constructs no object at the call site; its body is independently classified'
+const hostCallReason =
+  'XR host-boundary call constructs no package-owned source object; host return values are outside package attribution'
+const collectionReadReason =
+  'preallocated WeakMap/WeakSet lookup constructs no JavaScript object'
+const allocationFreeCallRegistry = Object.freeze([
+  {
+    id: 'free.probe.known-sync-call',
+    path: 'dist/probe.js',
+    identity: 'knownAllocationFreeProbe',
+    scopes: ['exerciseAllocationFreeCall'],
+    reason: packageCallReason,
+    proof: { kind: 'function-declaration' },
+  },
+  {
+    id: 'free.three-index.assert-active',
+    path: 'dist/three/index.js',
+    identity: 'assertActive',
+    scopes: ['updateThreeWristMenu'],
+    reason: packageCallReason,
+    proof: { kind: 'function-declaration' },
+  },
+  {
+    id: 'free.three-index.set-observation-context',
+    path: 'dist/three/index.js',
+    identity: 'setSteadyFrameObservationContext',
+    scopes: ['updateThreeWristMenu'],
+    reason: packageCallReason,
+    proof: {
+      kind: 'relative-import',
+      module: './steady-frame.js',
+      imported: 'setSteadyFrameObservationContext',
+    },
+  },
+  {
+    id: 'free.three-index.presentation-state-changed',
+    path: 'dist/three/index.js',
+    identity: 'steadyPresentationStateChanged',
+    scopes: ['updateThreeWristMenu'],
+    reason: packageCallReason,
+    proof: {
+      kind: 'relative-import',
+      module: './steady-frame.js',
+      imported: 'steadyPresentationStateChanged',
+    },
+  },
+  {
+    id: 'free.three-index.observe-steady-frame',
+    path: 'dist/three/index.js',
+    identity: 'observeSteadyFrame',
+    scopes: ['updateThreeWristMenu'],
+    reason: packageCallReason,
+    proof: {
+      kind: 'relative-import',
+      module: './steady-frame.js',
+      imported: 'observeSteadyFrame',
+    },
+  },
+  {
+    id: 'free.three-index.advance-settled-runtime',
+    path: 'dist/three/index.js',
+    identity: 'advanceSettledRuntimeFrame',
+    scopes: ['updateThreeWristMenu'],
+    reason: packageCallReason,
+    proof: {
+      kind: 'relative-import',
+      module: '../core/runtime-internals.js',
+      imported: 'advanceSettledRuntimeFrame',
+    },
+  },
+  {
+    id: 'free.three-index.xr-session-read',
+    path: 'dist/three/index.js',
+    identity: 'state.renderer.xr.getSession',
+    scopes: ['updateThreeWristMenu'],
+    reason: hostCallReason,
+    proof: { kind: 'exact-property-access' },
+  },
+  {
+    id: 'free.three-index.xr-reference-space-read',
+    path: 'dist/three/index.js',
+    identity: 'state.renderer.xr.getReferenceSpace',
+    scopes: ['updateThreeWristMenu'],
+    reason: hostCallReason,
+    proof: { kind: 'exact-property-access' },
+  },
+  {
+    id: 'free.steady-frame.observe-group-transform',
+    path: 'dist/three/steady-frame.js',
+    identity: 'observeGroupTransform',
+    scopes: ['steadyPresentationStateChanged', 'observeSteadyFrame'],
+    reason: packageCallReason,
+    proof: { kind: 'function-declaration' },
+  },
+  {
+    id: 'free.steady-frame.observe-pose',
+    path: 'dist/three/steady-frame.js',
+    identity: 'observePose',
+    scopes: ['observeSource'],
+    reason: packageCallReason,
+    proof: { kind: 'function-declaration' },
+  },
+  {
+    id: 'free.steady-frame.observe-source',
+    path: 'dist/three/steady-frame.js',
+    identity: 'observeSource',
+    scopes: ['observeSteadyFrame'],
+    reason: packageCallReason,
+    proof: { kind: 'function-declaration' },
+  },
+  {
+    id: 'free.steady-frame-pressed-read',
+    path: 'dist/three/steady-frame.js',
+    identity: 'sourcePressed.get',
+    scopes: ['observeSource'],
+    reason: collectionReadReason,
+    proof: { kind: 'exact-property-access' },
+  },
+  {
+    id: 'free.steady-frame-completed-read',
+    path: 'dist/three/steady-frame.js',
+    identity: 'sourceCompleted.has',
+    scopes: ['observeSource'],
+    reason: collectionReadReason,
+    proof: { kind: 'exact-property-access' },
+  },
+  {
+    id: 'free.steady-frame-signature-source-read',
+    path: 'dist/three/steady-frame.js',
+    identity: 'signature.sources.get',
+    scopes: ['observeSteadyFrame'],
+    reason: collectionReadReason,
+    proof: { kind: 'exact-property-access' },
+  },
+  {
+    id: 'free.steady-frame-xr-pose-read',
+    path: 'dist/three/steady-frame.js',
+    identity: 'frame.getPose',
+    scopes: ['observeSource'],
+    reason: hostCallReason,
+    proof: { kind: 'exact-property-access' },
+  },
+  {
+    id: 'free.steady-frame-xr-viewer-pose-read',
+    path: 'dist/three/steady-frame.js',
+    identity: 'frame.getViewerPose',
+    scopes: ['observeSteadyFrame'],
+    reason: hostCallReason,
+    proof: { kind: 'exact-property-access' },
+  },
+])
+
+function invocationIdentity(node, sourceFile) {
+  return node.expression.getText(sourceFile)
+}
+
+function invocationScope(node, sourceFile) {
+  let current = node.parent
+  while (current !== undefined) {
+    if (ts.isFunctionDeclaration(current) && current.name !== undefined) {
+      return current.name.text
+    }
+    if (ts.isMethodDeclaration(current)) {
+      return current.name.getText(sourceFile)
+    }
+    if (
+      (ts.isFunctionExpression(current) || ts.isArrowFunction(current)) &&
+      ts.isVariableDeclaration(current.parent) &&
+      ts.isIdentifier(current.parent.name)
+    ) {
+      return current.parent.name.text
+    }
+    current = current.parent
   }
+  return '<module>'
+}
+
+function exactInvocationDescriptor() {
+  // No CallExpression or NewExpression currently has a source-level fixed
+  // object cardinality proof. Literal/declaration handlers below provide the
+  // exact categories; invocation coverage remains default-deny.
   return undefined
 }
 
-function exactStaticCallKind(node) {
-  if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) {
-    return undefined
-  }
-  const owner = propertyOwnerName(node.expression)
-  if (!owner?.explicitGlobal) return undefined
-  const method = node.expression.name.text
-  return exactStaticMethods.get(owner.name)?.has(method)
-    ? `static:${owner.name}.${method}`
-    : undefined
-}
-
-function isPromiseConstructor(expression) {
+function ordinaryFunctionDeclarationMatches(sourceFile, identity) {
+  const declarations = sourceFile.statements.filter(
+    (statement) =>
+      ts.isFunctionDeclaration(statement) &&
+      statement.name?.text === identity,
+  )
+  if (declarations.length !== 1) return false
+  const declaration = declarations[0]
   return (
-    ts.isIdentifier(expression) && expression.text === 'Promise'
-  ) || (
-    ts.isPropertyAccessExpression(expression) &&
-    ts.isIdentifier(expression.expression) &&
-    expression.expression.text === 'globalThis' &&
-    expression.name.text === 'Promise'
+    declaration.asteriskToken === undefined &&
+    !(declaration.modifiers?.some(
+      ({ kind }) => kind === ts.SyntaxKind.AsyncKeyword,
+    ) ?? false) &&
+    declaration.parameters.every(
+      (parameter) =>
+        parameter.dotDotDotToken === undefined &&
+        ts.isIdentifier(parameter.name),
+    ) &&
+    !functionUsesArguments(declaration)
   )
 }
 
-function constructorName(expression) {
-  if (ts.isIdentifier(expression)) return expression.text
-  if (
-    ts.isPropertyAccessExpression(expression) &&
-    ts.isIdentifier(expression.expression) &&
-    expression.expression.text === 'globalThis'
-  ) {
-    return expression.name.text
+function relativeImportMatches(
+  sourceFile,
+  path,
+  identity,
+  proof,
+  packageSources,
+) {
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      statement.moduleSpecifier.text !== proof.module
+    ) {
+      continue
+    }
+    const bindings = statement.importClause?.namedBindings
+    if (!ts.isNamedImports(bindings)) continue
+    if (bindings.elements.some((element) => (
+      element.name.text === identity &&
+      (element.propertyName?.text ?? element.name.text) === proof.imported
+    ))) {
+      const targetPath = posix.normalize(
+        posix.join(posix.dirname(path), proof.module),
+      )
+      const targetSource = packageSources.get(targetPath)
+      if (targetSource === undefined) return false
+      const targetFile = ts.createSourceFile(
+        targetPath,
+        targetSource,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.JS,
+      )
+      return ordinaryFunctionDeclarationMatches(targetFile, proof.imported)
+    }
   }
-  return undefined
+  return false
 }
 
-function unsupportedCallKind(node) {
+function allocationFreeProofMatches(
+  registered,
+  node,
+  sourceFile,
+  path,
+  packageSources,
+) {
+  if (registered.proof.kind === 'function-declaration') {
+    return ordinaryFunctionDeclarationMatches(sourceFile, registered.identity)
+  }
+  if (registered.proof.kind === 'relative-import') {
+    return relativeImportMatches(
+      sourceFile,
+      path,
+      registered.identity,
+      registered.proof,
+      packageSources,
+    )
+  }
+  return (
+    registered.proof.kind === 'exact-property-access' &&
+    ts.isPropertyAccessExpression(node.expression)
+  )
+}
+
+function allocationFreeCallDescriptor(node, sourceFile, path, packageSources) {
   if (!ts.isCallExpression(node)) return undefined
-  if (exactStaticCallKind(node) !== undefined) return undefined
-  if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-    return 'dynamic-import'
+  const callee = invocationIdentity(node, sourceFile)
+  const scope = invocationScope(node, sourceFile)
+  const registered = allocationFreeCallRegistry.find(
+    (entry) =>
+      entry.path === path &&
+      entry.identity === callee &&
+      entry.scopes.includes(scope) &&
+      allocationFreeProofMatches(
+        entry,
+        node,
+        sourceFile,
+        path,
+        packageSources,
+      ),
+  )
+  if (registered === undefined) return undefined
+  return {
+    classification: 'allocation-free',
+    kind: 'call-expression',
+    objectsPerEvaluation: null,
+    descriptorId: registered.id,
+    identity: `${path}#${scope}:${callee}`,
+    reason: registered.reason,
   }
-  if (ts.isIdentifier(node.expression) && node.expression.text === 'Promise') {
-    return 'promise-path'
+}
+
+function unsupportedInvocationDescriptor(node, sourceFile) {
+  const call = ts.isCallExpression(node)
+  const callee = invocationIdentity(node, sourceFile)
+  const scope = invocationScope(node, sourceFile)
+  return {
+    classification: 'unsupported',
+    kind: call && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      ? 'dynamic-import'
+      : call ? 'call-expression' : 'new-expression',
+    objectsPerEvaluation: null,
+    descriptorId: call
+      ? 'unsupported.call.default-deny'
+      : 'unsupported.new.default-deny',
+    identity: `${scope}:${callee}`,
+    reason: call
+      ? 'callee identity has no fixed-cardinality or allocation-free protocol proof'
+      : 'constructor cardinality is not generically one and has no exact protocol proof',
   }
-  if (
-    ts.isIdentifier(node.expression) &&
-    callableObjectFactories.has(node.expression.text)
-  ) {
-    return 'variable-cardinality-call'
+}
+
+const invocationDescriptorHandlers = Object.freeze([
+  exactInvocationDescriptor,
+  allocationFreeCallDescriptor,
+  unsupportedInvocationDescriptor,
+])
+
+function describeInvocation(node, sourceFile, path, packageSources) {
+  for (const handler of invocationDescriptorHandlers) {
+    const descriptor = handler(node, sourceFile, path, packageSources)
+    if (descriptor !== undefined) return descriptor
   }
-  if (ts.isElementAccessExpression(node.expression)) {
-    const key = node.expression.argumentExpression
-    if (
-      ts.isPropertyAccessExpression(key) &&
-      (key.name.text === 'iterator' || key.name.text === 'asyncIterator') &&
-      (
-        (ts.isIdentifier(key.expression) && key.expression.text === 'Symbol') ||
-        (
-          ts.isPropertyAccessExpression(key.expression) &&
-          ts.isIdentifier(key.expression.expression) &&
-          key.expression.expression.text === 'globalThis' &&
-          key.expression.name.text === 'Symbol'
-        )
-      )
-    ) {
-      return 'for-of-iteration'
-    }
-  }
-  if (!ts.isPropertyAccessExpression(node.expression)) return undefined
-  const method = node.expression.name.text
-  const owner = propertyOwnerName(node.expression)
-  if (owner?.name === 'Promise' && promiseMethods.has(method)) {
-    return 'promise-path'
-  }
-  if (promiseMethods.has(method) && ['then', 'catch', 'finally'].includes(method)) {
-    return 'promise-path'
-  }
-  if (owner !== undefined) {
-    if (
-      variableCardinalityStaticMethods.get(owner.name)?.has(method) ||
-      (!owner.explicitGlobal && exactStaticMethods.get(owner.name)?.has(method))
-    ) {
-      return 'variable-cardinality-call'
-    }
-  }
-  if (variableCardinalityMethods.has(method)) {
-    return 'variable-cardinality-call'
-  }
-  return undefined
+  throw new Error(`allocation descriptor registry did not classify ${path}`)
 }
 
 function methodObjectCount(members) {
@@ -232,10 +389,6 @@ function exactAllocation(node) {
   if (ts.isArrayLiteralExpression(node)) {
     return { kind: 'array-literal', objectsPerEvaluation: 1 }
   }
-  if (ts.isNewExpression(node)) {
-    if (isPromiseConstructor(node.expression)) return undefined
-    return { kind: 'new-expression', objectsPerEvaluation: 1 }
-  }
   if (ts.isArrowFunction(node)) {
     return { kind: 'arrow-function', objectsPerEvaluation: 1 }
   }
@@ -254,10 +407,7 @@ function exactAllocation(node) {
   if (node.kind === ts.SyntaxKind.RegularExpressionLiteral) {
     return { kind: 'regexp-literal', objectsPerEvaluation: 1 }
   }
-  const staticKind = exactStaticCallKind(node)
-  return staticKind === undefined
-    ? undefined
-    : { kind: staticKind, objectsPerEvaluation: 1 }
+  return undefined
 }
 
 function bindingUnsupportedKinds(name) {
@@ -314,7 +464,7 @@ function insertAfterDirectives(statements, additions) {
   ]
 }
 
-function instrumentSource(source, path, firstSiteId) {
+function instrumentSource(source, path, firstSiteId, packageSources) {
   if (source.includes(recorderName)) {
     throw new Error(`candidate output already contains ${recorderName}: ${path}`)
   }
@@ -329,8 +479,12 @@ function instrumentSource(source, path, firstSiteId) {
     throw new Error(`candidate output cannot be parsed completely: ${path}`)
   }
   let sourceNodeCount = 0
+  let callExpressionCount = 0
+  let newExpressionCount = 0
   const countSourceNodes = (node) => {
     sourceNodeCount += 1
+    if (ts.isCallExpression(node)) callExpressionCount += 1
+    if (ts.isNewExpression(node)) newExpressionCount += 1
     ts.forEachChild(node, countSourceNodes)
   }
   countSourceNodes(sourceFile)
@@ -341,12 +495,14 @@ function instrumentSource(source, path, firstSiteId) {
     const functionEntrySites = new WeakMap()
     const blockEntrySites = new WeakMap()
     const switchFunctionDeclarations = new WeakSet()
+    const describedInvocations = new WeakSet()
 
     const register = (
       node,
       classification,
       kind,
       objectsPerEvaluation = null,
+      descriptor = {},
     ) => {
       const id = firstSiteId + sites.length
       const position = sourceFile.getLineAndCharacterOfPosition(
@@ -360,15 +516,48 @@ function instrumentSource(source, path, firstSiteId) {
         classification,
         kind,
         objectsPerEvaluation,
+        nodeKind: ts.SyntaxKind[node.kind],
+        descriptorId: descriptor.descriptorId ?? `${classification}.${kind}`,
+        identity: descriptor.identity ?? kind,
+        reason: descriptor.reason ?? (
+          classification === 'exact'
+            ? `${kind} has fixed source-language object cardinality`
+            : `${kind} cannot be counted exactly by this protocol`
+        ),
       }
       sites.push(site)
       return site
+    }
+
+    const registerInvocation = (node) => {
+      if (describedInvocations.has(node)) {
+        throw new Error(`invocation received more than one descriptor: ${path}`)
+      }
+      describedInvocations.add(node)
+      const descriptor = describeInvocation(
+        node,
+        sourceFile,
+        path,
+        packageSources,
+      )
+      return register(
+        node,
+        descriptor.classification,
+        descriptor.kind,
+        descriptor.objectsPerEvaluation,
+        descriptor,
+      )
     }
 
     const recordCall = (site) => factory.createCallExpression(
       factory.createIdentifier(recorderName),
       undefined,
       [
+        factory.createStringLiteral(
+          site.classification === 'exact'
+            ? EXACT_ALLOCATION_RUNTIME_PROTOCOL.exactToken
+            : EXACT_ALLOCATION_RUNTIME_PROTOCOL.unsupportedToken,
+        ),
         factory.createNumericLiteral(site.id),
         factory.createNumericLiteral(site.objectsPerEvaluation ?? 0),
       ],
@@ -383,11 +572,68 @@ function instrumentSource(source, path, firstSiteId) {
       factory.createIdentifier(recorderName),
       undefined,
       [
+        factory.createStringLiteral(
+          site.classification === 'exact'
+            ? EXACT_ALLOCATION_RUNTIME_PROTOCOL.exactToken
+            : EXACT_ALLOCATION_RUNTIME_PROTOCOL.unsupportedToken,
+        ),
         factory.createNumericLiteral(site.id),
         factory.createNumericLiteral(site.objectsPerEvaluation ?? 0),
         expression,
       ],
     )
+    const guardUnsupportedFunctionInvocation = (entrySites, target) =>
+      factory.createNewExpression(
+        factory.createIdentifier('Proxy'),
+        undefined,
+        [
+          target,
+          factory.createObjectLiteralExpression([
+            factory.createMethodDeclaration(
+              undefined,
+              undefined,
+              'apply',
+              undefined,
+              undefined,
+              [
+                factory.createParameterDeclaration(
+                  undefined,
+                  undefined,
+                  'target',
+                ),
+                factory.createParameterDeclaration(
+                  undefined,
+                  undefined,
+                  'thisArg',
+                ),
+                factory.createParameterDeclaration(
+                  undefined,
+                  undefined,
+                  'args',
+                ),
+              ],
+              undefined,
+              factory.createBlock([
+                ...entrySites.map(recordStatement),
+                factory.createReturnStatement(
+                  factory.createCallExpression(
+                    factory.createPropertyAccessExpression(
+                      factory.createIdentifier('Reflect'),
+                      'apply',
+                    ),
+                    undefined,
+                    [
+                      factory.createIdentifier('target'),
+                      factory.createIdentifier('thisArg'),
+                      factory.createIdentifier('args'),
+                    ],
+                  ),
+                ),
+              ], true),
+            ),
+          ], true),
+        ],
+      )
 
     const entrySites = (node) => {
       const cached = functionEntrySites.get(node)
@@ -432,13 +678,31 @@ function instrumentSource(source, path, firstSiteId) {
     }
 
     const transformStatements = (statements, functionEntries = []) => {
-      const functionDeclarationSites = statements
+      const functionDeclarations = statements
         .filter(
           (statement) =>
             ts.isFunctionDeclaration(statement) &&
             !switchFunctionDeclarations.has(statement),
         )
-        .map(declarationSite)
+      const functionDeclarationSites = functionDeclarations.map(declarationSite)
+      const invocationGuards = functionDeclarations.flatMap((declaration) => {
+        const invocationEntries = entrySites(declaration).filter(
+          ({ kind }) => kind === 'generator-path' || kind === 'async-path',
+        )
+        if (invocationEntries.length === 0) return []
+        if (declaration.name === undefined) {
+          throw new Error(`anonymous function declaration cannot be guarded: ${path}`)
+        }
+        return [factory.createExpressionStatement(
+          factory.createAssignment(
+            factory.createIdentifier(declaration.name.text),
+            guardUnsupportedFunctionInvocation(
+              invocationEntries,
+              factory.createIdentifier(declaration.name.text),
+            ),
+          ),
+        )]
+      })
       const transformed = []
       for (const statement of statements) {
         if (ts.isClassDeclaration(statement)) {
@@ -448,7 +712,12 @@ function instrumentSource(source, path, firstSiteId) {
       }
       return insertAfterDirectives(
         transformed,
-        [...functionEntries, ...functionDeclarationSites].map(recordStatement),
+        [
+          ...[...functionEntries, ...functionDeclarationSites].map(
+            recordStatement,
+          ),
+          ...invocationGuards,
+        ],
       )
     }
 
@@ -477,6 +746,16 @@ function instrumentSource(source, path, firstSiteId) {
         for (const clause of node.caseBlock.clauses) {
           for (const statement of clause.statements) {
             if (ts.isFunctionDeclaration(statement)) {
+              if (
+                statement.asteriskToken !== undefined ||
+                (statement.modifiers?.some(
+                  ({ kind }) => kind === ts.SyntaxKind.AsyncKeyword,
+                ) ?? false)
+              ) {
+                throw new Error(
+                  `switch-scoped async/generator invocation cannot be guarded exactly: ${path}`,
+                )
+              }
               switchFunctionDeclarations.add(statement)
               declarationSites.push(declarationSite(statement))
             }
@@ -609,6 +888,20 @@ function instrumentSource(source, path, firstSiteId) {
       const visited = ts.visitEachChild(node, visit, context)
 
       if (
+        ts.isMethodDeclaration(node) &&
+        (
+          node.asteriskToken !== undefined ||
+          (node.modifiers?.some(
+            ({ kind }) => kind === ts.SyntaxKind.AsyncKeyword,
+          ) ?? false)
+        )
+      ) {
+        throw new Error(
+          `async/generator method invocation cannot be guarded exactly: ${path}`,
+        )
+      }
+
+      if (
         ts.isArrowFunction(node) &&
         !ts.isBlock(node.body) &&
         entrySites(node).length !== 0
@@ -627,9 +920,15 @@ function instrumentSource(source, path, firstSiteId) {
           arrow.equalsGreaterThanToken,
           body,
         )
+        const invocationEntries = entrySites(node).filter(
+          ({ kind }) => kind === 'generator-path' || kind === 'async-path',
+        )
+        const callable = invocationEntries.length === 0
+          ? updated
+          : guardUnsupportedFunctionInvocation(invocationEntries, updated)
         const exact = exactAllocation(node)
         return exact === undefined
-          ? updated
+          ? callable
           : recordBefore(
               register(
                 node,
@@ -637,32 +936,48 @@ function instrumentSource(source, path, firstSiteId) {
                 exact.kind,
                 exact.objectsPerEvaluation,
               ),
-              updated,
+              callable,
             )
       }
 
+      if (ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
+        const invocationEntries = entrySites(node).filter(
+          ({ kind }) => kind === 'generator-path' || kind === 'async-path',
+        )
+        if (invocationEntries.length !== 0) {
+          const exact = exactAllocation(node)
+          const guarded = guardUnsupportedFunctionInvocation(
+            invocationEntries,
+            visited,
+          )
+          return exact === undefined
+            ? guarded
+            : recordBefore(
+                register(
+                  node,
+                  'exact',
+                  exact.kind,
+                  exact.objectsPerEvaluation,
+                ),
+                guarded,
+              )
+        }
+      }
+
+      if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+        const site = registerInvocation(node)
+        return site.classification === 'allocation-free'
+          ? visited
+          : recordBefore(site, visited)
+      }
+
       let unsupportedKind
-      if (ts.isNewExpression(node) && isPromiseConstructor(node.expression)) {
-        unsupportedKind = 'promise-path'
-      } else if (
-        ts.isNewExpression(node) &&
-        (node.arguments?.length ?? 0) !== 0 &&
-        iterableConstructors.has(constructorName(node.expression))
-      ) {
-        unsupportedKind = 'for-of-iteration'
-      } else if (
-        ts.isNewExpression(node) &&
-        dynamicConstructors.has(constructorName(node.expression))
-      ) {
-        unsupportedKind = 'variable-cardinality-call'
-      } else if (ts.isTaggedTemplateExpression(node)) {
+      if (ts.isTaggedTemplateExpression(node)) {
         unsupportedKind = 'tagged-template'
       } else if (ts.isAwaitExpression(node)) {
         unsupportedKind = 'async-path'
       } else if (ts.isYieldExpression(node)) {
         unsupportedKind = 'generator-path'
-      } else {
-        unsupportedKind = unsupportedCallKind(node)
       }
       if (unsupportedKind !== undefined) {
         return recordBefore(
@@ -713,11 +1028,31 @@ function instrumentSource(source, path, firstSiteId) {
 
   const result = ts.transform(sourceFile, [transformer])
   try {
+    const callDescriptorCount = sites.filter(
+      ({ nodeKind }) => nodeKind === 'CallExpression',
+    ).length
+    const newDescriptorCount = sites.filter(
+      ({ nodeKind }) => nodeKind === 'NewExpression',
+    ).length
+    if (
+      callDescriptorCount !== callExpressionCount ||
+      newDescriptorCount !== newExpressionCount
+    ) {
+      throw new Error(
+        `invocation descriptor coverage incomplete for ${path}: ` +
+        `${callDescriptorCount}/${callExpressionCount} calls, ` +
+        `${newDescriptorCount}/${newExpressionCount} constructors`,
+      )
+    }
     return {
       output: ts.createPrinter({ newLine: ts.NewLineKind.LineFeed })
         .printFile(result.transformed[0]),
       sites,
       visitedNodeCount: sourceNodeCount,
+      callExpressionCount,
+      callDescriptorCount,
+      newExpressionCount,
+      newDescriptorCount,
     }
   } finally {
     result.dispose()
@@ -728,18 +1063,35 @@ export async function instrumentExactPackageAllocations(packageRoot) {
   const absoluteRoot = resolve(packageRoot)
   const files = []
   const sites = []
-  for (const { absolutePath, path } of await exactPackageJavaScriptFiles(
-    absoluteRoot,
-  )) {
-    const source = await readFile(absolutePath, 'utf8')
-    const instrumented = instrumentSource(source, path, sites.length)
+  const packageFiles = await exactPackageJavaScriptFiles(absoluteRoot)
+  const packageSources = new Map(await Promise.all(
+    packageFiles.map(async ({ absolutePath, path }) => [
+      path,
+      await readFile(absolutePath, 'utf8'),
+    ]),
+  ))
+  for (const { absolutePath, path } of packageFiles) {
+    const source = packageSources.get(path)
+    if (source === undefined) {
+      throw new Error(`package source disappeared before instrumentation: ${path}`)
+    }
+    const instrumented = instrumentSource(
+      source,
+      path,
+      sites.length,
+      packageSources,
+    )
     const output = `${instrumented.output.trimEnd()}\n`
     await writeFile(absolutePath, output)
     sites.push(...instrumented.sites)
     const exactSiteCount = instrumented.sites.filter(
       ({ classification }) => classification === 'exact',
     ).length
-    const unsupportedSiteCount = instrumented.sites.length - exactSiteCount
+    const allocationFreeSiteCount = instrumented.sites.filter(
+      ({ classification }) => classification === 'allocation-free',
+    ).length
+    const unsupportedSiteCount = instrumented.sites.length -
+      exactSiteCount - allocationFreeSiteCount
     files.push({
       path,
       sourceSha256: sha256(source),
@@ -747,16 +1099,25 @@ export async function instrumentExactPackageAllocations(packageRoot) {
       siteCount: instrumented.sites.length,
       visitedNodeCount: instrumented.visitedNodeCount,
       exactSiteCount,
+      allocationFreeSiteCount,
       unsupportedSiteCount,
+      callExpressionCount: instrumented.callExpressionCount,
+      callDescriptorCount: instrumented.callDescriptorCount,
+      newExpressionCount: instrumented.newExpressionCount,
+      newDescriptorCount: instrumented.newDescriptorCount,
     })
   }
   const exactSiteCount = sites.filter(
     ({ classification }) => classification === 'exact',
   ).length
+  const allocationFreeSiteCount = sites.filter(
+    ({ classification }) => classification === 'allocation-free',
+  ).length
   const marker = {
     schemaVersion: EXACT_ALLOCATION_MARKER_PROTOCOL.schemaVersion,
     instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
     globalSymbol: EXACT_ALLOCATION_GLOBAL_SYMBOL,
+    runtime: EXACT_ALLOCATION_RUNTIME_PROTOCOL,
     coverage: {
       classifier: {
         id: EXACT_ALLOCATION_COVERAGE_PROTOCOL.id,
@@ -768,9 +1129,29 @@ export async function instrumentExactPackageAllocations(packageRoot) {
         0,
       ),
       exactSiteCount,
-      unsupportedSiteCount: sites.length - exactSiteCount,
+      allocationFreeSiteCount,
+      unsupportedSiteCount:
+        sites.length - exactSiteCount - allocationFreeSiteCount,
       exactKinds: EXACT_ALLOCATION_COVERAGE_PROTOCOL.exactKinds,
+      allocationFreeKinds:
+        EXACT_ALLOCATION_COVERAGE_PROTOCOL.allocationFreeKinds,
       unsupportedKinds: EXACT_ALLOCATION_COVERAGE_PROTOCOL.unsupportedKinds,
+      callExpressionCount: files.reduce(
+        (total, file) => total + file.callExpressionCount,
+        0,
+      ),
+      callDescriptorCount: files.reduce(
+        (total, file) => total + file.callDescriptorCount,
+        0,
+      ),
+      newExpressionCount: files.reduce(
+        (total, file) => total + file.newExpressionCount,
+        0,
+      ),
+      newDescriptorCount: files.reduce(
+        (total, file) => total + file.newDescriptorCount,
+        0,
+      ),
     },
     siteCount: sites.length,
     files,

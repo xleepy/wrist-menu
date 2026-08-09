@@ -32,6 +32,7 @@ import {
 } from '../runtime-evidence.mjs'
 import {
   exactAllocationGate,
+  EXACT_ALLOCATION_MARKER_SHA256_ENV,
   prepareExactPackageAllocationEvidence,
 } from '../exact-allocation-evidence.mjs'
 
@@ -43,7 +44,10 @@ const candidatePackageRoot = resolve(
   'wrist-menu',
 )
 const exactAllocationEvidence =
-  await prepareExactPackageAllocationEvidence(candidatePackageRoot)
+  await prepareExactPackageAllocationEvidence(
+    candidatePackageRoot,
+    process.env[EXACT_ALLOCATION_MARKER_SHA256_ENV],
+  )
 const {
   createThreeWristMenuState,
   defaultThreeWristMenuPresentationFactory,

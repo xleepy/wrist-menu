@@ -286,6 +286,8 @@ function applyAnchorPose(
 function clearTransientInput(state: ThreeWristMenuState): void {
   state.sourcePressed = new WeakMap()
   state.sourceCompleted = new WeakSet()
+  state.steadyFrameContext.sourcePressed = state.sourcePressed
+  state.steadyFrameContext.sourceCompleted = state.sourceCompleted
   state.lastTargetBySource = new WeakMap()
   state.provisionalClaims = new WeakSet()
 }
@@ -581,6 +583,8 @@ export function updateThreeWristMenu(
     nextSession,
     nextReferenceSpace,
     parent,
+    state.sourcePressed,
+    state.sourceCompleted,
   )
   if (
     steadyPresentationStateChanged(

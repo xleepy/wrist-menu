@@ -19,7 +19,14 @@ export function advanceSettledRuntimeFrame(
   time: number,
   lifecycleRevision: number,
 ): PresentationModel | undefined {
-  if (!Number.isFinite(sequence) || !Number.isFinite(time)) {
+  if (
+    sequence !== sequence ||
+    sequence === Infinity ||
+    sequence === -Infinity ||
+    time !== time ||
+    time === Infinity ||
+    time === -Infinity
+  ) {
     throw new TypeError('Frame Sample sequence and time must be finite')
   }
   const model = state.lastPresentationModel
