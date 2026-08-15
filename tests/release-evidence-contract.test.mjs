@@ -10,6 +10,9 @@ import {
   validateCompatibilityManifest,
 } from '../scripts/release-evidence-lib.mjs'
 import {
+  finalizeAutomatedReleaseEvidence,
+} from '../scripts/release-gate-evaluation.mjs'
+import {
   evaluatePerformanceBaselineGate,
   evaluatePerformanceVariant,
   performanceBaselinePhases,
@@ -109,6 +112,27 @@ test('an automated Evidence Record is reproducible and fails closed', () => {
   assert.equal(first.result, 'passed')
   assert.match(first.recordId, /^automated-release-[a-f0-9]{16}$/)
   assert.ok(Object.isFrozen(first))
+
+  const finalized = finalizeAutomatedReleaseEvidence({
+    evidenceContext: {
+      compatibility: { testedLanes: [{ id: 'core-import' }] },
+      protocol: { ...input.protocol, requiredGateIds: input.requiredGateIds },
+      candidate: input.candidate,
+      source: input.source,
+      lockfiles: input.lockfiles,
+      instrumentation: input.instrumentation,
+    },
+    testedLanes: input.testedLanes,
+    laneStates: { 'core-import': true },
+    gates: input.gates,
+  }, { bundleManifest: input.bundleManifest })
+  assert.equal(finalized.record.result, 'passed')
+  assert.ok(Object.isFrozen(finalized.record))
+  assert.equal(finalized.resolvedCompatibility.testedLanes[0].status, 'passed')
+  assert.deepEqual(
+    finalized.resolvedCompatibility.testedLanes[0].evidenceRecords,
+    [`${finalized.recordDirectory}/evidence-record.json`],
+  )
 
   for (const changed of [
     { testedLanes: ['core-import', 'three-0.185.1'] },
@@ -312,6 +336,7 @@ test('the automated protocol names every threshold triplet and fail-closed gate'
   assert.deepEqual(protocol.frameSchedules, ['60hz', '72hz', '90hz', '120hz', 'irregular'])
   for (const gate of [
     'import-safety',
+    'tested-lane-coverage',
     'allocation',
     'identical-frame-mutation',
     'resource-growth',
@@ -441,7 +466,6 @@ test('React performance evidence runs through both packed public consumer lanes 
     instrumentation,
     rendererHarness,
     vanillaInstrumentation,
-    journey,
     reachWorkload,
   ] = await Promise.all([
     readFile(new URL('../fixtures/consumers/react-18/smoke.mjs', import.meta.url), 'utf8'),
@@ -449,7 +473,6 @@ test('React performance evidence runs through both packed public consumer lanes 
     readFile(new URL('../fixtures/consumers/react-performance-baseline.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../fixtures/consumers/react-renderer-harness.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../fixtures/consumers/three/automated-gates.mjs', import.meta.url), 'utf8'),
-    readFile(new URL('../fixtures/consumers/controller-action-journey.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../fixtures/consumers/reach-scroll-workload.mjs', import.meta.url), 'utf8'),
   ])
 
@@ -465,8 +488,6 @@ test('React performance evidence runs through both packed public consumer lanes 
   assert.match(vanillaInstrumentation, /from ['"]\.\.\/performance-workload\.mjs['"]/)
   assert.match(instrumentation, /from ['"]\.\/reach-scroll-workload\.mjs['"]/)
   assert.match(vanillaInstrumentation, /from ['"]\.\.\/reach-scroll-workload\.mjs['"]/)
-  assert.match(journey, /from ['"]\.\/react-renderer-harness\.mjs['"]/)
-  assert.match(journey, /from ['"]\.\/reach-scroll-workload\.mjs['"]/)
   assert.doesNotMatch(instrumentation, /controller-action-journey/)
   assert.match(instrumentation, /instrumentUniqueAddedFrameSubscription/)
   assert.doesNotMatch(
@@ -474,15 +495,11 @@ test('React performance evidence runs through both packed public consumer lanes 
     /(?:beforeFrameSample|afterFrameSample|-1001|-999)/,
   )
   assert.doesNotMatch(
-    journey,
-    /(?:function installIwerNodePrimitives|function createCanvas|fiber\.createRoot|createXRStore)/,
-  )
-  assert.doesNotMatch(
     `${instrumentation}\n${vanillaInstrumentation}`,
     /function (?:sceneCounters|percentile)\(/,
   )
   assert.doesNotMatch(
-    `${react18}\n${react19}\n${instrumentation}\n${rendererHarness}\n${journey}\n${reachWorkload}`,
+    `${react18}\n${react19}\n${instrumentation}\n${rendererHarness}\n${reachWorkload}`,
     /(?:\.\.\/)+src\//,
   )
 })

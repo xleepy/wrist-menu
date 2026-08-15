@@ -23,9 +23,6 @@ import {
 } from './oriented-box.js'
 import { WristMenuPresentation } from './wrist-menu-presentation.js'
 
-const decorativeRaycast: Mesh['raycast'] = () => undefined
-const interactiveRaycast = Mesh.prototype.raycast
-
 /** One presentation-declared, oriented-box target for one interactive row. */
 export type ThreeWristMenuHitRegion = Readonly<{
   itemId: string
@@ -41,8 +38,9 @@ export type ThreeWristMenuViewport = Readonly<{
 
 /**
  * One disposable Three.js realization of the curated Presentation Model.
- * Selection behavior remains package-owned; the presentation declares geometry
- * but never receives XR objects, callbacks, or core runtime state.
+ * Selection behavior remains package-owned; the presentation owns raycast
+ * targetability for its declared geometry from model.targetable, but never
+ * receives XR objects, callbacks, or core runtime state.
  */
 export type ThreeWristMenuPresentation = Readonly<{
   root: Object3D<Object3DEventMap>
@@ -76,7 +74,7 @@ export const defaultThreeWristMenuPresentationFactory: ThreeWristMenuPresentatio
         object: presentation.viewportMesh as Mesh<BoxGeometry>,
       },
       update(model) {
-        presentation.setModel(model, false)
+        presentation.update(model)
       },
       dispose() {
         presentation.dispose()
@@ -282,6 +280,15 @@ function presentationModelEqual(
   )
 }
 
+function withTargetability(
+  model: PresentationModel,
+  targetable: boolean,
+): PresentationModel {
+  return model.targetable === targetable
+    ? model
+    : Object.freeze({ ...model, targetable })
+}
+
 /** Package-owned stable attachment and hit-testing adapter around one factory result. */
 export class ManagedWristMenuPresentation {
   readonly group = new Group()
@@ -377,28 +384,6 @@ export class ManagedWristMenuPresentation {
     this.declarations = this.declarationsFor(this.instance, model)
   }
 
-  private configureTargetability(
-    model: PresentationModel,
-    targetable: boolean,
-  ): void {
-    this.group.visible = model.visible
-    this.instance.root.traverse((object) => {
-      if ((object as { isMesh?: unknown }).isMesh === true) {
-        ;(object as Mesh).raycast = decorativeRaycast
-      }
-    })
-    for (const { object } of this.declarations) {
-      object.raycast =
-        targetable && model.visible && !model.scrollBarrierActive && object.visible
-          ? interactiveRaycast
-          : decorativeRaycast
-    }
-    this.panelMesh.raycast =
-      targetable && model.visible && this.panelMesh.visible
-        ? interactiveRaycast
-        : decorativeRaycast
-  }
-
   applyModel(model: PresentationModel, targetable: boolean): void {
     if (
       this.appliedModel !== undefined &&
@@ -407,23 +392,17 @@ export class ManagedWristMenuPresentation {
     ) {
       return
     }
-    this.instance.update(model)
+    this.instance.update(withTargetability(model, targetable))
     this.refreshDeclarations(model)
-    this.configureTargetability(model, targetable)
+    this.group.visible = model.visible
     this.appliedModel = model
     this.appliedTargetable = targetable
   }
 
   setTargetable(targetable: boolean): void {
-    for (const { object } of this.declarations) {
-      object.raycast = targetable && object.visible
-        ? interactiveRaycast
-        : decorativeRaycast
-    }
-    this.panelMesh.raycast =
-      targetable && this.panelMesh.visible
-        ? interactiveRaycast
-        : decorativeRaycast
+    if (this.appliedModel === undefined) return
+    this.instance.update(withTargetability(this.appliedModel, targetable))
+    this.refreshDeclarations(this.appliedModel)
     this.appliedTargetable = targetable
   }
 
@@ -473,7 +452,7 @@ export class ManagedWristMenuPresentation {
     const next = createPresentation(factory, model)
     let nextDeclarations: readonly ThreeWristMenuHitRegion[]
     try {
-      next.update(model)
+      next.update(withTargetability(model, false))
       nextDeclarations = this.declarationsFor(next, model)
     } catch (error) {
       try {
@@ -499,7 +478,7 @@ export class ManagedWristMenuPresentation {
     try {
       previous.dispose()
     } finally {
-      this.configureTargetability(model, false)
+      this.group.visible = model.visible
       this.appliedModel = model
       this.appliedTargetable = false
     }
