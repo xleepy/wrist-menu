@@ -52,9 +52,11 @@ values are strings or finite numbers; Toggle Item values are booleans. Every
 interactive item requires a label, may provide a portable `iconKey`, and may be
 disabled with an optional reason. Separators may omit both identity and label.
 
-`sync(nextSnapshot)` validates and deeply copies the complete input immediately,
-then applies the latest valid snapshot atomically at the next Frame Sample. A
-failed sync leaves both the live and already-queued snapshots unchanged.
+`syncWristMenuRuntime(state, nextSnapshot)` and
+`syncThreeWristMenu(state, nextSnapshot)` validate and deeply copy the complete
+input immediately, then apply the latest valid snapshot atomically at the next
+Frame Sample. A failed sync leaves both the live and already-queued snapshots
+unchanged.
 
 Selection Intents are proposals. An Action Item reports its `itemId`; a Toggle
 Item reports its current and proposed boolean values; a choice reports its
@@ -154,3 +156,19 @@ Release candidates are verified from a clean commit with `npm run evidence`.
 That command installs a digest-named copy of the packed candidate in every
 consumer and writes immutable, fail-closed records under ignored artifacts; see
 the [release evidence guide](docs/release-evidence.md).
+
+## Candidate documentation
+
+The [versioned 0.0.0 candidate guide](docs/0.0.0/index.md) documents entry
+points, Host Snapshots, behavior, lifecycle, customization, accessibility,
+testing, security, and troubleshooting. Its [migration guide](docs/0.0.0/migration.md)
+calls the state-pure API change breaking: there are no legacy aliases, and
+every former instance method maps to an explicit state function.
+
+Build the review bundle with `npm run candidate:verify -- --evidence-bundle
+<immutable-record-directory>`. Verification installs the extracted package into
+public-import, declaration, and executable-document fixtures, then restores the
+fixture's clean frozen dependency tree. The current exact predecessor Evidence
+Record is retained as **failed** and applies to neither changed candidate bytes
+nor provisional physical combinations; see the
+[compatibility record](docs/0.0.0/compatibility.md).

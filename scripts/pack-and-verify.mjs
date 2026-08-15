@@ -4,6 +4,8 @@ import { mkdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { APPROVED_PACKAGE_FILES } from './approved-package-files.mjs'
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const artifactDirectory = resolve(root, 'artifacts')
 const npmCli = process.env.npm_execpath
@@ -23,46 +25,9 @@ assert.ok(archive, 'npm pack did not report an archive')
 assert.equal(archive.filename, 'xleepy-wrist-menu-0.0.0.tgz')
 
 const actualFiles = archive.files.map(({ path }) => path).sort()
-const expectedFiles = [
-  'LICENSE',
-  'README.md',
-  'compatibility.json',
-  'dist/core/activation-config.d.ts',
-  'dist/core/activation-config.js',
-  'dist/core/index.d.ts',
-  'dist/core/index.js',
-  'dist/core/host-snapshot.d.ts',
-  'dist/core/host-snapshot.js',
-  'dist/core/presentation-model.d.ts',
-  'dist/core/presentation-model.js',
-  'dist/core/reveal-state.d.ts',
-  'dist/core/reveal-state.js',
-  'dist/core/runtime-internals.d.ts',
-  'dist/core/runtime-internals.js',
-  'dist/core/scroll-state.d.ts',
-  'dist/core/scroll-state.js',
-  'dist/core/selection-state.d.ts',
-  'dist/core/selection-state.js',
-  'dist/core/theme.d.ts',
-  'dist/core/theme.js',
-  'dist/core/wrist-anchor.d.ts',
-  'dist/core/wrist-anchor.js',
-  'dist/react/index.d.ts',
-  'dist/react/index.js',
-  'dist/three/index.d.ts',
-  'dist/three/index.js',
-  'dist/three/oriented-box.d.ts',
-  'dist/three/oriented-box.js',
-  'dist/three/presentation.d.ts',
-  'dist/three/presentation.js',
-  'dist/three/wrist-menu-presentation.d.ts',
-  'dist/three/wrist-menu-presentation.js',
-  'package.json',
-].sort()
-
 assert.deepEqual(
   actualFiles,
-  expectedFiles,
+  APPROVED_PACKAGE_FILES,
   `package archive contents changed:\n${actualFiles.join('\n')}`,
 )
 
