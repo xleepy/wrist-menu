@@ -70,8 +70,24 @@ const instrumentationPaths = [
 ]
 function git(...args) {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
-  if (result.status !== 0) throw new Error(result.stderr || result.stdout)
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.error?.message || result.stdout)
+  }
   return result.stdout.trim()
+}
+
+export function retainedCommandResult(command, result) {
+  const stderr = [...new Set([
+    result.stderr ?? '',
+    result.error?.message ?? '',
+  ].filter((message) => message !== ''))].join('\n')
+  return {
+    command,
+    status: result.status === 0 ? 'passed' : 'failed',
+    exitCode: Number.isInteger(result.status) ? result.status : 1,
+    stdout: result.stdout ?? '',
+    stderr,
+  }
 }
 
 function runNpm(script, environment = {}) {
@@ -85,13 +101,7 @@ function runNpm(script, environment = {}) {
       maxBuffer: subprocessMaxBuffer,
     },
   )
-  return {
-    command: `npm run ${script}`,
-    status: result.status === 0 ? 'passed' : 'failed',
-    exitCode: result.status,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr || result.error?.message || '',
-  }
+  return retainedCommandResult(`npm run ${script}`, result)
 }
 
 function runNode(script, args, environment = {}, cwd = root) {
@@ -101,13 +111,10 @@ function runNode(script, args, environment = {}, cwd = root) {
     env: { ...process.env, ...environment },
     maxBuffer: subprocessMaxBuffer,
   })
-  return {
-    command: `node ${relative(root, resolve(cwd, script))}`,
-    status: result.status === 0 ? 'passed' : 'failed',
-    exitCode: result.status,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr || result.error?.message || '',
-  }
+  return retainedCommandResult(
+    `node ${relative(root, resolve(cwd, script))}`,
+    result,
+  )
 }
 
 async function writeCommandLog(path, result) {

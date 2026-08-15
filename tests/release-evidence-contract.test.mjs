@@ -13,6 +13,7 @@ import {
   automatedRawGateStatus,
   finalizeAutomatedReleaseEvidence,
 } from '../scripts/release-gate-evaluation.mjs'
+import { retainedCommandResult } from '../scripts/generate-release-evidence.mjs'
 import {
   evaluatePerformanceBaselineGate,
   evaluatePerformanceVariant,
@@ -27,6 +28,24 @@ import {
 } from '../fixtures/consumers/react-renderer-harness.mjs'
 const readJson = async (path) =>
   JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8'))
+
+test('spawn failures retain an integer exit code and complete diagnostics', () => {
+  assert.deepEqual(
+    retainedCommandResult('node evidence.mjs', {
+      status: null,
+      stdout: 'partial output',
+      stderr: 'process stderr',
+      error: new Error('spawn ENOBUFS'),
+    }),
+    {
+      command: 'node evidence.mjs',
+      status: 'failed',
+      exitCode: 1,
+      stdout: 'partial output',
+      stderr: 'process stderr\nspawn ENOBUFS',
+    },
+  )
+})
 
 test('the compatibility manifest separates policy, exact lanes, claims, and physical provisional rows', async () => {
   const manifest = await readJson('../compatibility.json')
