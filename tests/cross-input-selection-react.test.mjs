@@ -12,6 +12,7 @@ import { BoxGeometry, Mesh, MeshBasicMaterial } from 'three'
 import { WristMenu } from '../dist/react/index.js'
 import { crossInputSnapshot } from '../fixtures/cross-input-selection.mjs'
 import { createHandXrFixture } from '../fixtures/cross-input-xr.mjs'
+import { createEquivalentPresentationFactory } from '../fixtures/presentation-factory.mjs'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -50,7 +51,8 @@ function createCanvas() {
   return canvas
 }
 
-test('React Scene Event Shield excludes every tested behind-menu action during a hand commit', async () => {
+for (const presentationKind of ['default', 'custom']) {
+test(`React ${presentationKind} presentation shields every tested behind-menu action during a hand commit`, async () => {
   const fixture = createHandXrFixture()
   const managerListeners = new Map()
   Object.assign(fixture.renderer.xr, {
@@ -89,6 +91,11 @@ test('React Scene Event Shield excludes every tested behind-menu action during a
     behindActions += 1
   }
   const events = []
+  const presentationLog = { name: `react-hand-${presentationKind}` }
+  const presentationFactory =
+    presentationKind === 'custom'
+      ? createEquivalentPresentationFactory(presentationLog)
+      : undefined
   let store
 
   await act(async () => {
@@ -99,6 +106,7 @@ test('React Scene Event Shield excludes every tested behind-menu action during a
         createElement(WristMenu, {
           snapshot: crossInputSnapshot,
           onEvent: (event) => events.push(event),
+          presentationFactory,
         }),
         createElement('primitive', {
           object: behind,
@@ -141,6 +149,10 @@ test('React Scene Event Shield excludes every tested behind-menu action during a
   )
 
   await act(async () => root.unmount())
+  if (presentationKind === 'custom') {
+    assert.equal(presentationLog.disposals, 1)
+  }
   behindGeometry.dispose()
   behindMaterial.dispose()
 })
+}

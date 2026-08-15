@@ -9,18 +9,29 @@ import {
 
 import {
   createThreeWristMenuState,
+  defaultThreeWristMenuPresentationFactory,
   disposeThreeWristMenu,
+  replaceThreeWristMenuPresentation,
   syncThreeWristMenu,
   updateThreeWristMenu,
   type HostSnapshot,
+  type ThreeWristMenuPresentationFactory,
   type WristMenuEvent,
 } from '../three/index.js'
 
 export * from '../core/index.js'
+export {
+  defaultThreeWristMenuPresentationFactory,
+  type ThreeWristMenuHitRegion,
+  type ThreeWristMenuPresentation,
+  type ThreeWristMenuPresentationFactory,
+  type ThreeWristMenuViewport,
+} from '../three/index.js'
 
 export type WristMenuProps = Readonly<{
   snapshot: HostSnapshot
   onEvent: (event: WristMenuEvent) => void
+  presentationFactory?: ThreeWristMenuPresentationFactory
 }>
 
 type SceneShieldEvent = Readonly<{
@@ -35,6 +46,7 @@ type MountedWristMenuProps = WristMenuProps &
 function MountedWristMenu({
   snapshot,
   onEvent,
+  presentationFactory,
   fiber,
 }: MountedWristMenuProps): ReactElement {
   const renderer = fiber.useThree((state) => state.gl)
@@ -42,11 +54,13 @@ function MountedWristMenu({
   onEventRef.current = onEvent
   const initialSnapshotRef = useRef(snapshot)
   const lastSnapshotRef = useRef(snapshot)
+  const lastPresentationFactoryRef = useRef(presentationFactory)
   const [menuState] = useState(() =>
     createThreeWristMenuState({
       renderer,
       snapshot: initialSnapshotRef.current,
       onEvent: (event) => onEventRef.current(event),
+      ...(presentationFactory === undefined ? {} : { presentationFactory }),
     }),
   )
 
@@ -56,6 +70,16 @@ function MountedWristMenu({
       syncThreeWristMenu(menuState, snapshot)
     }
   }, [menuState, snapshot])
+
+  useEffect(() => {
+    if (lastPresentationFactoryRef.current !== presentationFactory) {
+      lastPresentationFactoryRef.current = presentationFactory
+      replaceThreeWristMenuPresentation(
+        menuState,
+        presentationFactory ?? defaultThreeWristMenuPresentationFactory,
+      )
+    }
+  }, [menuState, presentationFactory])
 
   useEffect(() => () => disposeThreeWristMenu(menuState), [menuState])
 

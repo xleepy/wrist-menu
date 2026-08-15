@@ -91,9 +91,10 @@ test('React applies complete snapshot props and preserves vanilla event ordering
     ({ name }) => name === 'wrist-menu-attachment-root',
   )
   assert.ok(attachmentRoot)
-  const rows = attachmentRoot.children.filter(({ name }) =>
-    name.includes('-visual:'),
-  )
+  const rows = []
+  attachmentRoot.traverse((object) => {
+    if (object.name.includes('-visual:')) rows.push(object)
+  })
   assert.equal(rows[2].userData.wristMenuSelected, false)
   assert.equal(rows[4].userData.wristMenuSelected, false)
   assert.equal(rows[5].userData.wristMenuSelected, true)

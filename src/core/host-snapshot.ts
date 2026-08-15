@@ -8,6 +8,12 @@ import {
   type RevealConfigurationOverrides,
   type Vector3Tuple,
 } from './activation-config.js'
+import {
+  resolveThemeTokens,
+  themeTokenKeys,
+  type ThemeOverrides,
+  type ThemeTokens,
+} from './theme.js'
 
 export type Handedness = 'left' | 'right'
 
@@ -65,6 +71,7 @@ export type HostSnapshot = Readonly<{
   menuDefinition: readonly MenuDefinitionEntry[]
   comfort?: RevealConfigurationOverrides
   controllerWrist?: ControllerWristConfiguration
+  theme?: ThemeOverrides
 }>
 
 export type MenuInteraction = 'idle' | 'hovered' | 'armed'
@@ -226,6 +233,25 @@ function copyOptionalComfort(
     overrides[key] = value
   }
   return resolveRevealConfiguration(overrides)
+}
+
+function copyOptionalTheme(
+  snapshot: Record<string, unknown>,
+): ThemeTokens | undefined {
+  if (!Object.hasOwn(snapshot, 'theme')) return undefined
+  const theme = snapshot['theme']
+  assertRecord(theme, 'Host Snapshot theme')
+  assertKnownKeys(theme, themeTokenKeys, 'Host Snapshot theme')
+  const overrides: Partial<Record<string, number>> = {}
+  for (const key of themeTokenKeys) {
+    if (!Object.hasOwn(theme, key)) continue
+    const value = theme[key]
+    if (typeof value !== 'number') {
+      throw new TypeError(`theme.${key} must be a number`)
+    }
+    overrides[key] = value
+  }
+  return resolveThemeTokens(overrides as ThemeOverrides)
 }
 
 function copyVector3(value: unknown, name: string): Vector3Tuple {
@@ -520,6 +546,7 @@ export function copyHostSnapshot(snapshot: HostSnapshot): HostSnapshot {
       'menuDefinition',
       'comfort',
       'controllerWrist',
+      'theme',
     ],
     'Host Snapshot',
   )
@@ -548,6 +575,7 @@ export function copyHostSnapshot(snapshot: HostSnapshot): HostSnapshot {
   assertPortableArray(rawMenuDefinition, 'Menu Definition')
   const comfort = copyOptionalComfort(snapshot)
   const controllerWrist = copyOptionalControllerWrist(snapshot)
+  const theme = copyOptionalTheme(snapshot)
 
   const ids = new Set<string>()
   const menuDefinition = rawMenuDefinition.map((entry, index) => {
@@ -574,6 +602,7 @@ export function copyHostSnapshot(snapshot: HostSnapshot): HostSnapshot {
     menuDefinition: Object.freeze(menuDefinition),
     ...(comfort === undefined ? {} : { comfort }),
     ...(controllerWrist === undefined ? {} : { controllerWrist }),
+    ...(theme === undefined ? {} : { theme }),
   })
 }
 

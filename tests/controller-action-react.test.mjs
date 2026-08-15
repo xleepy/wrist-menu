@@ -23,6 +23,7 @@ import {
   FakeReferenceSpace,
   FakeXrSession,
 } from '../fixtures/controller-action.mjs'
+import { createEquivalentPresentationFactory } from '../fixtures/presentation-factory.mjs'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -203,6 +204,97 @@ test('React integration mounts the Three instance and shields its active Hit Reg
 
   await act(async () => root.unmount())
   assert.equal(menuGroup.children.length, 0)
+  behindGeometry.dispose()
+  behindMaterial.dispose()
+})
+
+test('React forwards the shared presentation factory without a JSX behavior path', async () => {
+  const wristMenuEvents = []
+  const { canvas, frame, inputSource, renderer, session } = createReactXrFixture()
+  const root = createRoot(canvas)
+  await root.configure({
+    gl: renderer,
+    events: createPointerEvents,
+    frameloop: 'never',
+    size: { width: 1, height: 1, top: 0, left: 0 },
+  })
+
+  const presentationLog = { name: 'shared-react' }
+  const presentationFactory = createEquivalentPresentationFactory(presentationLog)
+
+  const behindGeometry = new BoxGeometry(0.5, 0.5, 0.02)
+  const behindMaterial = new MeshBasicMaterial()
+  const behindMenu = new Mesh(behindGeometry, behindMaterial)
+  behindMenu.position.z = -0.1
+  let behindSceneEvents = 0
+  let store
+  await act(async () => {
+    store = root.render(
+      createElement(
+        Fragment,
+        null,
+        createElement(WristMenu, {
+          snapshot: controllerActionSnapshot,
+          onEvent: (event) => wristMenuEvents.push(event),
+          presentationFactory,
+        }),
+        createElement('primitive', {
+          object: behindMenu,
+          onPointerDown: () => {
+            behindSceneEvents += 1
+          },
+        }),
+      ),
+    )
+  })
+
+  const state = store.getState()
+  const menuGroup = state.scene.children[0]
+  assert.equal(
+    menuGroup.children[0]?.name,
+    'custom-presentation-shared-react',
+  )
+  assert.ok(Object.isFrozen(presentationLog.factoryModels[0]))
+  advance(16, true, state, frame)
+  advance(32, true, state, frame)
+  session.dispatch('selectstart', inputSource)
+  advance(48, true, state, frame)
+  canvas.dispatch('pointerdown')
+  assert.equal(behindSceneEvents, 0)
+  session.dispatch('select', inputSource)
+  session.dispatch('selectend', inputSource)
+  advance(64, true, state, frame)
+  assert.equal(
+    wristMenuEvents.filter(({ type }) => type === 'selection-intent').length,
+    1,
+  )
+
+  const replacementFactory = createEquivalentPresentationFactory(presentationLog)
+  await act(async () => {
+    root.render(
+      createElement(
+        Fragment,
+        null,
+        createElement(WristMenu, {
+          snapshot: controllerActionSnapshot,
+          onEvent: (event) => wristMenuEvents.push(event),
+          presentationFactory: replacementFactory,
+        }),
+        createElement('primitive', {
+          object: behindMenu,
+          onPointerDown: () => {
+            behindSceneEvents += 1
+          },
+        }),
+      ),
+    )
+  })
+  assert.equal(presentationLog.factoryModels.length, 2)
+  assert.equal(presentationLog.disposals, 1)
+  assert.equal(menuGroup.children[0]?.name, 'custom-presentation-shared-react')
+
+  await act(async () => root.unmount())
+  assert.equal(presentationLog.disposals, 2)
   behindGeometry.dispose()
   behindMaterial.dispose()
 })

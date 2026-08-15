@@ -32,10 +32,23 @@ import {
   type WristMenuEvent,
 } from '../core/index.js'
 import { copyHostSnapshot } from '../core/host-snapshot.js'
+import { createInitialPresentationModel } from '../core/presentation-model.js'
+import { resetRuntimeForPresentationReplacement } from '../core/runtime-internals.js'
 import { selectWristSource } from '../core/wrist-anchor.js'
-import { WristMenuPresentation } from './wrist-menu-presentation.js'
+import {
+  defaultThreeWristMenuPresentationFactory,
+  ManagedWristMenuPresentation,
+  type ThreeWristMenuPresentationFactory,
+} from './presentation.js'
 
 export * from '../core/index.js'
+export {
+  defaultThreeWristMenuPresentationFactory,
+  type ThreeWristMenuHitRegion,
+  type ThreeWristMenuPresentation,
+  type ThreeWristMenuPresentationFactory,
+  type ThreeWristMenuViewport,
+} from './presentation.js'
 
 export type ThreeWristMenuRenderer = Pick<WebGLRenderer, 'xr'>
 
@@ -48,6 +61,7 @@ export type CreateThreeWristMenuOptions = Readonly<{
   renderer: ThreeWristMenuRenderer
   snapshot: HostSnapshot
   onEvent: (event: WristMenuEvent) => void
+  presentationFactory?: ThreeWristMenuPresentationFactory
 }>
 
 type SelectEvent = Readonly<{ inputSource: XRInputSource }>
@@ -73,7 +87,7 @@ export type ThreeWristMenuState = {
   renderer: ThreeWristMenuRenderer
   onEvent: (event: WristMenuEvent) => void
   runtime: WristMenuRuntimeState
-  presentation: WristMenuPresentation
+  presentation: ManagedWristMenuPresentation
   raycaster: Raycaster
   rayMatrix: Matrix4
   rayOrigin: Vector3
@@ -261,7 +275,7 @@ function applyLifecycleSample(
     },
     [],
   )
-  state.presentation.setModel(model, false)
+  state.presentation.applyModel(model, false)
 }
 
 function onSelectStart(state: ThreeWristMenuState, event: SelectEvent): void {
@@ -377,7 +391,11 @@ export function createThreeWristMenuState(
   options: CreateThreeWristMenuOptions,
 ): ThreeWristMenuState {
   const initialSnapshot = copyHostSnapshot(options.snapshot)
-  const presentation = new WristMenuPresentation()
+  const initialModel = createInitialPresentationModel(initialSnapshot, 1)
+  const presentation = new ManagedWristMenuPresentation(
+    initialModel,
+    options.presentationFactory ?? defaultThreeWristMenuPresentationFactory,
+  )
   let state: ThreeWristMenuState
   const sessionHandlers: BoundSessionHandlers = {
     selectstart: (event) => onSelectStart(state, event),
@@ -440,6 +458,36 @@ export function syncThreeWristMenu(
   const copiedSnapshot = copyHostSnapshot(nextSnapshot)
   syncWristMenuRuntime(state.runtime, copiedSnapshot)
   state.pendingAnchorSettings = materializeAnchorSettings(copiedSnapshot)
+}
+
+/**
+ * Replace only the inner presentation while retaining the package-owned
+ * attachment. Interaction is released immediately and automatic reveal starts
+ * a fresh initial dwell on the next XR frame.
+ */
+export function replaceThreeWristMenuPresentation(
+  state: ThreeWristMenuState,
+  presentationFactory: ThreeWristMenuPresentationFactory,
+): void {
+  assertActive(state)
+  let resetError: unknown
+  const snapshot = state.runtime.pendingSnapshot ?? state.runtime.snapshot
+  const model = createInitialPresentationModel(
+    snapshot,
+    state.runtime.revision + 1,
+  )
+  state.presentation.replace(presentationFactory, model, () => {
+    try {
+      resetRuntimeForPresentationReplacement(state.runtime)
+    } catch (error) {
+      resetError = error
+    } finally {
+      clearTransientInput(state)
+    }
+    state.presentationRevision = 0
+    state.geometryBarrierThrough = state.frameSequence
+  })
+  if (resetError !== undefined) throw resetError
 }
 
 export function updateThreeWristMenu(
@@ -588,7 +636,7 @@ export function updateThreeWristMenu(
       state.rayDirection.set(0, 0, -1).transformDirection(state.rayMatrix)
       state.raycaster.set(state.rayOrigin, state.rayDirection)
       const intersection = state.raycaster.intersectObjects(
-        state.presentation.hitRegions,
+        [...state.presentation.hitRegions],
         false,
       )[0]
       const itemId = state.presentation.itemIdForIntersection(intersection)
@@ -671,12 +719,11 @@ export function updateThreeWristMenu(
 
   if (model.revision !== state.presentationRevision) {
     state.presentationRevision = model.revision
-    state.presentation.renderItems(model.items)
     state.geometryBarrierThrough = state.frameSequence
   }
 
   applyAnchorPose(state, model.anchorPose)
-  state.presentation.setModel(
+  state.presentation.applyModel(
     model,
     model.targetable && state.frameSequence > state.geometryBarrierThrough,
   )
