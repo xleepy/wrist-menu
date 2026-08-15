@@ -4,8 +4,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
-  digestNamedCandidate,
   installPackedCandidate,
+  resolveCandidate,
 } from './candidate-tarball.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -13,7 +13,7 @@ const npmCli = process.env.npm_execpath
 const fixtures = ['three', 'react-18', 'react-19']
 
 assert.ok(npmCli, 'run consumer verification through npm')
-const candidate = await digestNamedCandidate(root)
+const candidate = await resolveCandidate(root)
 
 const installFrozen = async (fixtureDirectory) => {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
