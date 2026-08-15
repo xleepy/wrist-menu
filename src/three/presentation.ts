@@ -402,6 +402,7 @@ export class ManagedWristMenuPresentation {
   setTargetable(targetable: boolean): void {
     if (this.appliedModel === undefined) return
     this.instance.update(withTargetability(this.appliedModel, targetable))
+    this.refreshDeclarations(this.appliedModel)
     this.appliedTargetable = targetable
   }
 

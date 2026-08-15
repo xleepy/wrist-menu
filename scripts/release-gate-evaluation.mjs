@@ -313,6 +313,9 @@ export function evaluateAutomatedReleaseGates({
     automatedResult.status === 'passed'
       ? automatedReport.gates?.[id]?.status
       : 'failed'
+  const failedTestedLanes = compatibility.testedLanes
+    .map(({ id }) => id)
+    .filter((id) => laneStates[id] !== true)
   const gates = [
     gate(
       'deterministic-boundaries',
@@ -323,6 +326,14 @@ export function evaluateAutomatedReleaseGates({
     ),
     gate('core-behavior', prerequisiteResults[4]?.status, 'raw/prerequisite-5.json'),
     gate('import-safety', importSafety.status, 'raw/import-safety.json'),
+    gate(
+      'tested-lane-coverage',
+      failedTestedLanes.length === 0,
+      'raw/packed-consumers-command.json',
+      failedTestedLanes.length === 0
+        ? undefined
+        : `failed or unmapped Tested Lanes: ${failedTestedLanes.join(', ')}`,
+    ),
     gate('three-consumer', laneStates['three-0.185.1'], 'raw/three-iwer-lanes.json'),
     gate('react-18-consumer', laneStates['react-18.3.1-r3f-8.18.0'], 'raw/react-18-xr-iwer-lanes.json'),
     gate('react-19-consumer', laneStates['react-19.2.7-r3f-9.6.1'], 'raw/react-19-xr-iwer-lanes.json'),

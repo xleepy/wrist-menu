@@ -142,6 +142,72 @@ test('shared oriented-box targeting preserves world-meter semantics under presen
   disposeThreeWristMenu(menu)
 })
 
+test('targetability updates refresh custom Hit Region declarations', () => {
+  const fixture = createWristXrFixture({ menuKind: 'controller' })
+  fixture.setWristMatrix(new Matrix4().makeRotationY(-Math.PI / 2))
+  let targetableHit
+  let decorativeHit
+  const menu = createThreeWristMenuState({
+    renderer: fixture.renderer,
+    snapshot: controllerActionSnapshot,
+    onEvent: () => undefined,
+    presentationFactory: () => {
+      const root = new Group()
+      const viewport = new Mesh(
+        new BoxGeometry(0.192, 0.27, 0.004),
+        new MeshBasicMaterial({ visible: false }),
+      )
+      targetableHit = new Mesh(
+        new BoxGeometry(0.176, 0.02, 0.008),
+        new MeshBasicMaterial({ visible: false }),
+      )
+      decorativeHit = new Mesh(
+        new BoxGeometry(0.176, 0.02, 0.008),
+        new MeshBasicMaterial({ visible: false }),
+      )
+      root.add(viewport, targetableHit, decorativeHit)
+      let activeHit = decorativeHit
+      return {
+        root,
+        get hitRegions() {
+          return [{ itemId: 'spawn-cube', object: activeHit }]
+        },
+        menuViewport: { object: viewport },
+        update(model) {
+          activeHit = model.targetable ? targetableHit : decorativeHit
+        },
+        dispose() {
+          viewport.geometry.dispose()
+          viewport.material.dispose()
+          targetableHit.geometry.dispose()
+          targetableHit.material.dispose()
+          decorativeHit.geometry.dispose()
+          decorativeHit.material.dispose()
+        },
+      }
+    },
+  })
+
+  updateThreeWristMenu(menu, { time: 16, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 32, frame: fixture.frame })
+  assert.equal(
+    menu.presentation.itemIdForIntersection({ object: targetableHit }),
+    'spawn-cube',
+  )
+
+  menu.presentation.setTargetable(false)
+  assert.equal(
+    menu.presentation.itemIdForIntersection({ object: targetableHit }),
+    undefined,
+  )
+  assert.equal(
+    menu.presentation.itemIdForIntersection({ object: decorativeHit }),
+    'spawn-cube',
+  )
+
+  disposeThreeWristMenu(menu)
+})
+
 test('a custom factory receives only the curated model and preserves controller selection, shielding, and disposal', () => {
   const fixture = createWristXrFixture({ menuKind: 'controller' })
   fixture.setWristMatrix(new Matrix4().makeRotationY(-Math.PI / 2))

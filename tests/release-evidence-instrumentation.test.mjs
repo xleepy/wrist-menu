@@ -752,6 +752,15 @@ test('Release Gate evaluation fails closed for unknown lanes and unmapped report
     additionalLaneIds: ['unknown-renderer-lane'],
   })
   assert.equal(unknownLane.laneStates['unknown-renderer-lane'], false)
+  assert.deepEqual(
+    unknownLane.gates.find(({ id }) => id === 'tested-lane-coverage'),
+    {
+      id: 'tested-lane-coverage',
+      status: 'failed',
+      report: 'raw/packed-consumers-command.json',
+      detail: 'failed or unmapped Tested Lanes: unknown-renderer-lane',
+    },
+  )
 
   const unmappedReport = evaluateJourneyReports(makeValidJourneyReport(), {
     threeTestedLanes: ['unmapped-three-report-lane'],
