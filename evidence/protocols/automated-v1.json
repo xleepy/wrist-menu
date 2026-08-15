@@ -33,6 +33,7 @@
     "deterministic-boundaries",
     "core-behavior",
     "import-safety",
+    "tested-lane-coverage",
     "three-consumer",
     "react-18-consumer",
     "react-19-consumer",

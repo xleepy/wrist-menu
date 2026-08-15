@@ -24,7 +24,10 @@ import {
   runRendererJourneyEvidence,
   verifyRendererJourneyEvidence,
 } from '../fixtures/consumers/journey-evidence.mjs'
-import { evaluateAutomatedReleaseGates } from '../scripts/release-gate-evaluation.mjs'
+import {
+  evaluateAutomatedReleaseGates,
+  finalizeAutomatedReleaseEvidence,
+} from '../scripts/release-gate-evaluation.mjs'
 
 const semanticCaseIds = [
   'fresh-reveal-hide-dwell',
@@ -655,11 +658,24 @@ function evaluateJourneyReports(react19Report, options = {}) {
           ...(options.additionalLaneIds ?? []),
         ].map((id) => ({ id })),
       },
-      protocol: { id: 'test', version: 1, sha256: 'b'.repeat(64), requiredGateIds: [] },
-      candidate: { sha256: candidateSha256 },
-      source: {},
+      protocol: {
+        id: 'test',
+        version: 1,
+        sha256: 'b'.repeat(64),
+        requiredGateIds: ['tested-lane-coverage'],
+      },
+      candidate: {
+        package: '@xleepy/wrist-menu',
+        version: '0.0.0',
+        tarball: 'artifacts/xleepy-wrist-menu-0.0.0.tgz',
+        sha256: candidateSha256,
+      },
+      source: {
+        commit: 'c'.repeat(40),
+        exampleCommit: 'd'.repeat(40),
+      },
       lockfiles: [],
-      instrumentation: {},
+      instrumentation: { id: 'test', version: 1 },
     },
     prerequisiteResults: Array.from({ length: 5 }, () => ({ status: 'passed' })),
     deterministicResult: { status: 'passed' },
@@ -760,6 +776,27 @@ test('Release Gate evaluation fails closed for unknown lanes and unmapped report
       report: 'raw/packed-consumers-command.json',
       detail: 'failed or unmapped Tested Lanes: unknown-renderer-lane',
     },
+  )
+  const isolatedLaneFailure = {
+    ...unknownLane,
+    gates: unknownLane.gates.map((gate) => ({
+      ...gate,
+      status: gate.id === 'tested-lane-coverage' ? 'failed' : 'passed',
+    })),
+  }
+  const bundleManifest = [...new Set(
+    isolatedLaneFailure.gates.map(({ report }) => report),
+  )].map((path) => ({
+    path,
+    bytes: 1,
+    sha256: 'e'.repeat(64),
+  }))
+  assert.equal(
+    finalizeAutomatedReleaseEvidence(
+      isolatedLaneFailure,
+      { bundleManifest },
+    ).record.result,
+    'failed',
   )
 
   const unmappedReport = evaluateJourneyReports(makeValidJourneyReport(), {

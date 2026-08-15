@@ -336,6 +336,7 @@ test('the automated protocol names every threshold triplet and fail-closed gate'
   assert.deepEqual(protocol.frameSchedules, ['60hz', '72hz', '90hz', '120hz', 'irregular'])
   for (const gate of [
     'import-safety',
+    'tested-lane-coverage',
     'allocation',
     'identical-frame-mutation',
     'resource-growth',
