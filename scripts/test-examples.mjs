@@ -5,8 +5,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
-  digestNamedCandidate,
   installPackedCandidate,
+  resolveCandidate,
 } from './candidate-tarball.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -14,7 +14,7 @@ const exampleDirectory = resolve(root, 'examples', 'primitive-workshop')
 const npmCli = process.env.npm_execpath
 
 assert.ok(npmCli, 'run Example Variant verification through npm')
-const candidate = await digestNamedCandidate(root)
+const candidate = await resolveCandidate(root)
 
 execFileSync(
   process.execPath,
