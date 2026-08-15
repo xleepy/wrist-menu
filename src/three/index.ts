@@ -94,9 +94,12 @@ export type ThreeWristMenuState = {
   rayDirection: Vector3
   anchorMatrix: Matrix4
   parentInverse: Matrix4
+  anchorParentMatrix: Matrix4
   anchorPosition: Vector3
   anchorOrientation: Quaternion
   anchorScale: Vector3
+  anchorPoseApplied: boolean
+  lastAnchorParent: Object3D<Object3DEventMap> | null
   sourceIds: WeakMap<XRInputSource, string>
   inputSourceById: Map<string, XRInputSource>
   anchorSettings: AnchorSettings
@@ -117,7 +120,10 @@ export type ThreeWristMenuState = {
   observedSession: boolean
   observedParent: boolean
   lastParent: Object3D<Object3DEventMap> | null
+  lastUpdateFrame: XRFrame | null | undefined
   lastUpdateTime: number
+  lastSessionVisibility: XRVisibilityState | null
+  frameInvalidated: boolean
   disposed: boolean
 }
 
@@ -223,6 +229,22 @@ function applyAnchorPose(
   pose: PresentationModel['anchorPose'],
 ): void {
   if (pose === null) return
+  const parent = state.presentation.group.parent
+  if (parent !== null) parent.updateWorldMatrix(true, false)
+  const poseUnchanged =
+    state.anchorPoseApplied &&
+    state.anchorPosition.x === pose.position[0] &&
+    state.anchorPosition.y === pose.position[1] &&
+    state.anchorPosition.z === pose.position[2] &&
+    state.anchorOrientation.x === pose.orientation[0] &&
+    state.anchorOrientation.y === pose.orientation[1] &&
+    state.anchorOrientation.z === pose.orientation[2] &&
+    state.anchorOrientation.w === pose.orientation[3]
+  const parentUnchanged =
+    state.lastAnchorParent === parent &&
+    (parent === null || state.anchorParentMatrix.equals(parent.matrixWorld))
+  if (poseUnchanged && parentUnchanged) return
+
   state.anchorPosition.fromArray(pose.position)
   state.anchorOrientation.fromArray(pose.orientation)
   state.anchorMatrix.compose(
@@ -230,9 +252,7 @@ function applyAnchorPose(
     state.anchorOrientation,
     state.anchorScale,
   )
-  const parent = state.presentation.group.parent
   if (parent !== null) {
-    parent.updateWorldMatrix(true, false)
     state.parentInverse.copy(parent.matrixWorld).invert()
     state.anchorMatrix.premultiply(state.parentInverse)
   }
@@ -241,6 +261,9 @@ function applyAnchorPose(
     state.presentation.group.quaternion,
     state.presentation.group.scale,
   )
+  state.anchorPoseApplied = true
+  state.lastAnchorParent = parent
+  if (parent !== null) state.anchorParentMatrix.copy(parent.matrixWorld)
 }
 
 function clearTransientInput(state: ThreeWristMenuState): void {
@@ -252,6 +275,7 @@ function clearTransientInput(state: ThreeWristMenuState): void {
 
 function interruptLifecycle(state: ThreeWristMenuState): void {
   state.lifecycleRevision += 1
+  state.frameInvalidated = true
   clearTransientInput(state)
 }
 
@@ -279,6 +303,7 @@ function applyLifecycleSample(
 }
 
 function onSelectStart(state: ThreeWristMenuState, event: SelectEvent): void {
+  state.frameInvalidated = true
   state.sourcePressed.set(event.inputSource, true)
   if (state.lastTargetBySource.has(event.inputSource)) {
     state.provisionalClaims.add(event.inputSource)
@@ -286,10 +311,12 @@ function onSelectStart(state: ThreeWristMenuState, event: SelectEvent): void {
 }
 
 function onSelectEnd(state: ThreeWristMenuState, event: SelectEvent): void {
+  state.frameInvalidated = true
   state.sourcePressed.set(event.inputSource, false)
 }
 
 function onSelect(state: ThreeWristMenuState, event: SelectEvent): void {
+  state.frameInvalidated = true
   state.sourceCompleted.add(event.inputSource)
 }
 
@@ -421,9 +448,12 @@ export function createThreeWristMenuState(
     rayDirection: new Vector3(),
     anchorMatrix: new Matrix4(),
     parentInverse: new Matrix4(),
+    anchorParentMatrix: new Matrix4(),
     anchorPosition: new Vector3(),
     anchorOrientation: new Quaternion(),
     anchorScale: new Vector3(1, 1, 1),
+    anchorPoseApplied: false,
+    lastAnchorParent: null,
     sourceIds: new WeakMap(),
     inputSourceById: new Map(),
     anchorSettings: materializeAnchorSettings(initialSnapshot),
@@ -444,7 +474,10 @@ export function createThreeWristMenuState(
     observedSession: false,
     observedParent: false,
     lastParent: null,
+    lastUpdateFrame: undefined,
     lastUpdateTime: 0,
+    lastSessionVisibility: null,
+    frameInvalidated: true,
     disposed: false,
   }
   return state
@@ -458,6 +491,7 @@ export function syncThreeWristMenu(
   const copiedSnapshot = copyHostSnapshot(nextSnapshot)
   syncWristMenuRuntime(state.runtime, copiedSnapshot)
   state.pendingAnchorSettings = materializeAnchorSettings(copiedSnapshot)
+  state.frameInvalidated = true
 }
 
 /**
@@ -486,6 +520,7 @@ export function replaceThreeWristMenuPresentation(
     }
     state.presentationRevision = 0
     state.geometryBarrierThrough = state.frameSequence
+    state.frameInvalidated = true
   })
   if (resetError !== undefined) throw resetError
 }
@@ -495,17 +530,30 @@ export function updateThreeWristMenu(
   update: ThreeWristMenuUpdate,
 ): void {
   assertActive(state)
+  const nextSession = state.renderer.xr.getSession()
+  const nextReferenceSpace = state.renderer.xr.getReferenceSpace()
+  const parent = state.presentation.group.parent
+  const sessionVisibility = nextSession?.visibilityState ?? null
+  if (
+    !state.frameInvalidated &&
+    state.lastUpdateFrame === update.frame &&
+    state.lastUpdateTime === update.time &&
+    state.session === nextSession &&
+    state.referenceSpace === nextReferenceSpace &&
+    state.lastParent === parent &&
+    state.lastSessionVisibility === sessionVisibility
+  ) {
+    return
+  }
   state.lastUpdateTime = update.time
   state.frameSequence += 1
   if (state.pendingAnchorSettings !== undefined) {
     state.anchorSettings = state.pendingAnchorSettings
     state.pendingAnchorSettings = undefined
   }
-  const nextSession = state.renderer.xr.getSession()
   attachSession(state, nextSession)
   state.inputSourceById.clear()
 
-  const parent = state.presentation.group.parent
   if (state.observedParent && parent !== state.lastParent) interruptLifecycle(state)
   state.lastParent = parent
   state.observedParent = true
@@ -527,7 +575,6 @@ export function updateThreeWristMenu(
   > = []
   const targetObservations: TargetObservation[] = []
   const scrollSources: ScrollSourceSample[] = []
-  const nextReferenceSpace = state.renderer.xr.getReferenceSpace()
   attachReferenceSpace(state, nextReferenceSpace)
   let viewerPosition: Vector3Tuple | null = null
 
@@ -736,6 +783,9 @@ export function updateThreeWristMenu(
       state.provisionalClaims.delete(inputSource)
     }
   }
+  state.lastUpdateFrame = update.frame
+  state.lastSessionVisibility = sessionVisibility
+  state.frameInvalidated = false
 }
 
 export function threeWristMenuBlocksSceneInput(

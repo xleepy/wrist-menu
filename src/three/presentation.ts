@@ -11,6 +11,9 @@ import { Group } from 'three/src/objects/Group.js'
 import type {
   HandTargetObservation,
   PresentationModel,
+  PresentationChoiceOption,
+  PresentationItem,
+  ThemeTokens,
 } from '../core/index.js'
 import {
   createOrientedBoxScratch,
@@ -152,12 +155,141 @@ function interactiveItemIds(model: PresentationModel): Set<string> {
   return ids
 }
 
+function choiceOptionEqual(
+  left: PresentationChoiceOption,
+  right: PresentationChoiceOption,
+): boolean {
+  return (
+    left.id === right.id &&
+    left.groupId === right.groupId &&
+    left.label === right.label &&
+    left.iconKey === right.iconKey &&
+    left.value === right.value &&
+    left.selected === right.selected &&
+    left.disabled === right.disabled &&
+    left.disabledReason === right.disabledReason &&
+    left.interaction === right.interaction
+  )
+}
+
+function presentationItemEqual(
+  left: PresentationItem,
+  right: PresentationItem,
+): boolean {
+  if (left.type !== right.type) return false
+  if (left.type === 'separator' && right.type === 'separator') {
+    return left.id === right.id && left.label === right.label
+  }
+  if (left.type === 'choice-group' && right.type === 'choice-group') {
+    if (
+      left.id !== right.id ||
+      left.label !== right.label ||
+      left.selectedValue !== right.selectedValue ||
+      left.options.length !== right.options.length
+    ) {
+      return false
+    }
+    for (let index = 0; index < left.options.length; index += 1) {
+      if (!choiceOptionEqual(left.options[index]!, right.options[index]!)) {
+        return false
+      }
+    }
+    return true
+  }
+  if (
+    (left.type !== 'action' && left.type !== 'toggle') ||
+    (right.type !== 'action' && right.type !== 'toggle')
+  ) {
+    return false
+  }
+  if (
+    left.id !== right.id ||
+    left.label !== right.label ||
+    left.iconKey !== right.iconKey ||
+    left.disabled !== right.disabled ||
+    left.disabledReason !== right.disabledReason ||
+    left.interaction !== right.interaction
+  ) {
+    return false
+  }
+  return left.type === 'action' ||
+    right.type === 'action'
+    ? left.type === right.type
+    : left.value === right.value && left.selected === right.selected
+}
+
+function presentationItemsEqual(
+  left: readonly PresentationItem[],
+  right: readonly PresentationItem[],
+): boolean {
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) {
+    if (!presentationItemEqual(left[index]!, right[index]!)) return false
+  }
+  return true
+}
+
+function themeEqual(left: ThemeTokens, right: ThemeTokens): boolean {
+  return (
+    left.panelWidthMeters === right.panelWidthMeters &&
+    left.viewportHeightMeters === right.viewportHeightMeters &&
+    left.panelColor === right.panelColor &&
+    left.itemColor === right.itemColor &&
+    left.selectedItemColor === right.selectedItemColor &&
+    left.disabledItemColor === right.disabledItemColor &&
+    left.hoveredItemColor === right.hoveredItemColor &&
+    left.hoveredDisabledItemColor === right.hoveredDisabledItemColor &&
+    left.armedItemColor === right.armedItemColor &&
+    left.separatorColor === right.separatorColor &&
+    left.groupHeaderColor === right.groupHeaderColor
+  )
+}
+
+function anchorPoseEqual(
+  left: PresentationModel['anchorPose'],
+  right: PresentationModel['anchorPose'],
+): boolean {
+  if (left === null || right === null) return left === right
+  return (
+    left.position[0] === right.position[0] &&
+    left.position[1] === right.position[1] &&
+    left.position[2] === right.position[2] &&
+    left.orientation[0] === right.orientation[0] &&
+    left.orientation[1] === right.orientation[1] &&
+    left.orientation[2] === right.orientation[2] &&
+    left.orientation[3] === right.orientation[3]
+  )
+}
+
+function presentationModelEqual(
+  left: PresentationModel,
+  right: PresentationModel,
+): boolean {
+  return (
+    left.visible === right.visible &&
+    left.targetable === right.targetable &&
+    left.opacity === right.opacity &&
+    left.revealPhase === right.revealPhase &&
+    left.revision === right.revision &&
+    left.scrollOffset === right.scrollOffset &&
+    left.totalRows === right.totalRows &&
+    left.visibleSlots === right.visibleSlots &&
+    left.scrollOwned === right.scrollOwned &&
+    left.scrollBarrierActive === right.scrollBarrierActive &&
+    anchorPoseEqual(left.anchorPose, right.anchorPose) &&
+    themeEqual(left.theme, right.theme) &&
+    presentationItemsEqual(left.items, right.items)
+  )
+}
+
 /** Package-owned stable attachment and hit-testing adapter around one factory result. */
 export class ManagedWristMenuPresentation {
   readonly group = new Group()
   private instance: ThreeWristMenuPresentation
   private declarations: readonly ThreeWristMenuHitRegion[] = []
   private readonly orientedBoxScratch = createOrientedBoxScratch()
+  private appliedModel: PresentationModel | undefined
+  private appliedTargetable: boolean | undefined
 
   constructor(
     initialModel: PresentationModel,
@@ -268,9 +400,18 @@ export class ManagedWristMenuPresentation {
   }
 
   applyModel(model: PresentationModel, targetable: boolean): void {
+    if (
+      this.appliedModel !== undefined &&
+      this.appliedTargetable === targetable &&
+      presentationModelEqual(this.appliedModel, model)
+    ) {
+      return
+    }
     this.instance.update(model)
     this.refreshDeclarations(model)
     this.configureTargetability(model, targetable)
+    this.appliedModel = model
+    this.appliedTargetable = targetable
   }
 
   setTargetable(targetable: boolean): void {
@@ -283,6 +424,7 @@ export class ManagedWristMenuPresentation {
       targetable && this.panelMesh.visible
         ? interactiveRaycast
         : decorativeRaycast
+    this.appliedTargetable = targetable
   }
 
   itemIdForIntersection(
@@ -358,6 +500,8 @@ export class ManagedWristMenuPresentation {
       previous.dispose()
     } finally {
       this.configureTargetability(model, false)
+      this.appliedModel = model
+      this.appliedTargetable = false
     }
     if (beforeCommitError !== undefined) throw beforeCommitError
   }
