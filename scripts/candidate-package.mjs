@@ -27,13 +27,11 @@ import {
   sha256,
   verifyImmutableEvidenceBundle,
 } from './release-evidence-lib.mjs'
+import { packStagedCandidatePackage } from './staged-candidate.mjs'
 
 const SHA256 = /^[a-f0-9]{64}$/
 const COMMIT = /^[a-f0-9]{40}$/
-export const PREDECESSOR_EVIDENCE_ID =
-  'automated-release-d5827ff6fbbe7c67'
-export const PREDECESSOR_SOURCE_COMMIT =
-  '6d57b41b3f28a981f2c88e9f7c3cd5dd0a8d7c91'
+const AUTOMATED_EVIDENCE_ID = /^automated-release-[a-f0-9]{16}$/
 
 function requireIdentity(value, pattern, label) {
   if (typeof value !== 'string' || !pattern.test(value)) {
@@ -67,6 +65,11 @@ export function createCandidateEvidenceIndex({
     COMMIT,
     'candidate source commit',
   )
+  const evidenceRecordId = requireIdentity(
+    predecessorRecord?.recordId,
+    AUTOMATED_EVIDENCE_ID,
+    'evidence record id',
+  )
   const evidenceSourceCommit = requireIdentity(
     predecessorRecord?.source?.commit,
     COMMIT,
@@ -83,11 +86,14 @@ export function createCandidateEvidenceIndex({
     'evidence candidate sha256',
   )
 
-  if (predecessorRecord?.result !== 'failed') {
-    throw new TypeError('predecessor Evidence Record must retain its failed result')
+  if (predecessorRecord?.kind !== 'automated') {
+    throw new TypeError('candidate evidence must be an automated Evidence Record')
+  }
+  if (predecessorRecord?.result !== 'passed') {
+    throw new TypeError('candidate evidence must retain a passing result')
   }
   if (!Array.isArray(predecessorRecord.gates)) {
-    throw new TypeError('predecessor Evidence Record must contain Release Gates')
+    throw new TypeError('candidate Evidence Record must contain Release Gates')
   }
   if ((predecessorRecord.validationCombinations?.length ?? 0) !== 0) {
     throw new TypeError('automated evidence must not imply physical validation')
@@ -108,11 +114,11 @@ export function createCandidateEvidenceIndex({
     },
     exampleApp: {
       revision: exampleRevision,
-      relation: 'exact-predecessor-evaluated-revision',
+      relation: 'exact-evaluated-revision',
     },
     evidence: {
-      recordId: predecessorRecord.recordId,
-      result: 'failed',
+      recordId: evidenceRecordId,
+      result: predecessorRecord.result,
       sourceCommit: evidenceSourceCommit,
       candidateSha256: evidenceCandidateSha256,
       appliesToCandidate,
@@ -212,39 +218,6 @@ async function approvedPackageInputManifest(root) {
       const bytes = await readFile(file)
       return { path, bytes: bytes.byteLength, sha256: sha256(bytes) }
     }),
-  )
-}
-
-function rewriteCandidatePackageReadme(markdown, sourceCommit) {
-  return markdown.replace(
-    /\[([^\]]*)\]\(([^)]+)\)/gu,
-    (link, label, untrimmedTarget) => {
-      const target = untrimmedTarget.trim()
-      if (/^(?:https?:|mailto:|#)/u.test(target)) return link
-      const [path, ...fragmentParts] = target.split('#')
-      const safePath = requireSafeRelativePath(
-        decodeURIComponent(path),
-        'candidate package README link',
-      )
-      const fragment =
-        fragmentParts.length === 0 ? '' : `#${fragmentParts.join('#')}`
-      return `[${label}](https://github.com/xleepy/wrist-menu/blob/${sourceCommit}/${encodeURI(safePath)}${fragment})`
-    },
-  )
-}
-
-async function stageCandidatePackage(root, destination, sourceCommit) {
-  await mkdir(destination)
-  for (const path of APPROVED_PACKAGE_FILES) {
-    const source = resolve(root, ...path.split('/'))
-    const target = resolve(destination, ...path.split('/'))
-    await mkdir(dirname(target), { recursive: true })
-    await cp(source, target)
-  }
-  const readmePath = resolve(destination, 'README.md')
-  await writeFile(
-    readmePath,
-    rewriteCandidatePackageReadme(await readFile(readmePath, 'utf8'), sourceCommit),
   )
 }
 
@@ -439,17 +412,26 @@ export async function verifyCandidateBundle(bundleDirectory) {
   assert.deepEqual(candidate.documentation.resources, expectedResources)
   await verifyCandidateBundleMarkdownLinks(bundleDirectory)
 
+  const evidenceRecordId = requireIdentity(
+    candidate.evidence?.recordId,
+    AUTOMATED_EVIDENCE_ID,
+    'candidate evidence record id',
+  )
   const evidenceDirectory = resolve(
     bundleDirectory,
     'documentation',
     'evidence',
-    PREDECESSOR_EVIDENCE_ID,
+    evidenceRecordId,
   )
   const evidenceRecord = await verifyImmutableEvidenceBundle(evidenceDirectory)
-  assert.equal(evidenceRecord.recordId, PREDECESSOR_EVIDENCE_ID)
-  assert.equal(evidenceRecord.source.commit, PREDECESSOR_SOURCE_COMMIT)
-  assert.equal(evidenceRecord.source.exampleCommit, PREDECESSOR_SOURCE_COMMIT)
-  assert.equal(evidenceRecord.result, 'failed')
+  assert.equal(evidenceRecord.recordId, evidenceRecordId)
+  assert.equal(evidenceRecord.kind, 'automated')
+  assert.equal(evidenceRecord.result, 'passed')
+  assert.equal(evidenceRecord.source.commit, candidate.source.commit)
+  assert.equal(evidenceRecord.source.exampleCommit, candidate.source.commit)
+  assert.equal(evidenceRecord.candidate.package, candidate.package.package)
+  assert.equal(evidenceRecord.candidate.version, candidate.package.version)
+  assert.equal(evidenceRecord.candidate.sha256, candidate.package.sha256)
   const evidenceIndex = await readCanonicalJson(
     resolve(bundleDirectory, 'documentation', 'evidence-index.json'),
     'candidate evidence index',
@@ -462,6 +444,8 @@ export async function verifyCandidateBundle(bundleDirectory) {
       predecessorRecord: evidenceRecord,
     }),
   )
+  assert.equal(evidenceIndex.evidence.appliesToCandidate, true)
+  assert.equal(candidate.evidence.appliesToCandidate, true)
   assert.equal(evidenceIndex.compatibilityClaimsPromoted, false)
   const evidenceChecksum = await readFile(
     resolve(evidenceDirectory, 'evidence-record.sha256'),
@@ -508,13 +492,13 @@ export async function buildCandidateBundle({
     evidenceBundleDirectory,
   )
   if (
-    predecessorRecord.recordId !== PREDECESSOR_EVIDENCE_ID ||
-    predecessorRecord.source?.commit !== PREDECESSOR_SOURCE_COMMIT ||
-    predecessorRecord.source?.exampleCommit !== PREDECESSOR_SOURCE_COMMIT ||
-    predecessorRecord.result !== 'failed'
+    predecessorRecord.kind !== 'automated' ||
+    predecessorRecord.result !== 'passed' ||
+    !AUTOMATED_EVIDENCE_ID.test(predecessorRecord.recordId) ||
+    (predecessorRecord.validationCombinations?.length ?? 0) !== 0
   ) {
     throw new Error(
-      'candidate documentation requires the exact failed predecessor Evidence Record',
+      'candidate generation requires an exact passing automated Evidence Record',
     )
   }
 
@@ -524,22 +508,36 @@ export async function buildCandidateBundle({
   const docsSha256 = inputsBefore.versionedDocsSha256
   const sourceCommit = sourceBefore.commit
   const worktreeClean = sourceBefore.clean
+  if (
+    predecessorRecord.source?.commit !== sourceCommit ||
+    predecessorRecord.source?.exampleCommit !== sourceCommit
+  ) {
+    throw new Error(
+      'Evidence Record source revision does not match the candidate source commit',
+    )
+  }
   const stagingRoot = await mkdtemp(join(tmpdir(), 'wrist-menu-candidate-'))
 
   try {
-    const packageInput = resolve(stagingRoot, 'package-input')
-    await stageCandidatePackage(root, packageInput, sourceCommit)
-    const packOutput = execFileSync(
-      process.execPath,
-      [npmCli, 'pack', '--json', '--pack-destination', stagingRoot],
-      { cwd: packageInput, encoding: 'utf8' },
-    )
-    const [archive] = JSON.parse(packOutput)
-    assert.ok(archive, 'npm pack did not report an archive')
-    verifyCandidateFileList(archive.files.map(({ path }) => path))
+    const packed = await packStagedCandidatePackage({
+      root,
+      sourceCommit,
+      outputDirectory: stagingRoot,
+      npmCli,
+    })
+    verifyCandidateFileList(packed.files)
 
-    const sourceArchive = resolve(stagingRoot, archive.filename)
-    const candidateSha256 = sha256(await readFile(sourceArchive))
+    const sourceArchive = packed.candidatePath
+    const candidateSha256 = packed.sha256
+    if (
+      predecessorRecord.candidate?.package !== '@xleepy/wrist-menu' ||
+      predecessorRecord.candidate?.version !== '0.0.0' ||
+      predecessorRecord.candidate?.sha256 !== candidateSha256
+    ) {
+      throw new Error(
+        'Evidence Record candidate digest does not match the exact staged candidate bytes',
+      )
+    }
     const evidenceChecksum = await readFile(
       resolve(evidenceBundleDirectory, 'evidence-record.sha256'),
       'utf8',
@@ -605,7 +603,7 @@ export async function buildCandidateBundle({
     const copiedEvidenceDirectory = resolve(
       documentationDirectory,
       'evidence',
-      PREDECESSOR_EVIDENCE_ID,
+      predecessorRecord.recordId,
     )
     await mkdir(resolve(documentationDirectory, 'evidence'), { recursive: true })
     await cp(evidenceBundleDirectory, copiedEvidenceDirectory, { recursive: true })
@@ -624,6 +622,11 @@ export async function buildCandidateBundle({
       candidateSource: source,
       predecessorRecord,
     })
+    assert.equal(
+      evidenceIndex.evidence.appliesToCandidate,
+      true,
+      'Evidence Record does not apply to the exact staged candidate',
+    )
     await writeFile(
       resolve(documentationDirectory, 'evidence-index.json'),
       canonicalJson(evidenceIndex),
@@ -654,9 +657,9 @@ export async function buildCandidateBundle({
         ],
       },
       evidence: {
-        path: `documentation/evidence/${PREDECESSOR_EVIDENCE_ID}`,
-        recordId: PREDECESSOR_EVIDENCE_ID,
-        result: 'failed',
+        path: `documentation/evidence/${predecessorRecord.recordId}`,
+        recordId: predecessorRecord.recordId,
+        result: predecessorRecord.result,
         appliesToCandidate: evidenceIndex.evidence.appliesToCandidate,
       },
     }
