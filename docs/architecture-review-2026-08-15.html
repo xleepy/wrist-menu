@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — wrist-menu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "neutral",
+        securityLevel: "loose",
+        flowchart: { curve: "basis", htmlLabels: true },
+      });
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        background-image:
+          radial-gradient(circle at 12% 4%, rgba(16, 185, 129, 0.08), transparent 30rem),
+          linear-gradient(#fafaf9, #f5f5f4);
+      }
+      .seam-line { border-style: dashed; }
+      .deep {
+        background: linear-gradient(135deg, #0f172a, #1e293b);
+        box-shadow: 0 18px 50px -30px rgba(15, 23, 42, 0.9);
+      }
+      .leak-arrow { color: #dc2626; }
+      .paper-shadow { box-shadow: 0 18px 50px -38px rgba(15, 23, 42, 0.45); }
+      .mass-interface { background: #e0e7ff; border-color: #818cf8; }
+      .mass-implementation { background: #f8fafc; border-color: #cbd5e1; }
+      .mermaid svg { margin: 0 auto; max-height: 290px; }
+    </style>
+  </head>
+  <body class="text-slate-900 antialiased">
+    <main class="mx-auto max-w-6xl space-y-12 px-5 py-12 sm:px-8 lg:px-10">
+      <header class="border-b border-slate-300 pb-8">
+        <div class="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Architecture review</p>
+            <h1 class="mt-2 font-serif text-4xl tracking-tight text-slate-950 sm:text-5xl">wrist-menu</h1>
+            <p class="mt-2 text-sm text-slate-500">15 August 2026 · recent-hot-spot scan</p>
+          </div>
+          <div class="grid grid-cols-2 gap-x-5 gap-y-2 text-xs text-slate-600 sm:grid-cols-4">
+            <span class="flex items-center gap-2"><i class="h-4 w-6 rounded border border-slate-500 bg-white"></i> module</span>
+            <span class="flex items-center gap-2"><i class="h-0 w-7 border-t-2 border-dashed border-slate-500"></i> seam</span>
+            <span class="flex items-center gap-2"><i class="text-base not-italic text-red-600">→</i> leakage</span>
+            <span class="flex items-center gap-2"><i class="h-4 w-6 rounded bg-slate-900"></i> deep module</span>
+          </div>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-12">
+        <article id="renderer-journeys" class="paper-shadow overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div class="border-b border-slate-200 px-6 py-6 sm:px-8">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Candidate 01</p>
+                <h2 class="mt-1 font-serif text-3xl tracking-tight">One evidence journey, two Renderer Integration adapters</h2>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+                <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-800">in-process</span>
+              </div>
+            </div>
+            <div class="mt-5 rounded-lg bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-slate-200">
+              fixtures/consumers/controller-action-journey.mjs · fixtures/consumers/react-renderer-harness.mjs<br />
+              fixtures/consumers/journey-evidence.mjs · tests/release-evidence-{contract,instrumentation}.test.mjs
+            </div>
+          </div>
+
+          <div class="grid gap-5 p-6 sm:p-8 lg:grid-cols-2">
+            <figure class="rounded-xl border border-red-200 bg-red-50/40 p-4">
+              <figcaption class="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-red-700">Before · rules travel twice</figcaption>
+              <pre class="mermaid">
+flowchart TB
+  R[Journey rules] --> TS[Three semantic flow]
+  R --> TH[Three shield flow]
+  R -. copied .-> RS[React semantic flow]
+  R -. copied .-> RH[React shield flow]
+  TS --> C[Coverage assembly]
+  TH --> C
+  RS --> C
+  RH --> C
+  C -. source checks .-> T[Tests]
+  classDef leak fill:#fff1f2,stroke:#dc2626,stroke-width:2px,color:#7f1d1d;
+  class RS,RH,T leak;
+              </pre>
+            </figure>
+            <figure class="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+              <figcaption class="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-emerald-800">After · one deep journey module</figcaption>
+              <pre class="mermaid">
+flowchart TB
+  J["Deep journey evidence module<br/>cases · events · recovery · coverage"]
+  T[Three adapter] -. seam .-> J
+  R[React adapter] -. seam .-> J
+  J --> L[Four Tested Lanes]
+  L --> E[Evidence Record observations]
+  classDef deep fill:#0f172a,stroke:#0f172a,stroke-width:4px,color:#fff;
+  classDef adapter fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#064e3b;
+  class J deep;
+  class T,R adapter;
+              </pre>
+            </figure>
+          </div>
+
+          <div class="grid gap-8 border-t border-slate-200 px-6 py-6 sm:px-8 lg:grid-cols-[1.4fr_1fr]">
+            <dl class="space-y-4 text-sm leading-6">
+              <div><dt class="font-bold text-slate-950">Problem</dt><dd class="text-slate-600">Semantic and Scene Event Shield journeys are encoded twice; scenario rules, timing, observations, and Renderer Integration mechanics are interleaved across 1,875 lines.</dd></div>
+              <div><dt class="font-bold text-slate-950">Solution</dt><dd class="text-slate-600">Concentrate sequencing, Wrist Menu Events, recovery rules, and coverage assembly in one deep module; keep Three and React as the two adapters at a real seam.</dd></div>
+              <div><dt class="font-bold text-slate-950">Deletion test</dt><dd class="text-slate-600">Delete either matrix and its scenario complexity reappears in the other adapter. The behavior earns one shared module.</dd></div>
+            </dl>
+            <div>
+              <h3 class="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Benefits</h3>
+              <ul class="mt-3 grid gap-2 text-sm text-slate-700">
+                <li>locality: cases change once</li>
+                <li>leverage: one matrix, four lanes</li>
+                <li>two adapters justify seam</li>
+                <li>tests hit one interface</li>
+              </ul>
+            </div>
+          </div>
+          <div class="border-t border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-900 sm:px-8">
+            ADR-0001: instrumentation changes invalidate affected automated Evidence Records.
+          </div>
+        </article>
+
+        <article id="default-presentation" class="paper-shadow overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div class="border-b border-slate-200 px-6 py-6 sm:px-8">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Candidate 02</p>
+                <h2 class="mt-1 font-serif text-3xl tracking-tight">Make the presentation seam the test surface</h2>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+                <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-800">in-process</span>
+              </div>
+            </div>
+            <div class="mt-5 rounded-lg bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-slate-200">
+              src/three/{presentation,wrist-menu-presentation,presentation-atlas,reach-layout}.ts<br />
+              tests/{reach-scroll-three,theming-presentation-three,atlas-presentation-three}.test.mjs
+            </div>
+          </div>
+
+          <div class="grid gap-5 p-6 sm:p-8 lg:grid-cols-2">
+            <figure class="rounded-xl border border-red-200 bg-red-50/40 p-5">
+              <figcaption class="text-xs font-bold uppercase tracking-[0.18em] text-red-700">Before · shadow test interfaces</figcaption>
+              <div class="mt-5 space-y-3">
+                <div class="mass-interface rounded-lg border-2 px-4 py-3 text-center text-xs font-bold uppercase tracking-wider">Factory interface</div>
+                <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                  <div class="mass-interface h-24 rounded-lg border-2 p-3 text-center text-xs font-semibold">Managed presentation<br />interface</div>
+                  <span class="leak-arrow text-2xl">↔</span>
+                  <div class="mass-interface h-24 rounded-lg border-2 p-3 text-center text-xs font-semibold">Default presentation<br />interface</div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center text-[11px] text-slate-600">
+                  <span class="rounded border border-slate-300 bg-white p-2">targetability</span>
+                  <span class="rounded border border-slate-300 bg-white p-2">pool mutators</span>
+                  <span class="rounded border border-slate-300 bg-white p-2">atlas internals</span>
+                </div>
+                <p class="text-center text-xs font-semibold text-red-700">tests cross every seam</p>
+              </div>
+            </figure>
+            <figure class="rounded-xl border border-emerald-200 bg-emerald-50/40 p-5">
+              <figcaption class="text-xs font-bold uppercase tracking-[0.18em] text-emerald-800">After · one interface, deep implementation</figcaption>
+              <div class="mt-5">
+                <div class="mass-interface mx-auto w-3/5 rounded-t-lg border-2 px-4 py-2 text-center text-xs font-bold uppercase tracking-wider">Presentation interface</div>
+                <div class="deep min-h-48 rounded-xl border-4 border-slate-950 p-5 text-white">
+                  <p class="text-center text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">Default Presentation adapter</p>
+                  <div class="mt-5 grid grid-cols-2 gap-3 text-center text-xs text-slate-300">
+                    <span class="rounded border border-slate-600 p-3">targetability</span>
+                    <span class="rounded border border-slate-600 p-3">Reach geometry</span>
+                    <span class="rounded border border-slate-600 p-3">fixed pool</span>
+                    <span class="rounded border border-slate-600 p-3">atlas rebinding</span>
+                  </div>
+                  <p class="mt-5 text-center text-xs text-slate-400">tests observe through the seam</p>
+                </div>
+              </div>
+            </figure>
+          </div>
+
+          <div class="grid gap-8 border-t border-slate-200 px-6 py-6 sm:px-8 lg:grid-cols-[1.4fr_1fr]">
+            <dl class="space-y-4 text-sm leading-6">
+              <div><dt class="font-bold text-slate-950">Problem</dt><dd class="text-slate-600">Lower-level mutators exist mainly for tests, while targetability lives in both the managed and default implementations. Tests can pass past the seam while production behavior disagrees.</dd></div>
+              <div><dt class="font-bold text-slate-950">Solution</dt><dd class="text-slate-600">Keep pooling, atlas rebinding, scrolling, and targetability inside the default Presentation adapter; test it through the existing presentation seam used by custom adapters.</dd></div>
+              <div><dt class="font-bold text-slate-950">Deletion test</dt><dd class="text-slate-600">Delete the lower-level mutators and only tests break; the production behavior remains behind the existing factory. Those surfaces are shallow.</dd></div>
+            </dl>
+            <div>
+              <h3 class="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Benefits</h3>
+              <ul class="mt-3 grid gap-2 text-sm text-slate-700">
+                <li>locality: hit policy lives once</li>
+                <li>leverage: one observable interface</li>
+                <li>pool changes stay internal</li>
+                <li>tests survive implementation changes</li>
+              </ul>
+            </div>
+          </div>
+          <div class="border-t border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-900 sm:px-8">
+            ADR-0001: Presentation and instrumentation changes refresh Evidence Freshness.
+          </div>
+        </article>
+
+        <article id="release-gates" class="paper-shadow overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div class="border-b border-slate-200 px-6 py-6 sm:px-8">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Candidate 03</p>
+                <h2 class="mt-1 font-serif text-3xl tracking-tight">Concentrate Release Gate evaluation</h2>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+                <span class="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-800">local-substitutable</span>
+              </div>
+            </div>
+            <div class="mt-5 rounded-lg bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-slate-200">
+              scripts/{generate-release-evidence,release-evidence-lib}.mjs · fixtures/consumers/{journey-evidence,performance-baseline}.mjs<br />
+              compatibility.json · evidence/protocols/automated-v1.json · tests/release-evidence-*.test.mjs
+            </div>
+          </div>
+
+          <div class="grid gap-5 p-6 sm:p-8 lg:grid-cols-2">
+            <figure class="rounded-xl border border-red-200 bg-red-50/40 p-4">
+              <figcaption class="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-red-700">Before · policy leaks across orchestration</figcaption>
+              <pre class="mermaid">
+flowchart TB
+  C[Command runner] --> F[Report filenames]
+  F --> L[Tested Lane map]
+  L --> S[Shield combinations]
+  S --> P[Performance prerequisites]
+  P --> G[Release Gate array]
+  G --> R[Evidence Record]
+  R --> X[Resolved Compatibility Claim]
+  T[Tests] -. reach into .-> L
+  T -. reach into .-> P
+  T -. reach into .-> R
+  classDef leak fill:#fff1f2,stroke:#dc2626,stroke-width:2px,color:#7f1d1d;
+  class L,S,P,G,R,T leak;
+              </pre>
+            </figure>
+            <figure class="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+              <figcaption class="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-emerald-800">After · campaign policy has locality</figcaption>
+              <pre class="mermaid">
+flowchart TB
+  A[Local command adapters] -. seam .-> E["Deep Release Gate module<br/>reports → lanes → gates → records"]
+  E --> C[Compatibility Claim]
+  E --> R[Immutable Evidence Record]
+  F[Filesystem adapter] -. seam .-> P[Publication module]
+  R --> P
+  classDef deep fill:#0f172a,stroke:#0f172a,stroke-width:4px,color:#fff;
+  classDef adapter fill:#f5f3ff,stroke:#7c3aed,stroke-width:2px,color:#4c1d95;
+  class E deep;
+  class A,F adapter;
+              </pre>
+            </figure>
+          </div>
+
+          <div class="grid gap-8 border-t border-slate-200 px-6 py-6 sm:px-8 lg:grid-cols-[1.4fr_1fr]">
+            <dl class="space-y-4 text-sm leading-6">
+              <div><dt class="font-bold text-slate-950">Problem</dt><dd class="text-slate-600">One campaign mixes subprocess work, report names, Tested Lane mapping, Release Gate policy, record construction, and compatibility resolution in a 760-line implementation.</dd></div>
+              <div><dt class="font-bold text-slate-950">Solution</dt><dd class="text-slate-600">Concentrate report interpretation, fail-closed gate assembly, both record paths, and Compatibility Claim resolution in one deep module; keep process and filesystem work in local adapters.</dd></div>
+              <div><dt class="font-bold text-slate-950">Deletion test</dt><dd class="text-slate-600">Delete the small gate and lane helpers and their rules spread back into orchestration and tests. The invariant-bearing policy remains and needs one module.</dd></div>
+            </dl>
+            <div>
+              <h3 class="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Benefits</h3>
+              <ul class="mt-3 grid gap-2 text-sm text-slate-700">
+                <li>locality: policy and proof align</li>
+                <li>leverage: lanes change once</li>
+                <li>fail-closed paths share invariants</li>
+                <li>tests hit campaign interface</li>
+              </ul>
+            </div>
+          </div>
+          <div class="border-t border-emerald-200 bg-emerald-50 px-6 py-3 text-sm text-emerald-900 sm:px-8">
+            Supports ADR-0001: exact Tested Lanes, fail-closed Release Gates, and immutable Evidence Records remain load-bearing.
+          </div>
+        </article>
+
+        <article id="instance-state" class="paper-shadow overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div class="border-b border-slate-200 px-6 py-6 sm:px-8">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Candidate 04</p>
+                <h2 class="mt-1 font-serif text-3xl tracking-tight">Deepen Wrist Menu Instance state</h2>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">Worth exploring</span>
+                <span class="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-800">local-substitutable</span>
+              </div>
+            </div>
+            <div class="mt-5 rounded-lg bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-slate-200">
+              src/core/{index,runtime-internals}.ts · src/three/index.ts · src/react/index.ts<br />
+              fixtures/consumers/controller-action-journey.mjs · fixtures/consumers/three/automated-gates.mjs · docs/0.0.0/migration.md
+            </div>
+          </div>
+
+          <div class="grid gap-5 p-6 sm:p-8 lg:grid-cols-2">
+            <figure class="rounded-xl border border-red-200 bg-red-50/40 p-5">
+              <figcaption class="text-xs font-bold uppercase tracking-[0.18em] text-red-700">Before · state shape is caller knowledge</figcaption>
+              <div class="mt-5 grid grid-cols-[0.9fr_auto_1.4fr] items-center gap-3">
+                <div class="space-y-2 text-center text-xs font-semibold">
+                  <div class="rounded border border-slate-400 bg-white p-3">React</div>
+                  <div class="rounded border border-slate-400 bg-white p-3">Tests</div>
+                  <div class="rounded border border-slate-400 bg-white p-3">Fixtures</div>
+                </div>
+                <div class="leak-arrow space-y-8 text-2xl"><div>→</div><div>→</div><div>→</div></div>
+                <div class="rounded-xl border-2 border-red-400 bg-white p-3">
+                  <p class="text-center text-xs font-bold uppercase tracking-wider text-red-700">Wide state interface</p>
+                  <div class="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+                    <span class="rounded bg-red-50 p-2">runtime state</span>
+                    <span class="rounded bg-red-50 p-2">scratch math</span>
+                    <span class="rounded bg-red-50 p-2">input maps</span>
+                    <span class="rounded bg-red-50 p-2">frame caches</span>
+                    <span class="rounded bg-red-50 p-2">listener identity</span>
+                    <span class="rounded bg-red-50 p-2">presentation state</span>
+                  </div>
+                </div>
+              </div>
+            </figure>
+            <figure class="rounded-xl border border-emerald-200 bg-emerald-50/40 p-5">
+              <figcaption class="text-xs font-bold uppercase tracking-[0.18em] text-emerald-800">After · functional style, deeper module</figcaption>
+              <div class="mt-5">
+                <div class="mass-interface mx-auto w-2/3 rounded-t-lg border-2 px-4 py-2 text-center text-xs font-bold uppercase tracking-wider">Host-relevant interface</div>
+                <div class="deep min-h-48 rounded-xl border-4 border-slate-950 p-5 text-white">
+                  <p class="text-center text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">Wrist Menu Instance module</p>
+                  <div class="mt-5 grid grid-cols-2 gap-3 text-center text-xs text-slate-300">
+                    <span class="rounded border border-slate-600 p-3">state + functions</span>
+                    <span class="rounded border border-slate-600 p-3">frame caches</span>
+                    <span class="rounded border border-slate-600 p-3">Interaction State</span>
+                    <span class="rounded border border-slate-600 p-3">listener mechanics</span>
+                  </div>
+                </div>
+              </div>
+            </figure>
+          </div>
+
+          <div class="grid gap-8 border-t border-slate-200 px-6 py-6 sm:px-8 lg:grid-cols-[1.4fr_1fr]">
+            <dl class="space-y-4 text-sm leading-6">
+              <div><dt class="font-bold text-slate-950">Problem</dt><dd class="text-slate-600">Core and Three expose mutable implementation records; recent frame caching widened the interface, and tests cross it into reveal, selection, scroll, scratch, and lifecycle details.</dd></div>
+              <div><dt class="font-bold text-slate-950">Solution</dt><dd class="text-slate-600">Preserve state plus standalone functions, but keep renderer and core mechanics inside the Wrist Menu Instance module; expose only Host Application-relevant facts at the seam.</dd></div>
+              <div><dt class="font-bold text-slate-950">Deletion test</dt><dd class="text-slate-600">Remove structural exposure and runtime behavior remains in existing operations while most caller knowledge disappears. The structural interface is shallow.</dd></div>
+            </dl>
+            <div>
+              <h3 class="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Benefits</h3>
+              <ul class="mt-3 grid gap-2 text-sm text-slate-700">
+                <li>locality: caches stay internal</li>
+                <li>leverage: operations hide mechanics</li>
+                <li>tests observe domain outcomes</li>
+                <li>React knows less state</li>
+              </ul>
+            </div>
+          </div>
+          <div class="border-t border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-900 sm:px-8">
+            Decision constraint: preserve PR #36’s state-plus-functions style and stable attachment and handler identities.
+          </div>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="deep rounded-2xl border-4 border-slate-950 px-7 py-8 text-white sm:px-10">
+        <p class="text-xs font-bold uppercase tracking-[0.2em] text-emerald-300">Top recommendation</p>
+        <a href="#renderer-journeys" class="mt-2 block font-serif text-3xl tracking-tight underline decoration-emerald-400 decoration-2 underline-offset-8">One evidence journey, two Renderer Integration adapters</a>
+        <p class="mt-5 max-w-3xl text-sm leading-6 text-slate-300">It is the clearest real seam: two adapters already exist, the duplicated implementation is the largest locality failure, and one deep module gives four Tested Lanes immediate leverage.</p>
+      </section>
+    </main>
+  </body>
+</html>
