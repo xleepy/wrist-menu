@@ -22,6 +22,7 @@ export type PresentationModel = Readonly<{
   scrollOffset: number
   totalRows: number
   visibleSlots: number
+  scrollOwned: boolean
   scrollBarrierActive: boolean
   /** Fully resolved visual tokens; never changes Menu Definition semantics. */
   theme: ThemeTokens
@@ -38,6 +39,7 @@ type CreatePresentationModelInput = Readonly<{
   interactionFor: (itemId: string) => MenuInteraction
   scrollOffset: number
   visibleSlots: number
+  scrollOwned: boolean
   scrollBarrierActive: boolean
 }>
 
@@ -69,6 +71,7 @@ export function createPresentationModel(
     scrollOffset: input.scrollOffset,
     totalRows: countMenuRows(input.snapshot.menuDefinition),
     visibleSlots: input.visibleSlots,
+    scrollOwned: input.scrollOwned,
     scrollBarrierActive: input.scrollBarrierActive,
     theme: resolveThemeTokens(input.snapshot.theme),
   })
@@ -89,6 +92,7 @@ export function createInitialPresentationModel(
     interactionFor: () => 'idle',
     scrollOffset: 0,
     visibleSlots: VISIBLE_SLOTS,
+    scrollOwned: false,
     scrollBarrierActive: false,
   })
 }

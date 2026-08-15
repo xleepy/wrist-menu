@@ -48,6 +48,7 @@ function presentationModel(overrides = {}) {
     scrollOffset: 0,
     totalRows: 1,
     visibleSlots: VISIBLE_SLOTS,
+    scrollOwned: false,
     scrollBarrierActive: false,
     theme: defaultThemeTokens,
     ...overrides,
@@ -78,7 +79,11 @@ test('resolved theme tokens restyle and resize the default Command slab', () => 
   const row = presentation.group.children.find(
     ({ name }) => name === 'wrist-menu-action-visual:spawn',
   )
-  assert.equal(row.material.color.getHex(), 0xabcdef)
+  assert.equal(row.material.color.getHex(), 0xffffff)
+  assert.equal(
+    row.material.map.userData.wristMenuAtlas.roles.hovered.background,
+    0xabcdef,
+  )
 
   presentation.dispose()
 })
@@ -219,6 +224,7 @@ test('a custom Menu Viewport drives the same continuous scroll state', () => {
   const fixture = createWristXrFixture({ menuKind: 'controller' })
   fixture.setWristMatrix(new Matrix4().makeRotationY(-Math.PI / 2))
   const observedOffsets = []
+  const observedOwnership = []
   const menu = createThreeWristMenuState({
     renderer: fixture.renderer,
     snapshot: reachScrollSnapshot,
@@ -230,6 +236,7 @@ test('a custom Menu Viewport drives the same continuous scroll state', () => {
       const panel = new Mesh(geometry, material)
       root.add(panel)
       observedOffsets.push(initialModel.scrollOffset)
+      observedOwnership.push(initialModel.scrollOwned)
       return {
         root,
         hitRegions: [],
@@ -237,6 +244,7 @@ test('a custom Menu Viewport drives the same continuous scroll state', () => {
         update(model) {
           root.visible = model.visible
           observedOffsets.push(model.scrollOffset)
+          observedOwnership.push(model.scrollOwned)
         },
         dispose() {
           geometry.dispose()
@@ -256,6 +264,7 @@ test('a custom Menu Viewport drives the same continuous scroll state', () => {
   updateThreeWristMenu(menu, { time: 40, frame: fixture.frame })
 
   assert.equal(observedOffsets.at(-1), 1)
+  assert.equal(observedOwnership.at(-1), true)
   disposeThreeWristMenu(menu)
 })
 
@@ -332,12 +341,16 @@ for (const presentationKind of ['default', 'custom']) {
       onEvent: () => undefined,
       presentationFactory: currentFactory,
     })
+    const currentGapY = presentationKind === 'default' ? 0.01775 : 0
+    fixture.setTargetRayMatrix(
+      new Matrix4().makeTranslation(0, currentGapY, 1),
+    )
 
     updateThreeWristMenu(menu, { time: 10, frame: fixture.frame })
     updateThreeWristMenu(menu, { time: 20, frame: fixture.frame })
     updateThreeWristMenu(menu, { time: 30, frame: fixture.frame })
     fixture.setTargetRayMatrix(
-      new Matrix4().makeTranslation(0, -ROW_SPACING, 1),
+      new Matrix4().makeTranslation(0, currentGapY - ROW_SPACING, 1),
     )
     updateThreeWristMenu(menu, { time: 40, frame: fixture.frame })
     assert.notEqual(menu.runtime.scrollState.ownerSourceId, null)
@@ -356,14 +369,26 @@ for (const presentationKind of ['default', 'custom']) {
       assert.equal(replacement.factoryModels[0].scrollOffset, 0)
     }
 
+    const replacementGapY = presentationKind === 'default' ? 0 : 0.01775
+    fixture.setTargetRayMatrix(
+      new Matrix4().makeTranslation(0, replacementGapY, 1),
+    )
     updateThreeWristMenu(menu, { time: 50, frame: fixture.frame })
     updateThreeWristMenu(menu, { time: 60, frame: fixture.frame })
     fixture.setTargetRayMatrix(
-      new Matrix4().makeTranslation(0, -2 * ROW_SPACING, 1),
+      new Matrix4().makeTranslation(
+        0,
+        replacementGapY - ROW_SPACING,
+        1,
+      ),
     )
     updateThreeWristMenu(menu, { time: 70, frame: fixture.frame })
     fixture.setTargetRayMatrix(
-      new Matrix4().makeTranslation(0, -3 * ROW_SPACING, 1),
+      new Matrix4().makeTranslation(
+        0,
+        replacementGapY - 2 * ROW_SPACING,
+        1,
+      ),
     )
     updateThreeWristMenu(menu, { time: 80, frame: fixture.frame })
     assert.ok(Math.abs(menu.runtime.scrollState.offset - 1) < 1e-9)

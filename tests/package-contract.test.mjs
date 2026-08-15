@@ -30,7 +30,13 @@ test('publishes only the approved ESM entry points', () => {
   assert.equal(manifest.type, 'module')
   assert.equal(manifest.sideEffects, false)
   assert.deepEqual(manifest.exports, expectedExports)
-  assert.deepEqual(manifest.files, ['dist', 'README.md', 'LICENSE', 'compatibility.json'])
+  assert.deepEqual(manifest.files, [
+    'dist',
+    'README.md',
+    'LICENSE',
+    'LICENSE-INTER',
+    'compatibility.json',
+  ])
   assert.equal(manifest.main, undefined)
 })
 

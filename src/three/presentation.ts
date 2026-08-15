@@ -57,9 +57,8 @@ export type ThreeWristMenuPresentationFactory = (
 /** The self-contained default Command slab factory. */
 export const defaultThreeWristMenuPresentationFactory: ThreeWristMenuPresentationFactory =
   (initialModel) => {
-    const presentation = new WristMenuPresentation()
+    const presentation = new WristMenuPresentation(initialModel)
     presentation.group.name = 'wrist-menu-default-presentation-root'
-    presentation.setModel(initialModel, false)
     return {
       root: presentation.group,
       get hitRegions() {
@@ -71,7 +70,7 @@ export const defaultThreeWristMenuPresentationFactory: ThreeWristMenuPresentatio
         })
       },
       menuViewport: {
-        object: presentation.panelMesh as Mesh<BoxGeometry>,
+        object: presentation.viewportMesh as Mesh<BoxGeometry>,
       },
       update(model) {
         presentation.setModel(model, false)

@@ -446,6 +446,7 @@ export function stepWristMenuRuntime(
           : 'idle',
     scrollOffset: scrollResult.offset,
     visibleSlots: scrollResult.visibleSlots,
+    scrollOwned: scrollResult.scrollOwned,
     scrollBarrierActive: scrollResult.barrierActive,
   })
 }

@@ -3,8 +3,8 @@
   "version": 1,
   "instrumentation": "node-three-scene-counters-v2",
   "construction": {
-    "geometries": 27,
-    "materials": 27,
+    "geometries": 26,
+    "materials": 26,
     "textures": 1,
     "programSignatures": 1,
     "poolSlots": 12,
@@ -18,14 +18,14 @@
   },
   "variants": {
     "vanilla": {
-      "hidden": { "drawCallsMax": 0, "trianglesMax": 0, "linesMax": 0, "geometriesMax": 27, "texturesMax": 0, "programsMax": 0, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 },
-      "visibleIdle": { "drawCallsMax": 14, "trianglesMax": 168, "linesMax": 0, "geometriesMax": 27, "texturesMax": 0, "programsMax": 1, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 },
-      "activeScroll": { "drawCallsMax": 14, "trianglesMax": 168, "linesMax": 0, "geometriesMax": 27, "texturesMax": 0, "programsMax": 1, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 }
+      "hidden": { "drawCallsMax": 0, "trianglesMax": 0, "linesMax": 0, "geometriesMax": 26, "texturesMax": 0, "programsMax": 0, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 },
+      "visibleIdle": { "drawCallsMax": 14, "trianglesMax": 168, "linesMax": 0, "geometriesMax": 26, "texturesMax": 0, "programsMax": 1, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 },
+      "activeScroll": { "drawCallsMax": 14, "trianglesMax": 168, "linesMax": 0, "geometriesMax": 26, "texturesMax": 0, "programsMax": 1, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 }
     },
     "react": {
-      "hidden": { "drawCallsMax": 0, "trianglesMax": 0, "linesMax": 0, "geometriesMax": 27, "texturesMax": 0, "programsMax": 0, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 },
-      "visibleIdle": { "drawCallsMax": 14, "trianglesMax": 168, "linesMax": 0, "geometriesMax": 27, "texturesMax": 0, "programsMax": 1, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 },
-      "activeScroll": { "drawCallsMax": 14, "trianglesMax": 168, "linesMax": 0, "geometriesMax": 27, "texturesMax": 0, "programsMax": 1, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 }
+      "hidden": { "drawCallsMax": 0, "trianglesMax": 0, "linesMax": 0, "geometriesMax": 26, "texturesMax": 0, "programsMax": 0, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 },
+      "visibleIdle": { "drawCallsMax": 14, "trianglesMax": 168, "linesMax": 0, "geometriesMax": 26, "texturesMax": 0, "programsMax": 1, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 },
+      "activeScroll": { "drawCallsMax": 14, "trianglesMax": 168, "linesMax": 0, "geometriesMax": 26, "texturesMax": 0, "programsMax": 1, "atlasUploadsMax": 0, "packageUpdateP95MsMax": 1 }
     }
   }
 }

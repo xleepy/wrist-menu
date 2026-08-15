@@ -2,6 +2,9 @@ export const hostControlledSnapshot = Object.freeze({
   activationMode: 'forced-open',
   wrist: 'left',
   comfort: Object.freeze({ transitionMs: 0 }),
+  // This semantic journey keeps every row simultaneously targetable; Reach
+  // default geometry and scrolling are covered by the presentation fixtures.
+  theme: Object.freeze({ viewportHeightMeters: 0.27 }),
   controllerWrist: Object.freeze({
     offsets: Object.freeze({
       left: Object.freeze({

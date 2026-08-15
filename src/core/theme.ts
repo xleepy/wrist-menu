@@ -6,7 +6,7 @@
 export type ThemeTokens = Readonly<{
   /** Physical width of the Command slab panel. */
   panelWidthMeters: number
-  /** Physical height of the Menu Viewport; the default slab matches its panel. */
+  /** Physical height of the Menu Viewport. */
   viewportHeightMeters: number
   panelColor: number
   itemColor: number
@@ -23,7 +23,7 @@ export type ThemeOverrides = Readonly<Partial<ThemeTokens>>
 
 export const defaultThemeTokens: ThemeTokens = Object.freeze({
   panelWidthMeters: 0.192,
-  viewportHeightMeters: 0.27,
+  viewportHeightMeters: 0.108,
   panelColor: 0x081415,
   itemColor: 0x102020,
   selectedItemColor: 0x245345,

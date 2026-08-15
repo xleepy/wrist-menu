@@ -4,7 +4,7 @@ import test from 'node:test'
 import { WristMenuPresentation } from '../dist/three/wrist-menu-presentation.js'
 import { VISIBLE_SLOTS } from '../dist/core/scroll-state.js'
 
-const POOL_SIZE = VISIBLE_SLOTS + 1
+const POOL_SIZE = VISIBLE_SLOTS
 
 function rowAction(index) {
   return { type: 'action', id: `row-${index}`, label: `Row ${index}`, disabled: false }
@@ -14,16 +14,20 @@ function manyActions(count) {
   return Array.from({ length: count }, (_, index) => rowAction(index))
 }
 
-function visibleRowNames(presentation) {
+function boundRowNames(presentation) {
   return presentation.group.children
     .filter(
       (child) =>
-        child.name.startsWith('wrist-menu-action-visual:') && child.visible,
+        child.name.startsWith('wrist-menu-action-visual:'),
+    )
+    .sort(
+      (left, right) =>
+        left.userData.wristMenuPoolSlot - right.userData.wristMenuPoolSlot,
     )
     .map((child) => child.name)
 }
 
-test('the WristMenuPresentation pool allocates exactly VISIBLE_SLOTS + 1 hit regions', () => {
+test('the WristMenuPresentation pool allocates exactly VISIBLE_SLOTS hit regions', () => {
   const presentation = new WristMenuPresentation()
   assert.equal(presentation.hitRegions.length, POOL_SIZE)
   assert.equal(presentation.panelMesh.name, 'wrist-menu-command-slab')
@@ -33,18 +37,33 @@ test('the WristMenuPresentation pool allocates exactly VISIBLE_SLOTS + 1 hit reg
 test('renderItems binds at most POOL_SIZE rows from the presentation model', () => {
   const presentation = new WristMenuPresentation()
   presentation.renderItems(manyActions(POOL_SIZE + 5))
-  const names = visibleRowNames(presentation)
-  assert.equal(names.length, POOL_SIZE)
+  const names = boundRowNames(presentation)
+  assert.equal(names.length, 6)
   assert.ok(names[0].endsWith(':row-0'))
+  assert.ok(names.at(-1).endsWith(':row-5'))
   presentation.dispose()
 })
 
-test('setScrollOffset rebinds the pool to the new scroll window', () => {
+test('setScrollOffset keeps one bound entry of overscan on both available sides', () => {
   const presentation = new WristMenuPresentation()
   presentation.renderItems(manyActions(POOL_SIZE + 5))
   presentation.setScrollOffset(2)
-  const names = visibleRowNames(presentation)
-  assert.ok(names[0].endsWith(':row-2'))
+  const names = boundRowNames(presentation)
+  assert.equal(names.length, 7)
+  assert.ok(names[0].endsWith(':row-1'))
+  assert.ok(names[1].endsWith(':row-2'))
+  assert.ok(names.at(-1).endsWith(':row-7'))
+  presentation.dispose()
+})
+
+test('the top boundary spends the unavailable preceding slot on following overscan', () => {
+  const presentation = new WristMenuPresentation()
+  presentation.renderItems(manyActions(POOL_SIZE + 5))
+
+  const names = boundRowNames(presentation)
+  assert.equal(names.length, 6)
+  assert.ok(names[0].endsWith(':row-0'))
+  assert.ok(names.at(-1).endsWith(':row-5'))
   presentation.dispose()
 })
 
@@ -90,8 +109,8 @@ test('only fully-on-panel interactive rows expose visible hit regions', () => {
 
   const visibleHits = presentation.hitRegions.filter((hit) => hit.visible)
   assert.ok(
-    visibleHits.length > 0 && visibleHits.length < POOL_SIZE,
-    `expected a subset of hit regions to be visible, got ${visibleHits.length}`,
+    visibleHits.length > 0 && visibleHits.length <= POOL_SIZE,
+    `expected only pooled hit regions to be visible, got ${visibleHits.length}`,
   )
   for (const hit of visibleHits) {
     assert.equal(typeof hit.userData['wristMenuItemId'], 'string')
@@ -133,6 +152,7 @@ test('setModel updates the bound interactive rows with the latest interaction st
       scrollOffset: 0,
       totalRows: 2,
       visibleSlots: VISIBLE_SLOTS,
+      scrollOwned: false,
       scrollBarrierActive: false,
     },
     true,
@@ -143,7 +163,10 @@ test('setModel updates the bound interactive rows with the latest interaction st
       child.name === 'wrist-menu-action-visual:spawn' && child.visible,
   )
   assert.ok(hoveredRow !== undefined)
-  assert.equal(hoveredRow.material.color.getHex(), 0x1d4438)
+  assert.equal(hoveredRow.material.color.getHex(), 0xffffff)
+  assert.deepEqual(hoveredRow.userData.wristMenuAtlasStateCues, [
+    'hovered',
+  ])
 
   const toggleRow = presentation.group.children.find(
     (child) =>

@@ -133,6 +133,7 @@ test('the React custom Menu Viewport drives the shared continuous scroll state',
   advance(40, true, state, fixture.frame)
 
   assert.equal(log.updateModels.at(-1).scrollOffset, 1)
+  assert.equal(log.updateModels.at(-1).scrollOwned, true)
   await act(async () => root.unmount())
   assert.equal(log.disposals, 1)
 })

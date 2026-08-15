@@ -20,7 +20,7 @@ const snapshot = {
     panelColor: 0x081415,
     hoveredItemColor: 0x1d4438,
     panelWidthMeters: 0.192,
-    viewportHeightMeters: 0.27,
+    viewportHeightMeters: 0.108,
   },
   menuDefinition: [
     { type: 'action', id: 'reset', label: 'Reset workshop', iconKey: 'reset' },

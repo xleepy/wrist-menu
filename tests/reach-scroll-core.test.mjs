@@ -242,6 +242,7 @@ test('the runtime exposes scrollOffset and barrier flags on the Presentation Mod
   assert.equal(model.visibleSlots, VISIBLE_SLOTS)
   assert.equal(model.totalRows, reachScrollSnapshot.menuDefinition.length)
   assert.equal(model.scrollBarrierActive, false)
+  assert.equal(model.scrollOwned, false)
 
   const scrolled = stepWristMenuRuntime(
     runtime,
@@ -249,6 +250,7 @@ test('the runtime exposes scrollOffset and barrier flags on the Presentation Mod
     [],
   )
   assert.equal(scrolled.scrollOffset, 1)
+  assert.equal(scrolled.scrollOwned, true)
 })
 
 test('runtime scroll ownership releases and rearms across the barrier without dropouts', () => {

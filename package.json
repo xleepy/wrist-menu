@@ -17,6 +17,7 @@
     "dist",
     "README.md",
     "LICENSE",
+    "LICENSE-INTER",
     "compatibility.json"
   ],
   "exports": {
@@ -64,7 +65,7 @@
     "build": "tsc -p tsconfig.build.json",
     "build:declarations": "tsc -p tsconfig.declarations.json",
     "check:core-types": "tsc -p tsconfig.core.json",
-    "test": "node --test tests/package-contract.test.mjs tests/entrypoints.test.mjs tests/react-ssr.test.mjs tests/controller-action-core.test.mjs tests/controller-action-three.test.mjs tests/controller-action-react.test.mjs tests/host-controlled-core.test.mjs tests/host-controlled-three.test.mjs tests/host-controlled-react.test.mjs tests/wrist-reveal-core.test.mjs tests/wrist-reveal-three.test.mjs tests/wrist-reveal-react.test.mjs tests/cross-input-selection-core.test.mjs tests/cross-input-selection-three.test.mjs tests/cross-input-selection-react.test.mjs tests/reach-scroll-core.test.mjs tests/reach-scroll-three.test.mjs tests/reach-scroll-react.test.mjs tests/theming-presentation-core.test.mjs tests/theming-presentation-three.test.mjs tests/workshop-model.test.mjs tests/primitive-workshop-contract.test.mjs tests/primitive-workshop-lifecycle.test.mjs tests/release-evidence-contract.test.mjs tests/release-evidence-bundle.test.mjs tests/release-evidence-instrumentation.test.mjs tests/deterministic-release-traces.test.mjs tests/clean-artifacts.test.mjs tests/candidate-contract.test.mjs tests/candidate-archive.test.mjs",
+    "test": "node --test tests/package-contract.test.mjs tests/entrypoints.test.mjs tests/react-ssr.test.mjs tests/controller-action-core.test.mjs tests/controller-action-three.test.mjs tests/controller-action-react.test.mjs tests/host-controlled-core.test.mjs tests/host-controlled-three.test.mjs tests/host-controlled-react.test.mjs tests/wrist-reveal-core.test.mjs tests/wrist-reveal-three.test.mjs tests/wrist-reveal-react.test.mjs tests/cross-input-selection-core.test.mjs tests/cross-input-selection-three.test.mjs tests/cross-input-selection-react.test.mjs tests/reach-scroll-core.test.mjs tests/reach-scroll-three.test.mjs tests/reach-scroll-react.test.mjs tests/theming-presentation-core.test.mjs tests/theming-presentation-three.test.mjs tests/atlas-presentation-three.test.mjs tests/workshop-model.test.mjs tests/primitive-workshop-contract.test.mjs tests/primitive-workshop-lifecycle.test.mjs tests/release-evidence-contract.test.mjs tests/release-evidence-bundle.test.mjs tests/release-evidence-instrumentation.test.mjs tests/deterministic-release-traces.test.mjs tests/clean-artifacts.test.mjs tests/candidate-contract.test.mjs tests/candidate-archive.test.mjs",
     "pack:verify": "node scripts/pack-and-verify.mjs",
     "test:consumers": "node scripts/test-consumers.mjs",
     "test:examples": "node scripts/test-examples.mjs",
