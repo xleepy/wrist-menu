@@ -284,7 +284,7 @@ test('versioned documentation covers the candidate contract and exact breaking m
   assert.match(release, /documentation\.revision/)
   assert.match(release, /working-tree/)
   assert.match(release, /same staging function/i)
-  assert.match(release, /exact staged archive/i)
+  assert.match(release, /exact publication-staged npm archive/i)
   assert.match(release, /appliesToCandidate: true/)
   assert.match(release, /restore the local override/i)
 })
