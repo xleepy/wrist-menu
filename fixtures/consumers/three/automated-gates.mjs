@@ -31,7 +31,6 @@ import {
   sampleThreeAllocationOrdinals,
 } from '../runtime-evidence.mjs'
 import {
-  exactAllocationGate,
   EXACT_ALLOCATION_MARKER_SHA256_ENV,
   prepareExactPackageAllocationEvidence,
 } from '../exact-allocation-evidence.mjs'
@@ -353,8 +352,9 @@ for (let index = 0; index < 10_000; index += 1) {
 const exactAllocationReport = exactAllocationEvidence.finish()
 const allocationEnd = resourceCounts(menu.presentation.group)
 const allocationOrdinalsEnd = sampleThreeAllocationOrdinals(instrumentedThree)
-const allocationGate = {
-  ...exactAllocationGate(exactAllocationReport, 10_000),
+const allocationEvidence = {
+  ...exactAllocationReport,
+  frames: 10_000,
   warmupFrames: allocationWarmupFrames,
   packageOwnedResourceDelta: Object.fromEntries(
     Object.keys(allocationStart).map((key) => [key, allocationEnd[key] - allocationStart[key]]),
@@ -471,7 +471,7 @@ const report = {
   instrumentation: 'node-three-scene-counters-v2',
   candidate: '@xleepy/wrist-menu/three',
   gates: {
-    allocation: allocationGate,
+    allocation: allocationEvidence,
     'identical-frame-mutation': identicalMutationGate,
     construction: constructionGate,
     'resource-growth': resourceGrowthGate,

@@ -149,40 +149,6 @@ function unavailable(reason) {
   }
 }
 
-export function exactAllocationGate(report, frames) {
-  const result = {
-    instrumentation: report.instrumentation,
-    status:
-      report.status === 'available' &&
-      report.observedPackageObjectAllocations === 0
-        ? 'passed'
-        : 'failed',
-    frames,
-    ...(report.status === 'available'
-      ? {
-          observedPackageObjectAllocations:
-            report.observedPackageObjectAllocations,
-          sites: report.sites,
-          ...(report.coverage === undefined
-            ? {}
-            : { coverage: report.coverage }),
-          ...(report.markerSha256 === undefined
-            ? {}
-            : { markerSha256: report.markerSha256 }),
-        }
-      : { reason: report.reason }),
-  }
-  if (
-    result.status === 'failed' &&
-    report.status === 'available'
-  ) {
-    result.reason =
-      `observed ${report.observedPackageObjectAllocations} ` +
-      'package-owned JavaScript object allocations'
-  }
-  return result
-}
-
 export async function prepareExactPackageAllocationEvidence(
   packageRoot,
   trustedMarkerSha256,

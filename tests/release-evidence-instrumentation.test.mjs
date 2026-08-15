@@ -42,7 +42,6 @@ import {
   finalizeAutomatedReleaseEvidence,
 } from '../scripts/release-gate-evaluation.mjs'
 import {
-  exactAllocationGate,
   EXACT_ALLOCATION_COVERAGE_PROTOCOL,
   EXACT_ALLOCATION_INSTRUMENTATION,
   EXACT_ALLOCATION_MARKER_FILENAME,
@@ -395,39 +394,35 @@ test('the Node allocation lane classifies every exact and guarded-unsupported co
   }
 })
 
-test('the allocation Release Gate passes only an available exact zero count', () => {
-  assert.deepEqual(
-    exactAllocationGate({
-      instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
-      status: 'available',
-      observedPackageObjectAllocations: 0,
-      sites: [],
-    }, 10_000),
-    {
-      instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
-      status: 'passed',
-      frames: 10_000,
-      observedPackageObjectAllocations: 0,
-      sites: [],
-    },
-  )
-  for (const report of [
-    {
-      instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
-      status: 'available',
-      observedPackageObjectAllocations: 1,
-      sites: [{ id: 4, observedAllocations: 1 }],
-    },
-    {
-      instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
-      status: 'unavailable',
-      reason: 'instrumented package manifest is unavailable',
-    },
-  ]) {
-    const gate = exactAllocationGate(report, 10_000)
-    assert.equal(gate.status, 'failed')
-    assert.equal(gate.frames, 10_000)
+test('central Release Gate evaluation accepts only complete exact zero-allocation evidence', () => {
+  const available = {
+    instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
+    status: 'available',
+    frames: 10_000,
+    observedPackageObjectAllocations: 0,
+    sites: [],
+    coverage: { status: 'complete' },
+    markerSha256: 'f'.repeat(64),
   }
+  const evaluate = (allocation, automatedResult = { status: 'passed' }) =>
+    evaluateJourneyReports(makeValidJourneyReport(), {
+      automatedResult,
+      automatedReport: { gates: { allocation } },
+    }).gates.find(({ id }) => id === 'allocation')
+
+  assert.equal(evaluate(available).status, 'passed')
+  for (const report of [
+    { ...available, status: 'unavailable', reason: 'marker unavailable' },
+    { ...available, frames: 9_999 },
+    { ...available, instrumentation: { ...available.instrumentation, version: -1 } },
+    { ...available, observedPackageObjectAllocations: 1 },
+    { ...available, sites: [{ id: 4, observedAllocations: 1 }] },
+    { ...available, coverage: { status: 'partial' } },
+    { ...available, markerSha256: null },
+  ]) {
+    assert.equal(evaluate(report).status, 'failed')
+  }
+  assert.equal(evaluate(available, { status: 'failed' }).status, 'failed')
 })
 
 test('the public Three steady Frame Sample path allocates zero package objects across advancing frames', async () => {
@@ -1130,8 +1125,8 @@ function evaluateJourneyReports(react19Report, options = {}) {
     deterministicResult: { status: 'passed' },
     deterministicReport: { status: 'passed' },
     consumerResult: { status: 'passed' },
-    automatedResult: { status: 'passed' },
-    automatedReport: { gates: {} },
+    automatedResult: options.automatedResult ?? { status: 'passed' },
+    automatedReport: options.automatedReport ?? { gates: {} },
     exampleResult: { status: 'passed' },
     threeReport: report(
       options.threeReport ?? makeValidJourneyReport('three'),

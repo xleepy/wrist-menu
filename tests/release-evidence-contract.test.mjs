@@ -616,23 +616,21 @@ test('the performance Release Gate is independent from failed sibling automation
   )
 })
 
-test('each raw automated Release Gate keeps its own fail-closed status', () => {
+test('each sibling raw automated Release Gate keeps its own fail-closed status', () => {
   const report = {
     gates: {
-      allocation: { status: 'failed' },
       construction: { status: 'passed' },
       'resource-growth': { status: 'passed' },
     },
   }
 
-  assert.equal(automatedRawGateStatus(report, 'allocation'), 'failed')
   assert.equal(automatedRawGateStatus(report, 'construction'), 'passed')
   assert.equal(automatedRawGateStatus(report, 'resource-growth'), 'passed')
   assert.equal(automatedRawGateStatus(report, 'lifecycle-leak'), 'failed')
   assert.equal(
     automatedRawGateStatus(
-      { gates: { allocation: { status: 'unknown' } } },
-      'allocation',
+      { gates: { construction: { status: 'unknown' } } },
+      'construction',
     ),
     'failed',
   )
