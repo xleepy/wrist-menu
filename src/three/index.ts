@@ -33,13 +33,25 @@ import {
 } from '../core/index.js'
 import { copyHostSnapshot } from '../core/host-snapshot.js'
 import { createInitialPresentationModel } from '../core/presentation-model.js'
-import { resetRuntimeForPresentationReplacement } from '../core/runtime-internals.js'
+import {
+  advanceSettledRuntimeFrame,
+  resetRuntimeForPresentationReplacement,
+} from '../core/runtime-internals.js'
 import { selectWristSource } from '../core/wrist-anchor.js'
 import {
   defaultThreeWristMenuPresentationFactory,
   ManagedWristMenuPresentation,
   type ThreeWristMenuPresentationFactory,
 } from './presentation.js'
+import {
+  createSteadyFrameObservationContext,
+  createSteadyFrameSignature,
+  observeSteadyFrame,
+  setSteadyFrameObservationContext,
+  steadyPresentationStateChanged,
+  type SteadyFrameObservationContext,
+  type SteadyFrameSignature,
+} from './steady-frame.js'
 
 export * from '../core/index.js'
 export {
@@ -124,6 +136,11 @@ export type ThreeWristMenuState = {
   lastUpdateTime: number
   lastSessionVisibility: XRVisibilityState | null
   frameInvalidated: boolean
+  steadyFrameEligible: boolean
+  /** @internal Preallocated package-owned advancing-frame observation. */
+  steadyFrameContext: SteadyFrameObservationContext
+  /** @internal Package-owned advancing-frame comparison cache. */
+  steadyFrameSignature: SteadyFrameSignature
   disposed: boolean
 }
 
@@ -269,6 +286,8 @@ function applyAnchorPose(
 function clearTransientInput(state: ThreeWristMenuState): void {
   state.sourcePressed = new WeakMap()
   state.sourceCompleted = new WeakSet()
+  state.steadyFrameContext.sourcePressed = state.sourcePressed
+  state.steadyFrameContext.sourceCompleted = state.sourceCompleted
   state.lastTargetBySource = new WeakMap()
   state.provisionalClaims = new WeakSet()
 }
@@ -437,6 +456,8 @@ export function createThreeWristMenuState(
     snapshot: initialSnapshot,
     onEvent: (event) => deliverWristMenuEventWithFeedback(state, event),
   })
+  const sourcePressed = new WeakMap<XRInputSource, boolean>()
+  const sourceCompleted = new WeakSet<XRInputSource>()
   state = {
     renderer: options.renderer,
     onEvent: options.onEvent,
@@ -458,8 +479,8 @@ export function createThreeWristMenuState(
     inputSourceById: new Map(),
     anchorSettings: materializeAnchorSettings(initialSnapshot),
     pendingAnchorSettings: undefined,
-    sourcePressed: new WeakMap(),
-    sourceCompleted: new WeakSet(),
+    sourcePressed,
+    sourceCompleted,
     lastTargetBySource: new WeakMap(),
     provisionalClaims: new WeakSet(),
     inputSourceSequence: 0,
@@ -478,6 +499,15 @@ export function createThreeWristMenuState(
     lastUpdateTime: 0,
     lastSessionVisibility: null,
     frameInvalidated: true,
+    steadyFrameEligible:
+      options.presentationFactory === undefined ||
+      options.presentationFactory === defaultThreeWristMenuPresentationFactory,
+    steadyFrameContext: createSteadyFrameObservationContext(
+      presentation.group,
+      sourcePressed,
+      sourceCompleted,
+    ),
+    steadyFrameSignature: createSteadyFrameSignature(),
     disposed: false,
   }
   return state
@@ -522,6 +552,8 @@ export function replaceThreeWristMenuPresentation(
     state.geometryBarrierThrough = state.frameSequence
     state.frameInvalidated = true
   })
+  state.steadyFrameEligible =
+    presentationFactory === defaultThreeWristMenuPresentationFactory
   if (resetError !== undefined) throw resetError
 }
 
@@ -543,6 +575,47 @@ export function updateThreeWristMenu(
     state.lastParent === parent &&
     state.lastSessionVisibility === sessionVisibility
   ) {
+    return
+  }
+  setSteadyFrameObservationContext(
+    state.steadyFrameContext,
+    update.frame,
+    nextSession,
+    nextReferenceSpace,
+    parent,
+    state.sourcePressed,
+    state.sourceCompleted,
+  )
+  if (
+    steadyPresentationStateChanged(
+      state.steadyFrameSignature,
+      state.presentation.group,
+    )
+  ) {
+    state.anchorPoseApplied = false
+    state.presentation.invalidateModelCache()
+  }
+  if (
+    !state.frameInvalidated &&
+    state.steadyFrameEligible &&
+    state.frameSequence > state.geometryBarrierThrough + 1 &&
+    observeSteadyFrame(
+      state.steadyFrameSignature,
+      state.steadyFrameContext,
+      'compare',
+    ) &&
+    advanceSettledRuntimeFrame(
+      state.runtime,
+      state.frameSequence + 1,
+      update.time,
+      state.lifecycleRevision,
+    ) !== undefined
+  ) {
+    state.lastUpdateFrame = update.frame
+    state.lastUpdateTime = update.time
+    state.lastSessionVisibility = sessionVisibility
+    state.frameInvalidated = false
+    state.frameSequence += 1
     return
   }
   state.lastUpdateTime = update.time
@@ -783,6 +856,11 @@ export function updateThreeWristMenu(
       state.provisionalClaims.delete(inputSource)
     }
   }
+  observeSteadyFrame(
+    state.steadyFrameSignature,
+    state.steadyFrameContext,
+    'capture',
+  )
   state.lastUpdateFrame = update.frame
   state.lastSessionVisibility = sessionVisibility
   state.frameInvalidated = false

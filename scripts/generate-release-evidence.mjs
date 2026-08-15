@@ -13,6 +13,11 @@ import { fileURLToPath } from 'node:url'
 
 import { digestNamedCandidate } from './candidate-tarball.mjs'
 import {
+  EXACT_ALLOCATION_INSTRUMENTATION,
+  EXACT_ALLOCATION_MARKER_FILENAME,
+  EXACT_ALLOCATION_MARKER_SHA256_ENV,
+} from '../fixtures/consumers/exact-allocation-evidence.mjs'
+import {
   evaluateAutomatedReleaseGates,
   finalizeAutomatedReleaseEvidence,
   finalizeCandidateUnavailableEvidence,
@@ -25,10 +30,12 @@ import {
   validateCompatibilityManifest,
   verifyImmutableEvidenceBundle,
 } from './release-evidence-lib.mjs'
+import { instrumentExactPackageAllocations } from './instrument-exact-allocations.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const npmCli = process.env.npm_execpath
 const artifactRoot = resolve(root, 'artifacts', 'release-evidence')
+const subprocessMaxBuffer = 16 * 1024 * 1024
 const protocolPath = resolve(root, 'evidence', 'protocols', 'automated-v1.json')
 const baselinePath = resolve(root, 'evidence', 'baselines', 'performance-v1.json')
 const lockfilePaths = [
@@ -39,8 +46,10 @@ const lockfilePaths = [
   'examples/primitive-workshop/package-lock.json',
 ]
 const instrumentationPaths = [
+  resolve(root, 'scripts', 'instrument-exact-allocations.mjs'),
   resolve(root, 'scripts', 'deterministic-release-traces.mjs'),
   resolve(root, 'scripts', 'release-gate-evaluation.mjs'),
+  resolve(root, 'fixtures', 'consumers', 'exact-allocation-evidence.mjs'),
   resolve(root, 'fixtures', 'consumers', 'import-safety.mjs'),
   resolve(root, 'fixtures', 'consumers', 'journey-evidence.mjs'),
   resolve(root, 'fixtures', 'consumers', 'runtime-evidence.mjs'),
@@ -61,8 +70,24 @@ const instrumentationPaths = [
 ]
 function git(...args) {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
-  if (result.status !== 0) throw new Error(result.stderr || result.stdout)
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.error?.message || result.stdout)
+  }
   return result.stdout.trim()
+}
+
+export function retainedCommandResult(command, result) {
+  const stderr = [...new Set([
+    result.stderr ?? '',
+    result.error?.message ?? '',
+  ].filter((message) => message !== ''))].join('\n')
+  return {
+    command,
+    status: result.status === 0 ? 'passed' : 'failed',
+    exitCode: Number.isInteger(result.status) ? result.status : 1,
+    stdout: result.stdout ?? '',
+    stderr,
+  }
 }
 
 function runNpm(script, environment = {}) {
@@ -73,15 +98,10 @@ function runNpm(script, environment = {}) {
       cwd: root,
       encoding: 'utf8',
       env: { ...process.env, ...environment },
+      maxBuffer: subprocessMaxBuffer,
     },
   )
-  return {
-    command: `npm run ${script}`,
-    status: result.status === 0 ? 'passed' : 'failed',
-    exitCode: result.status,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
-  }
+  return retainedCommandResult(`npm run ${script}`, result)
 }
 
 function runNode(script, args, environment = {}, cwd = root) {
@@ -89,14 +109,12 @@ function runNode(script, args, environment = {}, cwd = root) {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, ...environment },
+    maxBuffer: subprocessMaxBuffer,
   })
-  return {
-    command: `node ${relative(root, resolve(cwd, script))}`,
-    status: result.status === 0 ? 'passed' : 'failed',
-    exitCode: result.status,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
-  }
+  return retainedCommandResult(
+    `node ${relative(root, resolve(cwd, script))}`,
+    result,
+  )
 }
 
 async function writeCommandLog(path, result) {
@@ -138,6 +156,11 @@ async function compositeDigest(paths) {
 }
 
 async function releaseIdentity(protocol) {
+  assert.deepEqual(
+    protocol.allocationInstrumentation,
+    EXACT_ALLOCATION_INSTRUMENTATION,
+    'allocation instrumentation identity must match the automated protocol',
+  )
   return {
     lockfiles: await Promise.all(
       lockfilePaths.map(async (path) => ({
@@ -150,6 +173,7 @@ async function releaseIdentity(protocol) {
       version: protocol.instrumentationVersion,
       sha256: await compositeDigest(instrumentationPaths),
       baselineSha256: await fileDigest(baselinePath),
+      allocation: protocol.allocationInstrumentation,
       node: process.version,
       platform: `${process.platform}-${process.arch}`,
     },
@@ -344,10 +368,76 @@ async function main() {
       consumerResult,
     )
 
+    const instrumentedCandidateRoot = resolve(
+      root,
+      'fixtures',
+      'consumers',
+      'three',
+      'node_modules',
+      '@xleepy',
+      'wrist-menu',
+    )
+    let trustedAllocationMarkerSha256
+    let allocationInstrumentationResult
+    try {
+      const marker = await instrumentExactPackageAllocations(
+        instrumentedCandidateRoot,
+      )
+      trustedAllocationMarkerSha256 = sha256(
+        await readFile(resolve(
+          instrumentedCandidateRoot,
+          EXACT_ALLOCATION_MARKER_FILENAME,
+        )),
+      )
+      allocationInstrumentationResult = {
+        command: 'instrument packed candidate for exact package allocations',
+        status: 'passed',
+        exitCode: 0,
+        stdout: JSON.stringify({
+          instrumentation: marker.instrumentation,
+          files: marker.files.length,
+          allocationSites: marker.siteCount,
+          markerSha256: trustedAllocationMarkerSha256,
+        }),
+        stderr: '',
+      }
+    } catch (error) {
+      allocationInstrumentationResult = {
+        command: 'instrument packed candidate for exact package allocations',
+        status: 'failed',
+        exitCode: 1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+      }
+    }
+    await writeCommandLog(
+      resolve(rawDirectory, 'exact-allocation-instrumentation-command.json'),
+      allocationInstrumentationResult,
+    )
+    await writeFile(
+      resolve(rawDirectory, 'exact-allocation-marker-trust.json'),
+      canonicalJson({
+        candidateSha256: candidate.sha256,
+        instrumentation: EXACT_ALLOCATION_INSTRUMENTATION,
+        marker: EXACT_ALLOCATION_MARKER_FILENAME,
+        markerSha256: trustedAllocationMarkerSha256 ?? null,
+        status:
+          trustedAllocationMarkerSha256 === undefined ? 'failed' : 'passed',
+      }),
+    )
+
     const automatedResult = runNode(
       'automated-gates.mjs',
       [],
-      evidenceEnvironment,
+      {
+        ...evidenceEnvironment,
+        ...(trustedAllocationMarkerSha256 === undefined
+          ? {}
+          : {
+              [EXACT_ALLOCATION_MARKER_SHA256_ENV]:
+                trustedAllocationMarkerSha256,
+            }),
+      },
       resolve(root, 'fixtures', 'consumers', 'three'),
     )
     await writeCommandLog(

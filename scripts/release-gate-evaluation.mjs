@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 
+import { EXACT_ALLOCATION_INSTRUMENTATION } from '../fixtures/consumers/exact-allocation-evidence.mjs'
 import { verifyRendererJourneyEvidence } from '../fixtures/consumers/journey-evidence.mjs'
 import {
   evaluatePerformanceBaselineGate,
@@ -19,6 +20,7 @@ const IWER_LANES = Object.freeze([
   'iwer-react-hand',
   'iwer-react-controller',
 ])
+const EXACT_ALLOCATION_FRAME_COUNT = 10_000
 
 function gate(id, status, report, detail) {
   return {
@@ -27,6 +29,49 @@ function gate(id, status, report, detail) {
     report,
     ...(detail === undefined ? {} : { detail }),
   }
+}
+
+/** Interpret one retained automation gate without allowing unknown states through. */
+export function automatedRawGateStatus(report, id) {
+  return report.gates?.[id]?.status === 'passed' ? 'passed' : 'failed'
+}
+
+function exactAllocationEvidenceFailure(report) {
+  if (report?.status !== 'available') {
+    return report?.reason ?? 'exact allocation evidence is unavailable'
+  }
+  if (
+    report.instrumentation?.id !== EXACT_ALLOCATION_INSTRUMENTATION.id ||
+    report.instrumentation?.version !== EXACT_ALLOCATION_INSTRUMENTATION.version
+  ) {
+    return 'exact allocation instrumentation identity does not match the protocol'
+  }
+  if (report.frames !== EXACT_ALLOCATION_FRAME_COUNT) {
+    return `exact allocation evidence must cover ${EXACT_ALLOCATION_FRAME_COUNT} Frame Samples`
+  }
+  if (
+    report.coverage?.status !== 'complete' ||
+    !/^[a-f0-9]{64}$/.test(report.markerSha256 ?? '') ||
+    !Array.isArray(report.sites)
+  ) {
+    return 'exact allocation evidence has an incomplete retained-report shape'
+  }
+  if (
+    !Number.isSafeInteger(report.observedPackageObjectAllocations) ||
+    report.observedPackageObjectAllocations < 0
+  ) {
+    return 'exact allocation evidence has an invalid observed allocation count'
+  }
+  if (report.observedPackageObjectAllocations !== 0) {
+    return (
+      `observed ${report.observedPackageObjectAllocations} ` +
+      'package-owned JavaScript object allocations'
+    )
+  }
+  if (report.sites.length !== 0) {
+    return 'zero allocation evidence retained contradictory executed sites'
+  }
+  return undefined
 }
 
 function resolveCompatibilityEvidence(
@@ -311,8 +356,12 @@ export function evaluateAutomatedReleaseGates({
   })
   const automatedGate = (id) =>
     automatedResult.status === 'passed'
-      ? automatedReport.gates?.[id]?.status
+      ? automatedRawGateStatus(automatedReport, id)
       : 'failed'
+  const allocationReport = automatedReport.gates?.allocation
+  const allocationFailure = automatedResult.status === 'passed'
+    ? exactAllocationEvidenceFailure(allocationReport)
+    : 'automated package gate subprocess failed'
   const failedTestedLanes = compatibility.testedLanes
     .map(({ id }) => id)
     .filter((id) => laneStates[id] !== true)
@@ -343,9 +392,15 @@ export function evaluateAutomatedReleaseGates({
       IWER_LANES.every((id) => laneStates[id]),
       'raw/packed-consumers-command.json',
     ),
-    ...[
+    gate(
       'allocation',
+      allocationFailure === undefined,
+      'raw/automated-package-gates.json',
+      allocationFailure,
+    ),
+    ...[
       'identical-frame-mutation',
+      'construction',
       'resource-growth',
       'lifecycle-leak',
     ].map((id) => gate(

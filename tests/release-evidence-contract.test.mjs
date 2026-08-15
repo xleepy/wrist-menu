@@ -10,8 +10,10 @@ import {
   validateCompatibilityManifest,
 } from '../scripts/release-evidence-lib.mjs'
 import {
+  automatedRawGateStatus,
   finalizeAutomatedReleaseEvidence,
 } from '../scripts/release-gate-evaluation.mjs'
+import { retainedCommandResult } from '../scripts/generate-release-evidence.mjs'
 import {
   evaluatePerformanceBaselineGate,
   evaluatePerformanceVariant,
@@ -24,9 +26,26 @@ import {
   installReactStateSetterProbe,
   instrumentUniqueAddedFrameSubscription,
 } from '../fixtures/consumers/react-renderer-harness.mjs'
-
 const readJson = async (path) =>
   JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8'))
+
+test('spawn failures retain an integer exit code and complete diagnostics', () => {
+  assert.deepEqual(
+    retainedCommandResult('node evidence.mjs', {
+      status: null,
+      stdout: 'partial output',
+      stderr: 'process stderr',
+      error: new Error('spawn ENOBUFS'),
+    }),
+    {
+      command: 'node evidence.mjs',
+      status: 'failed',
+      exitCode: 1,
+      stdout: 'partial output',
+      stderr: 'process stderr\nspawn ENOBUFS',
+    },
+  )
+})
 
 test('the compatibility manifest separates policy, exact lanes, claims, and physical provisional rows', async () => {
   const manifest = await readJson('../compatibility.json')
@@ -87,6 +106,10 @@ test('an automated Evidence Record is reproducible and fails closed', () => {
     instrumentation: {
       id: 'node-iwer-three-counters',
       version: 1,
+      allocation: {
+        id: 'node-static-package-allocation-counter',
+        version: 1,
+      },
       node: 'v22.0.0',
       platform: 'win32-x64',
     },
@@ -112,6 +135,10 @@ test('an automated Evidence Record is reproducible and fails closed', () => {
   assert.equal(first.result, 'passed')
   assert.match(first.recordId, /^automated-release-[a-f0-9]{16}$/)
   assert.ok(Object.isFrozen(first))
+  assert.deepEqual(first.instrumentation.allocation, {
+    id: 'node-static-package-allocation-counter',
+    version: 1,
+  })
 
   const finalized = finalizeAutomatedReleaseEvidence({
     evidenceContext: {
@@ -143,6 +170,12 @@ test('an automated Evidence Record is reproducible and fails closed', () => {
       ),
     },
     { resolvedCompatibilitySha256: '4'.repeat(64) },
+    {
+      instrumentation: {
+        ...input.instrumentation,
+        allocation: { ...input.instrumentation.allocation, version: 2 },
+      },
+    },
   ]) {
     assert.notEqual(
       buildAutomatedEvidenceRecord({ ...input, ...changed }).recordId,
@@ -334,11 +367,16 @@ test('the automated protocol names every threshold triplet and fail-closed gate'
     )
   }
   assert.deepEqual(protocol.frameSchedules, ['60hz', '72hz', '90hz', '120hz', 'irregular'])
+  assert.deepEqual(protocol.allocationInstrumentation, {
+    id: 'node-static-package-allocation-counter',
+    version: 4,
+  })
   for (const gate of [
     'import-safety',
     'tested-lane-coverage',
     'allocation',
     'identical-frame-mutation',
+    'construction',
     'resource-growth',
     'lifecycle-leak',
     'scene-event-shield',
@@ -488,6 +526,11 @@ test('React performance evidence runs through both packed public consumer lanes 
   assert.match(vanillaInstrumentation, /from ['"]\.\.\/performance-workload\.mjs['"]/)
   assert.match(instrumentation, /from ['"]\.\/reach-scroll-workload\.mjs['"]/)
   assert.match(vanillaInstrumentation, /from ['"]\.\.\/reach-scroll-workload\.mjs['"]/)
+  assert.match(vanillaInstrumentation, /writeLaneReport\('automated-package-gates\.json'/)
+  assert.doesNotMatch(
+    vanillaInstrumentation,
+    /console\.log\(JSON\.stringify\(report/,
+  )
   assert.doesNotMatch(instrumentation, /controller-action-journey/)
   assert.match(instrumentation, /instrumentUniqueAddedFrameSubscription/)
   assert.doesNotMatch(
@@ -594,5 +637,53 @@ test('the performance Release Gate is independent from failed sibling automation
       react19PackedConsumer: true,
     }).vanillaPackedConsumer,
     false,
+  )
+})
+
+test('each sibling raw automated Release Gate keeps its own fail-closed status', () => {
+  const report = {
+    gates: {
+      construction: { status: 'passed' },
+      'resource-growth': { status: 'passed' },
+    },
+  }
+
+  assert.equal(automatedRawGateStatus(report, 'construction'), 'passed')
+  assert.equal(automatedRawGateStatus(report, 'resource-growth'), 'passed')
+  assert.equal(automatedRawGateStatus(report, 'lifecycle-leak'), 'failed')
+  assert.equal(
+    automatedRawGateStatus(
+      { gates: { construction: { status: 'unknown' } } },
+      'construction',
+    ),
+    'failed',
+  )
+})
+
+test('release policy defines exact package allocation evidence and its freshness identity', async () => {
+  const [releaseEvidence, validationGates] = await Promise.all([
+    readFile(new URL('../docs/release-evidence.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/validation-gates.md', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(
+    releaseEvidence,
+    /every package-owned JavaScript allocation site[\s\S]*exact\s+per-site counts/i,
+  )
+  assert.match(
+    releaseEvidence,
+    /function declarations[\s\S]*containing scope[\s\S]*class declarations[\s\S]*evaluation/i,
+  )
+  assert.match(
+    releaseEvidence,
+    /Object\.entries[\s\S]*matchAll[\s\S]*guarded unsupported[\s\S]*unavailable/i,
+  )
+  assert.match(
+    releaseEvidence,
+    /missing,[\s\S]*incompatible,[\s\S]*digest-mismatched\s+instrumentation fails\s+closed/i,
+  )
+  assert.match(
+    validationGates,
+    /allocation instrumentation identity and version[\s\S]*invalidates prior allocation evidence/i,
   )
 })
