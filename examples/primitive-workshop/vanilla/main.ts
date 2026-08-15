@@ -30,13 +30,15 @@ import {
   syncThreeWristMenu,
   threeWristMenuBlocksSceneInput,
   updateThreeWristMenu,
+  WRIST_MENU_PACKAGE_VERSION,
   wristMenuSessionFeatures,
   type WristMenuEvent,
 } from '@xleepy/wrist-menu/three'
 
 import {
   WORKSHOP_BOUNDS_METERS,
-  createWorkshopModel,
+  WORKSHOP_OBJECT_CAPACITY,
+  createWorkshopScenario,
   reduceWorkshop,
   reduceWorkshopMenuEvent,
   workshopHostSnapshot,
@@ -45,6 +47,11 @@ import {
   type WorkshopObject,
 } from '../shared/workshop-model.js'
 import { createPhysicalActions } from './physical-actions.js'
+import {
+  createWorkshopRuntime,
+  deriveWorkshopView,
+  type WorkshopView,
+} from './runtime.js'
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector)
@@ -58,6 +65,18 @@ const canvas = requiredElement<HTMLCanvasElement>('#workshop')
 const enterVrButton = requiredElement<HTMLButtonElement>('#enter-vr')
 const spawnButton = requiredElement<HTMLButtonElement>('#spawn')
 const status = requiredElement<HTMLElement>('#status')
+const diagnostics = requiredElement<HTMLElement>('#diagnostics')
+
+const query = new URLSearchParams(window.location.search)
+const debugEnabled = query.get('debug') === '1'
+let startupError: string | null = null
+let scenario: ReturnType<typeof createWorkshopScenario>
+try {
+  scenario = createWorkshopScenario(query.get('fixture') ?? 'default')
+} catch (error) {
+  startupError = error instanceof Error ? error.message : String(error)
+  scenario = createWorkshopScenario('default')
+}
 
 const scene = new Scene()
 scene.background = new Color(0x06110f)
@@ -104,20 +123,68 @@ const objectsRoot = new Group()
 workshopRoot.add(objectsRoot)
 const objectMeshes = new Map<string, Mesh>()
 
-let model: WorkshopModel = createWorkshopModel()
+let model: WorkshopModel = scenario.model
 let actionSequence = 0
 let physicalActions: ReturnType<typeof createPhysicalActions>
+let lifecycle: ReturnType<typeof createWorkshopRuntime> | null = null
+let lastSemanticEvent = 'none'
 
-const menu = createThreeWristMenuState({
-  renderer,
-  snapshot: workshopHostSnapshot(model),
-  onEvent: handleWristMenuEvent,
-})
-workshopRoot.add(menu.presentation.group)
+function renderDiagnostics(): void {
+  const lifecycleState = lifecycle?.snapshot()
+  if (lifecycleState === undefined) return
+  const detail = `${lifecycleState.variant} · package ${WRIST_MENU_PACKAGE_VERSION} · ${model.objects.length}/${WORKSHOP_OBJECT_CAPACITY} objects · model revision ${model.revision} · last event ${lastSemanticEvent} · ${lifecycleState.runtimeStatus}`
+  diagnostics.textContent = startupError === null
+    ? `${detail} · ${lifecycleState.diagnostic.message} Next: ${lifecycleState.diagnostic.nextAction}.`
+    : `${detail} · ${startupError}. Next: use fixture=default, full-workshop, empty-definition, or shield.`
+  diagnostics.hidden =
+    !debugEnabled &&
+    startupError === null &&
+    lifecycleState.diagnostic.level !== 'error'
+}
+
+function currentSnapshot() {
+  const lifecycleState = lifecycle?.snapshot()
+  return lifecycleState === undefined
+    ? workshopHostSnapshot(model, scenario.snapshotOptions)
+    : deriveWorkshopView(model, lifecycleState, scenario.snapshotOptions)
+        .hostSnapshot
+}
+
+let menu: ReturnType<typeof createThreeWristMenuState> | null = null
+
+function createMenu(): void {
+  if (menu !== null) return
+  menu = createThreeWristMenuState({
+    renderer,
+    snapshot: currentSnapshot(),
+    onEvent: handleWristMenuEvent,
+  })
+  workshopRoot.add(menu.presentation.group)
+}
+
+function disposeMenu(): void {
+  if (menu === null) return
+  workshopRoot.remove(menu.presentation.group)
+  disposeThreeWristMenu(menu)
+  menu = null
+}
+
+createMenu()
 physicalActions = createPhysicalActions({
   inputSourceForMenuSourceId: (sourceId) =>
-    menu.inputSourceById.get(sourceId) ?? null,
+    menu?.inputSourceById.get(sourceId) ?? null,
 })
+lifecycle = createWorkshopRuntime({
+  readModel: () => model,
+  readSnapshotOptions: () => scenario.snapshotOptions,
+  clearTransientInteraction: () => physicalActions.clearTransientInteraction(),
+  render: (view) => {
+    if (menu !== null) syncThreeWristMenu(menu, view.hostSnapshot)
+    renderTransientState(view)
+    renderDiagnostics()
+  },
+})
+renderDiagnostics()
 
 function createGeometry(object: WorkshopObject): BufferGeometry {
   if (object.primitive === 'sphere') return new SphereGeometry(0.1, 24, 16)
@@ -160,20 +227,35 @@ function renderWorkshop(): void {
   }
 
   grid.visible = model.gridVisible
-  cursor.visible = model.placementCursor.valid
+  const lifecycleState = lifecycle?.snapshot()
+  const view = lifecycleState === undefined
+    ? Object.freeze({
+        hostSnapshot: workshopHostSnapshot(model, scenario.snapshotOptions),
+        cursorVisible: model.placementCursor.status !== 'unavailable',
+      })
+    : deriveWorkshopView(model, lifecycleState, scenario.snapshotOptions)
+  renderTransientState(view)
+  status.textContent = `${model.objects.length} object${model.objects.length === 1 ? '' : 's'} · ${model.selectedPrimitive} · grid ${model.gridVisible ? 'shown' : 'hidden'} · snap ${model.snapToGrid ? 'on' : 'off'} · ${model.menuWrist} wrist`
+}
+
+function renderTransientState(view: WorkshopView): void {
+  cursor.visible = view.cursorVisible
+  ;(cursor.material as MeshBasicMaterial).color.set(
+    model.placementCursor.status === 'occupied' ? 0xff6b6b : 0x7effd4,
+  )
   cursor.position.set(
     model.placementCursor.position[0],
     0.008,
     model.placementCursor.position[2],
   )
-  status.textContent = `${model.objects.length} object${model.objects.length === 1 ? '' : 's'} · ${model.selectedPrimitive} · grid ${model.gridVisible ? 'shown' : 'hidden'} · snap ${model.snapToGrid ? 'on' : 'off'} · ${model.menuWrist} wrist`
 }
 
 function applyModel(nextModel: WorkshopModel): void {
   if (nextModel === model) return
   model = nextModel
-  syncThreeWristMenu(menu, workshopHostSnapshot(model))
+  if (menu !== null) syncThreeWristMenu(menu, currentSnapshot())
   renderWorkshop()
+  renderDiagnostics()
 }
 
 function dispatch(action: WorkshopAction, physicalActionId?: string): void {
@@ -187,9 +269,13 @@ function dispatch(action: WorkshopAction, physicalActionId?: string): void {
 }
 
 function handleWristMenuEvent(event: WristMenuEvent): void {
+  lastSemanticEvent = event.type === 'selection-intent'
+    ? `${event.type}:${event.intent.itemId}`
+    : event.type
   applyModel(
     reduceWorkshopMenuEvent(model, event, physicalActions.menuAction(event)),
   )
+  renderDiagnostics()
 }
 
 const pointer = new Vector2()
@@ -215,6 +301,7 @@ function placeCursorFromRay(actionId: string): boolean {
     { type: 'place-cursor', position: [local.x, 0, local.z], valid },
     actionId,
   )
+  lifecycle?.markCursorAvailable()
   return true
 }
 
@@ -247,7 +334,7 @@ const controllerDirection = new Vector3()
 const controllerRotation = new Matrix4()
 
 function interactFromController(inputSource: XRInputSource, actionId: string): void {
-  if (threeWristMenuBlocksSceneInput(menu, inputSource)) return
+  if (menu !== null && threeWristMenuBlocksSceneInput(menu, inputSource)) return
   const session = renderer.xr.getSession()
   const inputIndex = session === null ? -1 : [...session.inputSources].indexOf(inputSource)
   if (inputIndex < 0) return
@@ -263,18 +350,27 @@ function interactFromController(inputSource: XRInputSource, actionId: string): v
 async function enterVr(): Promise<void> {
   if (navigator.xr === undefined) {
     status.textContent = 'WebXR is unavailable in this browser.'
+    lifecycle?.sessionRejected(
+      new Error('WebXR requires an HTTPS or localhost WebXR-capable browser'),
+    )
     return
   }
+  createMenu()
+  lifecycle?.beginSessionRequest()
   try {
     const supported = await navigator.xr.isSessionSupported('immersive-vr')
     if (!supported) {
       status.textContent = 'Immersive VR is unavailable on this device.'
+      lifecycle?.sessionRejected(
+        new Error('Immersive VR is not supported; use an HTTPS WebXR-capable device'),
+      )
       return
     }
     const session = await navigator.xr.requestSession('immersive-vr', {
       optionalFeatures: [...wristMenuSessionFeatures.optionalFeatures],
     })
     physicalActions.attachSession(session)
+    lifecycle?.sessionActivated(session)
     session.addEventListener('select', (event) => {
       const physicalActionId = physicalActions.sceneAction(event)
       if (physicalActionId === null) return
@@ -285,11 +381,13 @@ async function enterVr(): Promise<void> {
     })
     session.addEventListener('end', () => {
       enterVrButton.textContent = 'Enter VR'
+      disposeMenu()
     })
     await renderer.xr.setSession(session)
     enterVrButton.textContent = 'VR active'
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : String(error)
+    lifecycle?.sessionRejected(error)
   }
 }
 
@@ -307,12 +405,13 @@ resize()
 renderWorkshop()
 
 renderer.setAnimationLoop((time, frame) => {
-  updateThreeWristMenu(menu, { time, frame })
+  if (menu !== null) updateThreeWristMenu(menu, { time, frame })
   renderer.render(scene, camera)
 })
 
 window.addEventListener('pagehide', () => {
   physicalActions.dispose()
-  disposeThreeWristMenu(menu)
+  lifecycle?.dispose()
+  disposeMenu()
   renderer.dispose()
 })

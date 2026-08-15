@@ -116,8 +116,10 @@ test('the Example Variants share only the portable Workshop Model', async () => 
   const sources = await Promise.all([
     text('vanilla/main.ts'),
     text('vanilla/physical-actions.js'),
+    text('vanilla/runtime.js'),
     text('react/main.tsx'),
     text('react/physical-actions.js'),
+    text('react/runtime.js'),
   ])
 
   for (const source of sources) {
@@ -129,6 +131,67 @@ test('the Example Variants share only the portable Workshop Model', async () => 
       ['../shared/workshop-model.js'],
     )
   }
+})
+
+test('each Example Variant owns and wires its lifecycle integration', async () => {
+  const [
+    vanillaMain,
+    vanillaLifecycle,
+    vanillaRuntime,
+    reactMain,
+    reactLifecycle,
+    reactRuntime,
+  ] =
+    await Promise.all([
+      text('vanilla/main.ts'),
+      text('vanilla/lifecycle.js'),
+      text('vanilla/runtime.js'),
+      text('react/main.tsx'),
+      text('react/lifecycle.js'),
+      text('react/runtime.js'),
+    ])
+
+  assert.match(
+    vanillaMain,
+    /from ['"]\.\/runtime\.js['"]/,
+  )
+  assert.match(
+    reactMain,
+    /from ['"]\.\/runtime\.js['"]/,
+  )
+  assert.match(vanillaMain, /lifecycle\?\.sessionActivated\(session\)/)
+  assert.match(reactMain, /lifecycle\.sessionActivated\(session\)/)
+  assert.match(vanillaRuntime, /createWorkshopLifecycle/)
+  assert.match(reactRuntime, /createWorkshopLifecycle/)
+  assert.match(vanillaMain, /createWorkshopScenario/)
+  assert.match(reactMain, /createWorkshopScenario/)
+  assert.doesNotMatch(vanillaLifecycle, /react\/(?:main|lifecycle)/i)
+  assert.doesNotMatch(reactLifecycle, /vanilla\/(?:main|lifecycle)/i)
+  assert.doesNotMatch(
+    `${vanillaLifecycle}\n${reactLifecycle}`,
+    /\.\.\/shared\//,
+  )
+})
+
+test('the static chooser exposes direct query-preserving paths and diagnostics', async () => {
+  const [chooser, manifest, vanillaHtml, vanillaMain, reactMain] =
+    await Promise.all([
+      text('index.html'),
+      text('package.json'),
+      text('vanilla/index.html'),
+      text('vanilla/main.ts'),
+      text('react/main.tsx'),
+    ])
+  const scripts = JSON.parse(manifest).scripts
+
+  assert.match(chooser, /href="\.\/vanilla\/"/)
+  assert.match(chooser, /href="\.\/react\/"/)
+  assert.match(chooser, /target\.search = location\.search/)
+  assert.match(scripts.build, /build:index/)
+  assert.match(vanillaHtml, /id="diagnostics"/)
+  assert.match(`${vanillaMain}\n${reactMain}`, /WRIST_MENU_PACKAGE_VERSION/)
+  assert.match(`${vanillaMain}\n${reactMain}`, /debug/)
+  assert.match(`${vanillaMain}\n${reactMain}`, /nextAction/)
 })
 
 for (const harness of variantHarnesses) {
