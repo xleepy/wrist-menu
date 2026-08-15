@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-export const semanticCaseIds = Object.freeze([
+export const semanticScenarios = Object.freeze([
   'fresh-reveal-hide-dwell',
   'both-wrists',
   'scrolling',
@@ -9,14 +9,10 @@ export const semanticCaseIds = Object.freeze([
   'input-switching',
   'visibility-session-reentry',
   'empty-unavailable',
-])
-export const shieldCaseIds = Object.freeze([
-  'commit',
-  'cancel',
-  'hold',
-  'leave-before-release',
-  'rapid-actions',
-])
+].map((id) => Object.freeze({ id })))
+export const semanticCaseIds = Object.freeze(
+  semanticScenarios.map(({ id }) => id),
+)
 export const sceneActionTypes = Object.freeze([
   'pointerdown',
   'pointerup',
@@ -24,13 +20,28 @@ export const sceneActionTypes = Object.freeze([
   'dblclick',
   'contextmenu',
 ])
-const shieldTerminalEventTypes = Object.freeze({
-  commit: Object.freeze(['selection-intent']),
-  cancel: Object.freeze(['selection-cancellation']),
-  hold: Object.freeze(['selection-intent']),
-  'leave-before-release': Object.freeze(['selection-cancellation']),
-  'rapid-actions': Object.freeze(['selection-intent', 'selection-intent']),
-})
+export const shieldScenarios = Object.freeze([
+  ['commit', ['selection-intent']],
+  ['cancel', ['selection-cancellation']],
+  ['hold', ['selection-intent']],
+  ['leave-before-release', ['selection-cancellation']],
+  ['rapid-actions', ['selection-intent', 'selection-intent']],
+].map(([id, terminalEventTypes]) => Object.freeze({
+  id,
+  terminalEventTypes: Object.freeze(terminalEventTypes),
+  recovery: Object.freeze({
+    mountedMenuPresent: true,
+    sourceNeutralized: true,
+    menuPresentAfterUnmount: false,
+  }),
+})))
+export const shieldCaseIds = Object.freeze(
+  shieldScenarios.map(({ id }) => id),
+)
+
+const shieldScenarioById = new Map(
+  shieldScenarios.map((scenario) => [scenario.id, scenario]),
+)
 
 function sameOrderedValues(actual, expected) {
   return (
@@ -141,11 +152,10 @@ function validScrollingObservations(observations) {
   )
 }
 
-function validActualDispatchCase(entry) {
-  const observations = entry?.observations
-  const terminalEventTypes = shieldTerminalEventTypes[entry?.id]
+function sceneEventShieldScenarioPassed(id, observations) {
+  const scenario = shieldScenarioById.get(id)
   return (
-    entry?.status === 'passed' &&
+    scenario !== undefined &&
     (observations?.dispatchPath === 'three-host-shield' ||
       observations?.dispatchPath === 'react-event-manager') &&
     Array.isArray(observations.dispatches) &&
@@ -156,12 +166,13 @@ function validActualDispatchCase(entry) {
     ) &&
     sameOrderedValues(
       observations.terminalEvents?.map(({ type }) => type),
-      terminalEventTypes,
+      scenario.terminalEventTypes,
     ) &&
     Number.isInteger(observations.neutralTransitions) &&
     observations.neutralTransitions >= 1 &&
-    observations.mountedRecoveryMenuPresent === true &&
-    observations.sourceNeutralized === true &&
+    observations.mountedRecoveryMenuPresent ===
+      scenario.recovery.mountedMenuPresent &&
+    observations.sourceNeutralized === scenario.recovery.sourceNeutralized &&
     Array.isArray(observations.mountedRecoveryDispatches) &&
     observations.mountedRecoveryDispatches.length === sceneActionTypes.length &&
     observations.mountedRecoveryDispatches.every(
@@ -170,7 +181,8 @@ function validActualDispatchCase(entry) {
         Number.isInteger(behindTargetDeliveries) &&
         behindTargetDeliveries > 0,
     ) &&
-    observations.menuPresentAfterUnmount === false &&
+    observations.menuPresentAfterUnmount ===
+      scenario.recovery.menuPresentAfterUnmount &&
     Array.isArray(observations.unmountRecoveryDispatches) &&
     observations.unmountRecoveryDispatches.length === sceneActionTypes.length &&
     observations.unmountRecoveryDispatches.every(
@@ -179,6 +191,13 @@ function validActualDispatchCase(entry) {
         Number.isInteger(behindTargetDeliveries) &&
         behindTargetDeliveries > 0,
     )
+  )
+}
+
+function validActualDispatchCase(entry) {
+  return (
+    entry?.status === 'passed' &&
+    sceneEventShieldScenarioPassed(entry.id, entry.observations)
   )
 }
 
@@ -242,4 +261,64 @@ export function assertCompleteJourneyCoverage(coverage) {
   )
   assert.deepEqual(coverage.sceneEventShield.actionTypes, sceneActionTypes)
   assert.ok(coverage.sceneEventShield.cases.every(validActualDispatchCase))
+}
+
+/**
+ * Deep journey-evidence interface. Renderer Integration adapters receive the
+ * shared scenario sequence and return observations; this module owns expected
+ * Wrist Menu Events, recovery, coverage assembly, and the final lane result.
+ */
+export async function runRendererJourneyEvidence({
+  rendererIntegration,
+  sourceKind,
+  runSemanticCases,
+  runSceneEventShieldCases,
+}) {
+  if (rendererIntegration !== 'three' && rendererIntegration !== 'react') {
+    throw new TypeError('unknown Renderer Integration')
+  }
+  const driver = rendererIntegration === 'three'
+    ? 'packed-three-renderer-xr'
+    : 'packed-react-renderer-xr'
+  const semanticCases = await runSemanticCases(semanticScenarios)
+  const shieldCases = (await runSceneEventShieldCases(shieldScenarios)).map(
+    (entry) => Object.freeze({
+      ...entry,
+      status: sceneEventShieldScenarioPassed(entry.id, entry.observations)
+        ? 'passed'
+        : 'failed',
+    }),
+  )
+  const sceneEventShield = {
+    status: shieldCases.every(({ status }) => status === 'passed')
+      ? 'passed'
+      : 'failed',
+    rendererIntegration,
+    selectionSourceKind: sourceKind,
+    actionTypes: sceneActionTypes,
+    cases: shieldCases,
+  }
+  const coverage = buildRendererJourneyCoverage({
+    driver,
+    sourceKind,
+    semanticCases,
+    sceneEventShield,
+  })
+  assertCompleteJourneyCoverage(coverage)
+  const selectionIntents = semanticCases.reduce(
+    (total, entry) => total + entry.observations.runs.reduce(
+      (subtotal, run) => subtotal + run.wristMenuEvents.filter(
+        ({ type }) => type === 'selection-intent',
+      ).length,
+      0,
+    ),
+    0,
+  )
+  return Object.freeze({
+    id: `iwer-${rendererIntegration}-${sourceKind}`,
+    status: coverage.status,
+    selectionIntents,
+    coverage,
+    sceneEventShield,
+  })
 }

@@ -76,7 +76,7 @@ export const defaultThreeWristMenuPresentationFactory: ThreeWristMenuPresentatio
         object: presentation.viewportMesh as Mesh<BoxGeometry>,
       },
       update(model) {
-        presentation.setModel(model, false)
+        presentation.update(model)
       },
       dispose() {
         presentation.dispose()

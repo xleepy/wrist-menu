@@ -12,16 +12,13 @@ import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { digestNamedCandidate } from './candidate-tarball.mjs'
-import { assertCompleteJourneyCoverage } from '../fixtures/consumers/journey-evidence.mjs'
 import {
-  evaluatePerformanceBaselineGate,
-  performanceBaselinePrerequisites,
-} from '../fixtures/consumers/performance-baseline.mjs'
+  evaluateAutomatedReleaseGates,
+  finalizeAutomatedReleaseEvidence,
+  finalizeCandidateUnavailableEvidence,
+} from './release-gate-evaluation.mjs'
 import {
-  buildAutomatedEvidenceRecord,
-  buildCandidateUnavailableEvidenceRecord,
   canonicalJson,
-  consumerLanePassed,
   createRetainedReportManifest,
   publishImmutableEvidenceBundle,
   sha256,
@@ -43,6 +40,7 @@ const lockfilePaths = [
 ]
 const instrumentationPaths = [
   resolve(root, 'scripts', 'deterministic-release-traces.mjs'),
+  resolve(root, 'scripts', 'release-gate-evaluation.mjs'),
   resolve(root, 'fixtures', 'consumers', 'import-safety.mjs'),
   resolve(root, 'fixtures', 'consumers', 'journey-evidence.mjs'),
   resolve(root, 'fixtures', 'consumers', 'runtime-evidence.mjs'),
@@ -183,71 +181,6 @@ async function stageAndPublishRecord({
   return publishImmutableEvidenceBundle(workingDirectory, recordDirectory)
 }
 
-function gate(id, status, report, detail) {
-  return {
-    id,
-    status: status === 'passed' ? 'passed' : 'failed',
-    report,
-    ...(detail === undefined ? {} : { detail }),
-  }
-}
-
-function resolveCompatibilityEvidence(
-  compatibility,
-  candidate,
-  laneStates,
-  evidenceRecord,
-) {
-  return {
-    ...compatibility,
-    candidate,
-    evidenceRecord,
-    testedLanes: compatibility.testedLanes.map((lane) => ({
-      ...lane,
-      status: laneStates[lane.id] ? 'passed' : 'failed',
-      evidenceRecords: [evidenceRecord],
-    })),
-  }
-}
-
-export function journeyCombinationPassed(report, integration, sourceKind) {
-  const journey = report?.journeys?.find(
-    ({ sceneEventShield } = {}) =>
-      sceneEventShield?.rendererIntegration === integration &&
-      sceneEventShield.selectionSourceKind === sourceKind,
-  )
-  const coverage = journey?.coverage
-  const shield = journey?.sceneEventShield
-  const expectedDriver = integration === 'three'
-    ? 'packed-three-renderer-xr'
-    : 'packed-react-renderer-xr'
-  const expectedDispatchPath = integration === 'three'
-    ? 'three-host-shield'
-    : 'react-event-manager'
-
-  if (!(
-    report?.status === 'passed' &&
-    journey?.status === 'passed' &&
-    coverage?.status === 'passed' &&
-    coverage?.driver === expectedDriver &&
-    coverage?.sourceKind === sourceKind &&
-    shield?.status === 'passed' &&
-    shield.rendererIntegration === integration &&
-    shield.selectionSourceKind === sourceKind
-  )) return false
-
-  try {
-    assertCompleteJourneyCoverage(coverage)
-    assert.deepEqual(coverage.sceneEventShield, shield)
-  } catch {
-    return false
-  }
-
-  return shield.cases.every(
-    ({ observations }) => observations.dispatchPath === expectedDispatchPath,
-  )
-}
-
 async function main() {
   assert.ok(npmCli, 'run release evidence through npm')
   const arguments_ = process.argv.slice(2)
@@ -296,7 +229,6 @@ async function main() {
     version: protocol.version,
     sha256: sha256(protocolBytes),
   }
-  const testedLanes = compatibility.testedLanes.map(({ id }) => id)
   const { lockfiles, instrumentation } = await releaseIdentity(protocol)
 
   await mkdir(artifactRoot, { recursive: true })
@@ -311,47 +243,27 @@ async function main() {
       version: '0.0.0',
       availability: 'unavailable',
     }
-    const laneStates = Object.fromEntries(testedLanes.map((id) => [id, false]))
-    const resolvedCompatibilityTemplate = resolveCompatibilityEvidence(
+    const finalized = finalizeCandidateUnavailableEvidence({
       compatibility,
-      candidate,
-      laneStates,
-      'SELF',
-    )
-    const unavailableInput = {
       candidate,
       source,
       lockfiles,
       protocol: protocolIdentity,
       instrumentation,
-      testedLanes,
-      validationCombinations: [],
-      resolvedCompatibilitySha256: sha256(
-        canonicalJson(resolvedCompatibilityTemplate),
-      ),
       bundleManifest: await createRetainedReportManifest(workingDirectory),
-      rawReportDirectory: 'RAW_DIRECTORY_PLACEHOLDER',
       failure: {
         stage,
         command: result.command,
         exitCode: result.exitCode,
         report,
       },
-    }
-    const preliminary = buildCandidateUnavailableEvidenceRecord(unavailableInput)
-    const recordDirectoryRelative = `artifacts/release-evidence/${preliminary.recordId}`
-    const record = buildCandidateUnavailableEvidenceRecord({
-      ...unavailableInput,
-      rawReportDirectory: `${recordDirectoryRelative}/raw`,
     })
+    const {
+      recordDirectory: recordDirectoryRelative,
+      record,
+      resolvedCompatibility,
+    } = finalized
     const recordDirectory = resolve(root, recordDirectoryRelative)
-    const evidenceRecord = `${recordDirectoryRelative}/evidence-record.json`
-    const resolvedCompatibility = resolveCompatibilityEvidence(
-      compatibility,
-      record.candidate,
-      laneStates,
-      evidenceRecord,
-    )
     const publishResult = await stageAndPublishRecord({
       workingDirectory,
       recordDirectory,
@@ -478,263 +390,54 @@ async function main() {
     )
     const performanceBaselinePolicy = await readJson(baselinePath)
 
-    const laneStates = {
-      'three-0.185.1': consumerLanePassed(consumerResult, threeReport, 'three-0.185.1', candidate.sha256),
-      'react-18.3.1-r3f-8.18.0': consumerLanePassed(consumerResult, react18Report, 'react-18.3.1-r3f-8.18.0', candidate.sha256),
-      'react-19.2.7-r3f-9.6.1': consumerLanePassed(consumerResult, react19Report, 'react-19.2.7-r3f-9.6.1', candidate.sha256),
-      'react-xr-6.6.30':
-        consumerLanePassed(consumerResult, react18Report, 'react-xr-6.6.30', candidate.sha256) &&
-        consumerLanePassed(consumerResult, react19Report, 'react-xr-6.6.30', candidate.sha256),
-      'iwer-vanilla-hand': consumerLanePassed(consumerResult, threeReport, 'iwer-vanilla-hand', candidate.sha256),
-      'iwer-vanilla-controller': consumerLanePassed(consumerResult, threeReport, 'iwer-vanilla-controller', candidate.sha256),
-      'iwer-react-hand': consumerLanePassed(consumerResult, react19Report, 'iwer-react-hand', candidate.sha256),
-      'iwer-react-controller': consumerLanePassed(consumerResult, react19Report, 'iwer-react-controller', candidate.sha256),
-    }
-    laneStates['core-import'] = consumerResult.status === 'passed' && importReports.every(
-      ({ status, candidateSha256 }) =>
-        status === 'passed' && candidateSha256 === candidate.sha256,
-    )
-    await writeFile(
-      resolve(rawDirectory, 'import-safety.json'),
-      canonicalJson({
-        candidateSha256: candidate.sha256,
-        status: laneStates['core-import'] ? 'passed' : 'failed',
-        reports: importReportNames.map((name, index) => ({
-          report: `raw/${name}`,
-          status:
-            consumerResult.status === 'passed' &&
-            importReports[index]?.status === 'passed' &&
-            importReports[index]?.candidateSha256 === candidate.sha256
-              ? 'passed'
-              : 'failed',
-        })),
-      }),
-    )
-
-    const sceneShieldCombinations = [
-      {
-        id: 'three-hand',
-        report: threeReport,
-        reportPath: 'raw/three-iwer-lanes.json',
-        lanePassed: laneStates['three-0.185.1'],
-        integration: 'three',
-        sourceKind: 'hand',
-      },
-      {
-        id: 'three-controller',
-        report: threeReport,
-        reportPath: 'raw/three-iwer-lanes.json',
-        lanePassed: laneStates['three-0.185.1'],
-        integration: 'three',
-        sourceKind: 'controller',
-      },
-      {
-        id: 'react-18-hand',
-        report: react18Report,
-        reportPath: 'raw/react-18-xr-iwer-lanes.json',
-        lanePassed: laneStates['react-18.3.1-r3f-8.18.0'],
-        integration: 'react',
-        sourceKind: 'hand',
-      },
-      {
-        id: 'react-18-controller',
-        report: react18Report,
-        reportPath: 'raw/react-18-xr-iwer-lanes.json',
-        lanePassed: laneStates['react-18.3.1-r3f-8.18.0'],
-        integration: 'react',
-        sourceKind: 'controller',
-      },
-      {
-        id: 'react-19-hand',
-        report: react19Report,
-        reportPath: 'raw/react-19-xr-iwer-lanes.json',
-        lanePassed: laneStates['react-19.2.7-r3f-9.6.1'],
-        integration: 'react',
-        sourceKind: 'hand',
-      },
-      {
-        id: 'react-19-controller',
-        report: react19Report,
-        reportPath: 'raw/react-19-xr-iwer-lanes.json',
-        lanePassed: laneStates['react-19.2.7-r3f-9.6.1'],
-        integration: 'react',
-        sourceKind: 'controller',
-      },
-    ].map(
-      ({ id, report, reportPath, lanePassed, integration, sourceKind }) => ({
-        id,
-        integration,
-        sourceKind,
-        report: reportPath,
-        status:
-          lanePassed &&
-          journeyCombinationPassed(report, integration, sourceKind)
-            ? 'passed'
-            : 'failed',
-      }),
-    )
-    const sceneShieldStatus = sceneShieldCombinations.every(
-      ({ status }) => status === 'passed',
-    )
-      ? 'passed'
-      : 'failed'
-    await writeFile(
-      resolve(rawDirectory, 'scene-event-shield.json'),
-      canonicalJson({
-        candidateSha256: candidate.sha256,
-        status: sceneShieldStatus,
-        combinations: sceneShieldCombinations,
-      }),
-    )
-
-    const automatedGate = (id) =>
-      automatedResult.status === 'passed'
-        ? automatedReport.gates?.[id]?.status
-        : 'failed'
-    const evaluatedPerformanceBaseline = evaluatePerformanceBaselineGate(
-      performanceBaselinePolicy,
-      {
-        vanilla:
-          automatedReport.gates?.['performance-baseline']?.variants?.vanilla
-            ?.measurements,
-        'react-18.3.1-r3f-8.18.0':
-          react18Report.performanceBaseline?.measurements,
-        'react-19.2.7-r3f-9.6.1':
-          react19Report.performanceBaseline?.measurements,
-      },
-    )
-    const performancePrerequisites = performanceBaselinePrerequisites({
-      vanillaAutomatedReport: automatedReport,
-      react18PackedConsumer: consumerLanePassed(
-        consumerResult,
-        react18Report,
-        'react-18.3.1-r3f-8.18.0',
-        candidate.sha256,
-      ),
-      react19PackedConsumer: consumerLanePassed(
-        consumerResult,
-        react19Report,
-        'react-19.2.7-r3f-9.6.1',
-        candidate.sha256,
-      ),
-    })
-    const performanceBaselineReport = {
-      ...evaluatedPerformanceBaseline,
-      status:
-        evaluatedPerformanceBaseline.status === 'passed' &&
-        Object.values(performancePrerequisites).every(Boolean)
-          ? 'passed'
-          : 'failed',
-      failures: [
-        ...evaluatedPerformanceBaseline.failures,
-        ...Object.entries(performancePrerequisites)
-          .filter(([, passed]) => !passed)
-          .map(([prerequisite]) => `${prerequisite} prerequisite failed`),
-      ],
-      prerequisites: performancePrerequisites,
-    }
-    await writeFile(
-      resolve(rawDirectory, 'performance-baseline.json'),
-      canonicalJson(performanceBaselineReport),
-    )
-
-    const gates = [
-      gate(
-        'deterministic-boundaries',
-        deterministicResult.status === 'passed' ? deterministicReport.status : 'failed',
-        'raw/deterministic-boundaries.json',
-      ),
-      gate('core-behavior', prerequisiteResults[4].status, 'raw/prerequisite-5.json'),
-      gate(
-        'import-safety',
-        laneStates['core-import'] ? 'passed' : 'failed',
-        'raw/import-safety.json',
-      ),
-      gate('three-consumer', laneStates['three-0.185.1'] ? 'passed' : 'failed', 'raw/three-iwer-lanes.json'),
-      gate('react-18-consumer', laneStates['react-18.3.1-r3f-8.18.0'] ? 'passed' : 'failed', 'raw/react-18-xr-iwer-lanes.json'),
-      gate('react-19-consumer', laneStates['react-19.2.7-r3f-9.6.1'] ? 'passed' : 'failed', 'raw/react-19-xr-iwer-lanes.json'),
-      gate('react-xr', laneStates['react-xr-6.6.30'] ? 'passed' : 'failed', 'raw/react-19-xr-iwer-lanes.json'),
-      gate(
-        'iwer-four-lanes',
-        [
-          'iwer-vanilla-hand',
-          'iwer-vanilla-controller',
-          'iwer-react-hand',
-          'iwer-react-controller',
-        ].every((id) => laneStates[id])
-          ? 'passed'
-          : 'failed',
-        'raw/packed-consumers-command.json',
-      ),
-      ...[
-        'allocation',
-        'identical-frame-mutation',
-        'resource-growth',
-        'lifecycle-leak',
-      ].map((id) =>
-        gate(
-          id,
-          automatedGate(id),
-          'raw/automated-package-gates.json',
-          automatedReport.gates?.[id]?.reason,
-        ),
-      ),
-      gate(
-        'performance-baseline',
-        performanceBaselineReport.status,
-        'raw/performance-baseline.json',
-        performanceBaselineReport.failures[0],
-      ),
-      gate(
-        'scene-event-shield',
-        sceneShieldStatus,
-        'raw/scene-event-shield.json',
-      ),
-      gate('example-packed-consumer', exampleResult.status, 'raw/packed-example-command.json'),
-    ]
-
     const candidateIdentity = {
       package: '@xleepy/wrist-menu',
       version: '0.0.0',
       tarball: relative(root, candidate.candidatePath).replaceAll('\\', '/'),
       sha256: candidate.sha256,
     }
-    const recordInput = {
+    const evaluation = evaluateAutomatedReleaseGates({
+      compatibility,
+      protocol: { ...protocolIdentity, requiredGateIds: protocol.requiredGateIds },
       candidate: candidateIdentity,
       source,
       lockfiles,
-      protocol: protocolIdentity,
       instrumentation,
-      rawReportDirectory: 'RAW_DIRECTORY_PLACEHOLDER',
-      requiredGateIds: protocol.requiredGateIds,
-      gates,
-      testedLanes,
-      validationCombinations: [],
-      resolvedCompatibilitySha256: sha256(
-        canonicalJson(
-          resolveCompatibilityEvidence(
-            compatibility,
-            candidateIdentity,
-            laneStates,
-            'SELF',
-          ),
-        ),
-      ),
-      bundleManifest: await createRetainedReportManifest(workingDirectory),
-    }
-    const preliminary = buildAutomatedEvidenceRecord(recordInput)
-    const recordDirectoryRelative = `artifacts/release-evidence/${preliminary.recordId}`
-    const record = buildAutomatedEvidenceRecord({
-      ...recordInput,
-      rawReportDirectory: `${recordDirectoryRelative}/raw`,
+      prerequisiteResults,
+      deterministicResult,
+      deterministicReport,
+      consumerResult,
+      automatedResult,
+      automatedReport,
+      exampleResult,
+      threeReport,
+      react18Report,
+      react19Report,
+      importReportNames,
+      importReports,
+      performanceBaselinePolicy,
     })
-    const recordDirectory = resolve(root, recordDirectoryRelative)
-    const resolvedCompatibility = resolveCompatibilityEvidence(
-      compatibility,
-      record.candidate,
-      laneStates,
-      `${recordDirectoryRelative}/evidence-record.json`,
+    await writeFile(
+      resolve(rawDirectory, 'import-safety.json'),
+      canonicalJson(evaluation.reports.importSafety),
     )
+    await writeFile(
+      resolve(rawDirectory, 'scene-event-shield.json'),
+      canonicalJson(evaluation.reports.sceneEventShield),
+    )
+    await writeFile(
+      resolve(rawDirectory, 'performance-baseline.json'),
+      canonicalJson(evaluation.reports.performanceBaseline),
+    )
+    const finalized = finalizeAutomatedReleaseEvidence(evaluation, {
+      bundleManifest: await createRetainedReportManifest(workingDirectory),
+    })
+    const {
+      recordDirectory: recordDirectoryRelative,
+      record,
+      resolvedCompatibility,
+    } = finalized
+    const recordDirectory = resolve(root, recordDirectoryRelative)
 
     const publishResult = await stageAndPublishRecord({
       workingDirectory,

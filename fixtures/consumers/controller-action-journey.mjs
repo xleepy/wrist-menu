@@ -3,11 +3,8 @@ import assert from 'node:assert/strict'
 import { controllerActionSnapshot } from '../controller-action.mjs'
 import { crossInputSnapshot } from '../cross-input-selection.mjs'
 import {
-  assertCompleteJourneyCoverage,
-  buildRendererJourneyCoverage,
+  runRendererJourneyEvidence,
   sceneActionTypes,
-  semanticCaseIds,
-  shieldCaseIds,
 } from './journey-evidence.mjs'
 import {
   createIwerControllerFixture,
@@ -125,22 +122,6 @@ function terminalWristMenuEvents(events) {
     }))
 }
 
-function expectedShieldTerminalTypes(id) {
-  if (id === 'rapid-actions') return ['selection-intent', 'selection-intent']
-  if (id === 'cancel' || id === 'leave-before-release') {
-    return ['selection-cancellation']
-  }
-  return ['selection-intent']
-}
-
-function terminalSequenceMatches(id, events) {
-  const expected = expectedShieldTerminalTypes(id)
-  return (
-    events.length === expected.length &&
-    events.every(({ type }, index) => type === expected[index])
-  )
-}
-
 function threeBehindTarget(three) {
   const target = new three.Object3D()
   const deliveries = new Map(sceneActionTypes.map((type) => [type, 0]))
@@ -172,9 +153,9 @@ async function runThreeShieldMatrix({
   updateThreeWristMenu,
   iwer,
   three,
-}) {
+}, scenarios) {
   const cases = []
-  for (const id of shieldCaseIds) {
+  for (const { id } of scenarios) {
     const fixture = sourceKind === 'controller'
       ? await createIwerControllerFixture(iwer)
       : await createIwerHandFixture(iwer)
@@ -305,45 +286,31 @@ async function runThreeShieldMatrix({
       disposed = true
       const menuPresentAfterUnmount = menu.presentation.group.children.length > 0
       const unmountRecoveryDispatches = behind.dispatch(false)
-      const passed =
-        dispatches.every(({ behindTargetDeliveries }) =>
-          behindTargetDeliveries === 0) &&
-        mountedRecoveryDispatches.every(({ behindTargetDeliveries }) =>
-          behindTargetDeliveries === 1) &&
-        unmountRecoveryDispatches.every(({ behindTargetDeliveries }) =>
-          behindTargetDeliveries === 1) &&
-        terminalSequenceMatches(id, terminalEvents)
+      const observations = {
+        dispatchPath: 'three-host-shield',
+        dispatches,
+        recoveryDispatches: mountedRecoveryDispatches,
+        mountedRecoveryDispatches,
+        unmountRecoveryDispatches,
+        terminalEvents,
+        neutralTransitions,
+        mountedRecoveryMenuPresent,
+        sourceNeutralized,
+        menuPresentAfterUnmount,
+        iwerFrames: fixture.frameCount,
+        rendererFrames,
+        wristMenuEvents: events,
+      }
       cases.push({
         id,
-        status: passed ? 'passed' : 'failed',
-        observations: {
-          dispatchPath: 'three-host-shield',
-          dispatches,
-          recoveryDispatches: mountedRecoveryDispatches,
-          mountedRecoveryDispatches,
-          unmountRecoveryDispatches,
-          terminalEvents,
-          neutralTransitions,
-          mountedRecoveryMenuPresent,
-          sourceNeutralized,
-          menuPresentAfterUnmount,
-          iwerFrames: fixture.frameCount,
-          rendererFrames,
-          wristMenuEvents: events,
-        },
+        observations,
       })
     } finally {
       if (!disposed) disposeThreeWristMenu(menu)
       fixture.restoreGlobals()
     }
   }
-  return {
-    status: cases.every(({ status }) => status === 'passed')
-      ? 'passed'
-      : 'failed',
-    actionTypes: sceneActionTypes,
-    cases,
-  }
+  return cases
 }
 
 async function runThreeSemanticMatrix({
@@ -355,14 +322,14 @@ async function runThreeSemanticMatrix({
   updateThreeWristMenu,
   iwer,
   three,
-}) {
+}, scenarios) {
   const createFixture = (wrist = 'left') =>
     sourceKind === 'controller'
       ? createIwerControllerFixture(iwer, wrist)
       : createIwerHandFixture(iwer, wrist)
   const cases = []
 
-  for (const id of semanticCaseIds) {
+  for (const { id } of scenarios) {
     const wrists = id === 'both-wrists' ? ['left', 'right'] : ['left']
     const observations = []
     let passed = true
@@ -997,18 +964,20 @@ export async function runPackedThreeControllerJourney({
       wristMenuEvents.filter(({ type }) => type === 'selection-intent').length,
       1,
     )
-    const semanticCases = await runThreeSemanticMatrix({
+    const evidence = await runRendererJourneyEvidence({
+      rendererIntegration: 'three',
       sourceKind: 'controller',
-      createThreeWristMenuState,
-      disposeThreeWristMenu,
-      syncThreeWristMenu,
-      threeWristMenuBlocksSceneInput,
-      updateThreeWristMenu,
-      iwer,
-      three,
-    })
-    const sceneEventShield = {
-      ...(await runThreeShieldMatrix({
+      runSemanticCases: (scenarios) => runThreeSemanticMatrix({
+        sourceKind: 'controller',
+        createThreeWristMenuState,
+        disposeThreeWristMenu,
+        syncThreeWristMenu,
+        threeWristMenuBlocksSceneInput,
+        updateThreeWristMenu,
+        iwer,
+        three,
+      }, scenarios),
+      runSceneEventShieldCases: (scenarios) => runThreeShieldMatrix({
         sourceKind: 'controller',
         createThreeWristMenuState,
         disposeThreeWristMenu,
@@ -1016,17 +985,8 @@ export async function runPackedThreeControllerJourney({
         updateThreeWristMenu,
         iwer,
         three,
-      })),
-      rendererIntegration: 'three',
-      selectionSourceKind: 'controller',
-    }
-    const coverage = buildRendererJourneyCoverage({
-      driver: 'packed-three-renderer-xr',
-      sourceKind: 'controller',
-      semanticCases,
-      sceneEventShield,
+      }, scenarios),
     })
-    assertCompleteJourneyCoverage(coverage)
     const selectionIntents = wristMenuEvents.filter(
       ({ type }) => type === 'selection-intent',
     ).length
@@ -1035,13 +995,13 @@ export async function runPackedThreeControllerJourney({
       status:
         selectionIntents === 1 &&
         sceneActions === 0 &&
-        coverage.status === 'passed'
+        evidence.status === 'passed'
           ? 'passed'
           : 'failed',
       selectionIntents,
       blockedSceneActions: sceneActions,
-      coverage,
-      sceneEventShield,
+      coverage: evidence.coverage,
+      sceneEventShield: evidence.sceneEventShield,
     }
   } finally {
     disposeThreeWristMenu(menu)
@@ -1100,18 +1060,20 @@ export async function runPackedThreeHandJourney({
         .map(({ intent, source }) => [intent.itemId, source.kind]),
       [['first', 'hand']],
     )
-    const semanticCases = await runThreeSemanticMatrix({
+    const evidence = await runRendererJourneyEvidence({
+      rendererIntegration: 'three',
       sourceKind: 'hand',
-      createThreeWristMenuState,
-      disposeThreeWristMenu,
-      syncThreeWristMenu,
-      threeWristMenuBlocksSceneInput,
-      updateThreeWristMenu,
-      iwer,
-      three,
-    })
-    const sceneEventShield = {
-      ...(await runThreeShieldMatrix({
+      runSemanticCases: (scenarios) => runThreeSemanticMatrix({
+        sourceKind: 'hand',
+        createThreeWristMenuState,
+        disposeThreeWristMenu,
+        syncThreeWristMenu,
+        threeWristMenuBlocksSceneInput,
+        updateThreeWristMenu,
+        iwer,
+        three,
+      }, scenarios),
+      runSceneEventShieldCases: (scenarios) => runThreeShieldMatrix({
         sourceKind: 'hand',
         createThreeWristMenuState,
         disposeThreeWristMenu,
@@ -1119,17 +1081,8 @@ export async function runPackedThreeHandJourney({
         updateThreeWristMenu,
         iwer,
         three,
-      })),
-      rendererIntegration: 'three',
-      selectionSourceKind: 'hand',
-    }
-    const coverage = buildRendererJourneyCoverage({
-      driver: 'packed-three-renderer-xr',
-      sourceKind: 'hand',
-      semanticCases,
-      sceneEventShield,
+      }, scenarios),
     })
-    assertCompleteJourneyCoverage(coverage)
     const selectionIntents = wristMenuEvents.filter(
       ({ type }) => type === 'selection-intent',
     ).length
@@ -1138,13 +1091,13 @@ export async function runPackedThreeHandJourney({
       status:
         selectionIntents === 1 &&
         sceneActions === 0 &&
-        coverage.status === 'passed'
+        evidence.status === 'passed'
           ? 'passed'
           : 'failed',
       selectionIntents,
       blockedSceneActions: sceneActions,
-      coverage,
-      sceneEventShield,
+      coverage: evidence.coverage,
+      sceneEventShield: evidence.sceneEventShield,
     }
   } finally {
     disposeThreeWristMenu(menu)
@@ -1280,10 +1233,10 @@ async function createReactRendererHarness({
   }
 }
 
-async function runReactSemanticMatrix(dependencies, sourceKind) {
+async function runReactSemanticMatrix(dependencies, sourceKind, scenarios) {
   const { three } = dependencies
   const cases = []
-  for (const id of semanticCaseIds) {
+  for (const { id } of scenarios) {
     const wrists = id === 'both-wrists' ? ['left', 'right'] : ['left']
     const runs = []
     for (const wrist of wrists) {
@@ -1670,10 +1623,10 @@ async function runReactSemanticMatrix(dependencies, sourceKind) {
   return cases
 }
 
-async function runReactShieldMatrix(dependencies, sourceKind) {
+async function runReactShieldMatrix(dependencies, sourceKind, scenarios) {
   const { three } = dependencies
   const cases = []
-  for (const id of shieldCaseIds) {
+  for (const { id } of scenarios) {
     const harness = await createReactRendererHarness({
       ...dependencies,
       sourceKind,
@@ -1795,75 +1748,41 @@ async function runReactShieldMatrix(dependencies, sourceKind) {
       await step(recoveryTime, harness.fixture.nextFrame(recoveryTime))
       const menuPresentAfterUnmount = harness.menuGroup() !== undefined
       const unmountRecoveryDispatches = harness.dispatchSceneActions()
-      const passed =
-        dispatches.every(({ behindTargetDeliveries }) => behindTargetDeliveries === 0) &&
-        mountedRecoveryDispatches.every(
-          ({ behindTargetDeliveries }) => behindTargetDeliveries > 0,
-        ) &&
-        unmountRecoveryDispatches.every(
-          ({ behindTargetDeliveries }) => behindTargetDeliveries > 0,
-        ) &&
-        terminalSequenceMatches(id, terminalEvents)
+      const observations = {
+        dispatchPath: 'react-event-manager',
+        dispatches,
+        recoveryDispatches: mountedRecoveryDispatches,
+        mountedRecoveryDispatches,
+        unmountRecoveryDispatches,
+        terminalEvents,
+        neutralTransitions,
+        mountedRecoveryMenuPresent,
+        sourceNeutralized,
+        menuPresentAfterUnmount,
+        iwerFrames: harness.fixture.frameCount,
+        rendererFrames,
+        wristMenuEvents: harness.wristMenuEvents,
+      }
       cases.push({
         id,
-        status: passed ? 'passed' : 'failed',
-        observations: {
-          dispatchPath: 'react-event-manager',
-          dispatches,
-          recoveryDispatches: mountedRecoveryDispatches,
-          mountedRecoveryDispatches,
-          unmountRecoveryDispatches,
-          terminalEvents,
-          neutralTransitions,
-          mountedRecoveryMenuPresent,
-          sourceNeutralized,
-          menuPresentAfterUnmount,
-          iwerFrames: harness.fixture.frameCount,
-          rendererFrames,
-          wristMenuEvents: harness.wristMenuEvents,
-        },
+        observations,
       })
     } finally {
       await harness.dispose()
     }
   }
-  return {
-    status: cases.every(({ status }) => status === 'passed') ? 'passed' : 'failed',
-    actionTypes: sceneActionTypes,
-    cases,
-  }
+  return cases
 }
 
 async function runPackedReactJourney(dependencies, sourceKind) {
-  const semanticCases = await runReactSemanticMatrix(dependencies, sourceKind)
-  const sceneEventShield = {
-    ...(await runReactShieldMatrix(dependencies, sourceKind)),
+  return runRendererJourneyEvidence({
     rendererIntegration: 'react',
-    selectionSourceKind: sourceKind,
-  }
-  const coverage = buildRendererJourneyCoverage({
-    driver: 'packed-react-renderer-xr',
     sourceKind,
-    semanticCases,
-    sceneEventShield,
+    runSemanticCases: (scenarios) =>
+      runReactSemanticMatrix(dependencies, sourceKind, scenarios),
+    runSceneEventShieldCases: (scenarios) =>
+      runReactShieldMatrix(dependencies, sourceKind, scenarios),
   })
-  assertCompleteJourneyCoverage(coverage)
-  const selectionIntents = semanticCases.reduce(
-    (total, entry) => total + entry.observations.runs.reduce(
-      (subtotal, run) => subtotal + run.wristMenuEvents.filter(
-        ({ type }) => type === 'selection-intent',
-      ).length,
-      0,
-    ),
-    0,
-  )
-  return {
-    id: `iwer-react-${sourceKind}`,
-    status: coverage.status,
-    selectionIntents,
-    coverage,
-    sceneEventShield,
-  }
 }
 
 export async function runPackedReactControllerJourney(dependencies) {

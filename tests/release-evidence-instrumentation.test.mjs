@@ -23,8 +23,9 @@ import { verifyImportSafety } from '../fixtures/consumers/import-safety.mjs'
 import {
   assertCompleteJourneyCoverage,
   buildRendererJourneyCoverage,
+  runRendererJourneyEvidence,
 } from '../fixtures/consumers/journey-evidence.mjs'
-import { journeyCombinationPassed } from '../scripts/generate-release-evidence.mjs'
+import { evaluateAutomatedReleaseGates } from '../scripts/release-gate-evaluation.mjs'
 
 const semanticCaseIds = [
   'fresh-reveal-hide-dwell',
@@ -92,7 +93,10 @@ function makeValidSemanticCases() {
   }))
 }
 
-function makeValidSceneEventShield() {
+function makeValidSceneEventShield(
+  integration = 'react',
+  sourceKind = 'hand',
+) {
   return {
     status: 'passed',
     actionTypes: [...sceneActionTypes],
@@ -101,7 +105,9 @@ function makeValidSceneEventShield() {
         id,
         status: 'passed',
         observations: {
-          dispatchPath: 'react-event-manager',
+          dispatchPath: integration === 'three'
+            ? 'three-host-shield'
+            : 'react-event-manager',
           dispatches: sceneActionTypes.map((type) => ({
             type,
             behindTargetDeliveries: 0,
@@ -125,26 +131,35 @@ function makeValidSceneEventShield() {
   }
 }
 
-function makeValidJourneyReport() {
+function makeValidJourney(integration = 'react', sourceKind = 'hand') {
   const semanticCases = makeValidSemanticCases()
   const sceneEventShield = {
-    ...makeValidSceneEventShield(),
-    rendererIntegration: 'react',
-    selectionSourceKind: 'hand',
+    ...makeValidSceneEventShield(integration, sourceKind),
+    rendererIntegration: integration,
+    selectionSourceKind: sourceKind,
   }
   return {
     status: 'passed',
-    journeys: [{
+    coverage: {
       status: 'passed',
-      coverage: {
-        status: 'passed',
-        driver: 'packed-react-renderer-xr',
-        sourceKind: 'hand',
-        semanticCases,
-        sceneEventShield: structuredClone(sceneEventShield),
-      },
-      sceneEventShield,
-    }],
+      driver: integration === 'three'
+        ? 'packed-three-renderer-xr'
+        : 'packed-react-renderer-xr',
+      sourceKind,
+      semanticCases,
+      sceneEventShield: structuredClone(sceneEventShield),
+    },
+    sceneEventShield,
+  }
+}
+
+function makeValidJourneyReport(integration = 'react') {
+  return {
+    status: 'passed',
+    journeys: [
+      makeValidJourney(integration, 'hand'),
+      makeValidJourney(integration, 'controller'),
+    ],
   }
 }
 
@@ -328,6 +343,43 @@ test('renderer journey evidence rejects Core-only samples and inferred shield bo
   )
 })
 
+test('one journey-evidence interface sequences scenarios for either Renderer Integration adapter', async () => {
+  const observed = { semantic: [], shield: [] }
+  const evidence = await runRendererJourneyEvidence({
+    rendererIntegration: 'react',
+    sourceKind: 'hand',
+    runSemanticCases(scenarios) {
+      observed.semantic = scenarios.map(({ id }) => id)
+      return makeValidSemanticCases().map((entry) => ({
+        ...entry,
+        observations: {
+          ...entry.observations,
+          runs: entry.observations.runs.map((run) => ({
+            ...run,
+            wristMenuEvents: [],
+          })),
+        },
+      }))
+    },
+    runSceneEventShieldCases(scenarios) {
+      observed.shield = scenarios.map(({ id }) => id)
+      return makeValidSceneEventShield().cases
+    },
+  })
+
+  assert.deepEqual(observed.semantic, semanticCaseIds)
+  assert.deepEqual(observed.shield, [
+    'commit',
+    'cancel',
+    'hold',
+    'leave-before-release',
+    'rapid-actions',
+  ])
+  assert.equal(evidence.id, 'iwer-react-hand')
+  assert.equal(evidence.status, 'passed')
+  assert.equal(evidence.coverage.sceneEventShield, evidence.sceneEventShield)
+})
+
 test('renderer journey evidence rejects incomplete input-switching proof', () => {
   const mutations = [
     (run) => { run.activeTransientBefore.claimed = false },
@@ -478,7 +530,61 @@ test('renderer journey evidence rejects wrong shield terminals or missing recove
   }
 })
 
-test('release generator fails closed on passed journey reports with weakened proof', () => {
+function evaluateJourneyReports(react19Report) {
+  const candidateSha256 = 'a'.repeat(64)
+  const report = (journeyReport, testedLanes) => ({
+    ...journeyReport,
+    candidateSha256,
+    testedLanes,
+  })
+  return evaluateAutomatedReleaseGates({
+    compatibility: {
+      testedLanes: [
+        'core-import',
+        'three-0.185.1',
+        'react-18.3.1-r3f-8.18.0',
+        'react-19.2.7-r3f-9.6.1',
+        'react-xr-6.6.30',
+        'iwer-vanilla-hand',
+        'iwer-vanilla-controller',
+        'iwer-react-hand',
+        'iwer-react-controller',
+      ].map((id) => ({ id })),
+    },
+    protocol: { id: 'test', version: 1, sha256: 'b'.repeat(64), requiredGateIds: [] },
+    candidate: { sha256: candidateSha256 },
+    source: {},
+    lockfiles: [],
+    instrumentation: {},
+    prerequisiteResults: Array.from({ length: 5 }, () => ({ status: 'passed' })),
+    deterministicResult: { status: 'passed' },
+    deterministicReport: { status: 'passed' },
+    consumerResult: { status: 'passed' },
+    automatedResult: { status: 'passed' },
+    automatedReport: { gates: {} },
+    exampleResult: { status: 'passed' },
+    threeReport: report(makeValidJourneyReport('three'), [
+      'three-0.185.1',
+      'iwer-vanilla-hand',
+      'iwer-vanilla-controller',
+    ]),
+    react18Report: report(makeValidJourneyReport('react'), [
+      'react-18.3.1-r3f-8.18.0',
+      'react-xr-6.6.30',
+    ]),
+    react19Report: report(react19Report, [
+      'react-19.2.7-r3f-9.6.1',
+      'react-xr-6.6.30',
+      'iwer-react-hand',
+      'iwer-react-controller',
+    ]),
+    importReportNames: ['core.json'],
+    importReports: [{ status: 'passed', candidateSha256 }],
+    performanceBaselinePolicy: { variants: {} },
+  })
+}
+
+test('Release Gate evaluation fails closed on passed journey reports with weakened proof', () => {
   const mutations = [
     (report) => {
       report.journeys[0].coverage.semanticCases.find(
@@ -519,10 +625,16 @@ test('release generator fails closed on passed journey reports with weakened pro
     },
   ]
 
-  assert.equal(journeyCombinationPassed(makeValidJourneyReport(), 'react', 'hand'), true)
+  assert.equal(
+    evaluateJourneyReports(makeValidJourneyReport()).reports.sceneEventShield.status,
+    'passed',
+  )
   for (const mutate of mutations) {
     const report = makeValidJourneyReport()
     mutate(report)
-    assert.equal(journeyCombinationPassed(report, 'react', 'hand'), false)
+    assert.equal(
+      evaluateJourneyReports(report).reports.sceneEventShield.status,
+      'failed',
+    )
   }
 })

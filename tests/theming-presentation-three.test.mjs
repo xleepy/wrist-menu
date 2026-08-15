@@ -19,7 +19,6 @@ import {
   updateThreeWristMenu,
 } from '../dist/three/index.js'
 import { ManagedWristMenuPresentation } from '../dist/three/presentation.js'
-import { WristMenuPresentation } from '../dist/three/wrist-menu-presentation.js'
 import { controllerActionSnapshot } from '../fixtures/controller-action.mjs'
 import {
   reachScrollSnapshot,
@@ -56,7 +55,6 @@ function presentationModel(overrides = {}) {
 }
 
 test('resolved theme tokens restyle and resize the default Command slab', () => {
-  const presentation = new WristMenuPresentation()
   const theme = {
     ...defaultThemeTokens,
     panelWidthMeters: 0.24,
@@ -65,18 +63,23 @@ test('resolved theme tokens restyle and resize the default Command slab', () => 
     hoveredItemColor: 0xabcdef,
   }
 
-  presentation.setModel(presentationModel({ theme }), true)
+  const presentation = defaultThreeWristMenuPresentationFactory(
+    presentationModel({ theme }),
+  )
+  const panel = presentation.menuViewport.object.parent.getObjectByName(
+    'wrist-menu-command-slab',
+  )
 
-  assert.equal(presentation.panelMesh.material.color.getHex(), 0x010203)
+  assert.equal(panel.material.color.getHex(), 0x010203)
   assert.equal(
-    presentation.panelMesh.scale.x,
+    panel.scale.x,
     theme.panelWidthMeters / defaultThemeTokens.panelWidthMeters,
   )
   assert.equal(
-    presentation.panelMesh.scale.y,
+    panel.scale.y,
     theme.viewportHeightMeters / defaultThemeTokens.viewportHeightMeters,
   )
-  const row = presentation.group.children.find(
+  const row = presentation.root.children.find(
     ({ name }) => name === 'wrist-menu-action-visual:spawn',
   )
   assert.equal(row.material.color.getHex(), 0xffffff)
