@@ -28,6 +28,21 @@ function createRuntime(onEvent = () => undefined) {
   })
 }
 
+const thresholdFor = (kind) => (kind === 'hand' ? 0.009 : 0.013)
+
+function acquire(state, kind = 'hand') {
+  advanceScrollState(state, 1, 100, [
+    scrollSource({ id: 'source', kind, positionY: 0 }),
+  ])
+  return advanceScrollState(state, 2, 100, [
+    scrollSource({
+      id: 'source',
+      kind,
+      positionY: -thresholdFor(kind),
+    }),
+  ])
+}
+
 test('createScrollState exposes a neutral initial state', () => {
   const state = createScrollState()
   assert.deepEqual(state, {
@@ -36,6 +51,9 @@ test('createScrollState exposes a neutral initial state', () => {
     ownerKind: null,
     ownerStartY: 0,
     ownerStartOffset: 0,
+    candidateSourceId: null,
+    candidateKind: null,
+    candidateStartY: 0,
     barrierActive: false,
     lastSequence: 0,
   })
@@ -72,6 +90,42 @@ test('a panel-targeting source acquires ownership and translates Y motion into r
   assert.equal(moved.offset, 1)
 })
 
+for (const [kind, threshold] of [
+  ['hand', 0.009],
+  ['controller', 0.013],
+]) {
+  test(
+    `${kind} Scroll Ownership acquires only at its inclusive movement threshold`,
+    () => {
+      const belowState = createScrollState()
+      advanceScrollState(belowState, 1, 100, [
+        scrollSource({ id: 'source', kind, positionY: 0 }),
+      ])
+      const below = advanceScrollState(belowState, 2, 100, [
+        scrollSource({
+          id: 'source',
+          kind,
+          positionY: -(threshold - 0.000001),
+        }),
+      ])
+      assert.equal(below.scrollOwned, false)
+      assert.deepEqual([...below.scrollingSourceIds], [])
+
+      for (const movement of [threshold, threshold + 0.000001]) {
+        const state = createScrollState()
+        advanceScrollState(state, 1, 100, [
+          scrollSource({ id: 'source', kind, positionY: 0 }),
+        ])
+        const acquired = advanceScrollState(state, 2, 100, [
+          scrollSource({ id: 'source', kind, positionY: -movement }),
+        ])
+        assert.equal(acquired.scrollOwned, true)
+        assert.deepEqual([...acquired.scrollingSourceIds], ['source'])
+      }
+    },
+  )
+}
+
 test('non-targeting sources never acquire ownership', () => {
   const state = createScrollState()
   const result = advanceScrollState(state, 1, 100, [
@@ -101,36 +155,36 @@ test('advanceScrollState clamps to the [0, totalRows - visibleSlots] window on b
 
 test('ownership releases by id and arms the barrier until the sequence advances', () => {
   const state = createScrollState()
-  advanceScrollState(state, 1, 100, [scrollSource({ id: 'right-hand' })])
-  releaseScrollOwnership(state, 'right-hand')
+  acquire(state)
+  releaseScrollOwnership(state, 'source')
   assert.equal(state.ownerSourceId, null)
   assert.equal(state.barrierActive, true)
 
-  const sameSeq = advanceScrollState(state, 1, 100, [
-    scrollSource({ id: 'right-hand' }),
+  const sameSeq = advanceScrollState(state, 2, 100, [
+    scrollSource({ id: 'source', positionY: 0 }),
   ])
   assert.equal(sameSeq.barrierActive, true)
-  assert.equal(sameSeq.scrollOwned, true)
+  assert.equal(sameSeq.scrollOwned, false)
 
-  releaseScrollOwnership(state, 'right-hand')
-  const nextSeq = advanceScrollState(state, 2, 100, [
-    scrollSource({ id: 'right-hand' }),
+  const nextSeq = advanceScrollState(state, 3, 100, [
+    scrollSource({ id: 'source', positionY: -0.009 }),
   ])
   assert.equal(nextSeq.barrierActive, false)
+  assert.equal(nextSeq.scrollOwned, true)
 })
 
 test('releaseScrollOwnership ignores requests for unknown sources', () => {
   const state = createScrollState()
-  advanceScrollState(state, 1, 100, [scrollSource({ id: 'right-hand' })])
+  acquire(state)
   releaseScrollOwnership(state, 'wrong-source')
-  assert.equal(state.ownerSourceId, 'right-hand')
+  assert.equal(state.ownerSourceId, 'source')
   assert.equal(state.barrierActive, false)
 })
 
 test('a disappeared owner clears ownership without arming the barrier', () => {
   const state = createScrollState()
-  advanceScrollState(state, 1, 100, [scrollSource({ id: 'right-hand' })])
-  const result = advanceScrollState(state, 2, 100, [])
+  acquire(state)
+  const result = advanceScrollState(state, 3, 100, [])
   assert.equal(result.scrollOwned, false)
   assert.equal(state.ownerSourceId, null)
   assert.equal(state.barrierActive, false)
@@ -148,8 +202,8 @@ test('setScrollBarrier arms the barrier until the sequence advances', () => {
 
 test('resetScrollState restores the neutral initial state', () => {
   const state = createScrollState()
-  advanceScrollState(state, 1, 100, [scrollSource({ id: 'right-hand' })])
-  releaseScrollOwnership(state, 'right-hand')
+  acquire(state)
+  releaseScrollOwnership(state, 'source')
   resetScrollState(state)
   assert.deepEqual(
     {
@@ -158,6 +212,9 @@ test('resetScrollState restores the neutral initial state', () => {
       ownerKind: state.ownerKind,
       ownerStartY: state.ownerStartY,
       ownerStartOffset: state.ownerStartOffset,
+      candidateSourceId: state.candidateSourceId,
+      candidateKind: state.candidateKind,
+      candidateStartY: state.candidateStartY,
       barrierActive: state.barrierActive,
     },
     {
@@ -166,6 +223,9 @@ test('resetScrollState restores the neutral initial state', () => {
       ownerKind: null,
       ownerStartY: 0,
       ownerStartOffset: 0,
+      candidateSourceId: null,
+      candidateKind: null,
+      candidateStartY: 0,
       barrierActive: false,
     },
   )

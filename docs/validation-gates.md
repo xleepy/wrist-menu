@@ -2,9 +2,9 @@
 
 This document resolves
 [issue #8](https://github.com/xleepy/wrist-menu/issues/8). It defines what a
-candidate must prove; it is not evidence that the current repository passes the
-gates. Production implementation and evidence collection happen after the
-Wayfinder map closes.
+candidate must prove. The automation and source compatibility policy are
+described in [release-evidence.md](release-evidence.md); only generated records
+from an exact candidate show whether the current release commit passes.
 
 ## Release policy
 
@@ -46,6 +46,13 @@ selected and locked when its consumer fixture is implemented; it is not guessed
 in this planning issue. Widening any peer range requires the complete affected
 suite on every newly claimed Tested Lane.
 
+Although both Primitive Workshop variants live in this repository, evidence
+runs treat them as packed-public consumers. After the Example App's frozen
+dependency install, automation installs the freshly packed candidate under a
+digest-unique filename and builds through public exports. Source imports,
+workspace links, and a cached tarball at the stable development path cannot
+satisfy this gate.
+
 Every public entry point must import without reading `window`, `document`, or
 `navigator`; creating a renderer or Three.js resource; installing IWER or a
 listener; requesting or ending an XR session; or starting a render loop. React
@@ -74,6 +81,11 @@ Every rule below has a named trace. Percentage coverage is not a substitute.
 Threshold behavior is exercised immediately below, exactly at, and immediately
 above the boundary. Time-based traces produce the same Wrist Menu Events at 60,
 72, 90, and 120 Hz and under a deterministic irregular-frame sequence.
+Retained reports contain the complete public events, including their absolute
+timestamps, plus a named semantic projection that removes only `time` for the
+cross-schedule comparison. Each schedule separately proves finite, monotonic
+event times bounded by its final Frame Sample, so timing drift remains visible
+and fails closed even when the semantic projection still matches.
 
 - Automatic reveal enters at or below 35 degrees and exits only above 50
   degrees.

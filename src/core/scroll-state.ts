@@ -14,6 +14,9 @@ export type ScrollState = {
   ownerKind: 'hand' | 'controller' | null
   ownerStartY: number
   ownerStartOffset: number
+  candidateSourceId: string | null
+  candidateKind: 'hand' | 'controller' | null
+  candidateStartY: number
   barrierActive: boolean
   lastSequence: number
 }
@@ -34,6 +37,9 @@ export function createScrollState(): ScrollState {
     ownerKind: null,
     ownerStartY: 0,
     ownerStartOffset: 0,
+    candidateSourceId: null,
+    candidateKind: null,
+    candidateStartY: 0,
     barrierActive: false,
     lastSequence: 0,
   }
@@ -51,6 +57,21 @@ function clampOffset(offset: number, totalRows: number): number {
   return Math.min(maxOffset(totalRows), Math.max(0, offset))
 }
 
+function thresholdFor(kind: 'hand' | 'controller'): number {
+  return kind === 'hand' ? HAND_THRESHOLD : CONTROLLER_THRESHOLD
+}
+
+function clearCandidate(state: ScrollState): void {
+  state.candidateSourceId = null
+  state.candidateKind = null
+  state.candidateStartY = 0
+}
+
+function clearOwner(state: ScrollState): void {
+  state.ownerSourceId = null
+  state.ownerKind = null
+}
+
 export function advanceScrollState(
   state: ScrollState,
   sequence: number,
@@ -65,12 +86,9 @@ export function advanceScrollState(
 
   if (state.ownerSourceId !== null) {
     const owner = sources.find((s) => s.id === state.ownerSourceId)
-    if (owner === undefined) {
-      state.ownerSourceId = null
-      state.ownerKind = null
+    if (owner === undefined || !owner.targetingPanel) {
+      clearOwner(state)
     } else {
-      const threshold =
-        state.ownerKind === 'hand' ? HAND_THRESHOLD : CONTROLLER_THRESHOLD
       const deltaY = state.ownerStartY - owner.positionY
       const rawOffset = state.ownerStartOffset + deltaY / 0.0225
       state.offset = clampOffset(rawOffset, totalRows)
@@ -78,17 +96,38 @@ export function advanceScrollState(
     }
   }
 
-  if (state.ownerSourceId === null) {
+  if (state.ownerSourceId === null && state.candidateSourceId !== null) {
+    const candidate = sources.find((s) => s.id === state.candidateSourceId)
+    if (
+      candidate === undefined ||
+      !candidate.targetingPanel ||
+      candidate.kind !== state.candidateKind
+    ) {
+      clearCandidate(state)
+    } else {
+      const deltaY = state.candidateStartY - candidate.positionY
+      if (Math.abs(deltaY) >= thresholdFor(candidate.kind)) {
+        state.ownerSourceId = candidate.id
+        state.ownerKind = candidate.kind
+        state.ownerStartY = state.candidateStartY
+        state.ownerStartOffset = state.offset
+        clearCandidate(state)
+        state.offset = clampOffset(
+          state.ownerStartOffset + deltaY / 0.0225,
+          totalRows,
+        )
+        scrollingSourceIds.add(candidate.id)
+      }
+    }
+  }
+
+  if (state.ownerSourceId === null && state.candidateSourceId === null) {
     for (const source of sources) {
       if (!source.targetingPanel) continue
       if (scrollingSourceIds.has(source.id)) continue
-      const threshold =
-        source.kind === 'hand' ? HAND_THRESHOLD : CONTROLLER_THRESHOLD
-      state.ownerSourceId = source.id
-      state.ownerKind = source.kind
-      state.ownerStartY = source.positionY
-      state.ownerStartOffset = state.offset
-      scrollingSourceIds.add(source.id)
+      state.candidateSourceId = source.id
+      state.candidateKind = source.kind
+      state.candidateStartY = source.positionY
       break
     }
   }
@@ -111,10 +150,10 @@ export function releaseScrollOwnership(
   sourceId: string,
 ): void {
   if (state.ownerSourceId === sourceId) {
-    state.ownerSourceId = null
-    state.ownerKind = null
+    clearOwner(state)
     state.barrierActive = true
   }
+  if (state.candidateSourceId === sourceId) clearCandidate(state)
 }
 
 export function resetScrollState(state: ScrollState): void {
@@ -123,6 +162,7 @@ export function resetScrollState(state: ScrollState): void {
   state.ownerKind = null
   state.ownerStartY = 0
   state.ownerStartOffset = 0
+  clearCandidate(state)
   state.barrierActive = false
 }
 

@@ -10,6 +10,7 @@ import {
   runPackedReactControllerJourney,
   runPackedReactHandJourney,
 } from '../controller-action-journey.mjs'
+import { writeLaneReport } from '../evidence-report.mjs'
 
 const [fiber, xr] = await Promise.all([
   import('@react-three/fiber'),
@@ -20,7 +21,7 @@ if (fiber.Canvas === undefined || xr.createXRStore === undefined) {
   throw new Error('React renderer lane did not expose its expected public APIs')
 }
 
-await assertReactLane(
+const versions = await assertReactLane(
   renderToString(createElement(WristMenu)),
   {
     react: '19.2.7',
@@ -28,11 +29,12 @@ await assertReactLane(
     three: '0.185.1',
     '@react-three/fiber': '9.6.1',
     '@react-three/xr': '6.6.30',
+    iwer: '2.3.0',
   },
   import.meta.url,
 )
 
-await runPackedReactControllerJourney({
+const controllerJourney = await runPackedReactControllerJourney({
   React,
   WristMenu,
   fiber,
@@ -41,4 +43,27 @@ await runPackedReactControllerJourney({
   xr,
 })
 
-await runPackedReactHandJourney({ React, WristMenu, fiber, iwer, three })
+const handJourney = await runPackedReactHandJourney({
+  React,
+  WristMenu,
+  fiber,
+  iwer,
+  three,
+})
+
+await writeLaneReport('react-19-xr-iwer-lanes.json', {
+  candidateSha256: process.env.WRIST_MENU_CANDIDATE_SHA256,
+  status: [handJourney, controllerJourney].every(
+    ({ status }) => status === 'passed',
+  )
+    ? 'passed'
+    : 'failed',
+  testedLanes: [
+    'react-19.2.7-r3f-9.6.1',
+    'react-xr-6.6.30',
+    handJourney.id,
+    controllerJourney.id,
+  ],
+  versions,
+  journeys: [handJourney, controllerJourney],
+})

@@ -1,34 +1,166 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "package": "@xleepy/wrist-menu",
-  "peerRanges": {
+  "declaredPeers": {
     "three": ">=0.185.1 <0.186.0",
     "react": ">=18 <19.3",
     "@react-three/fiber": ">=8.18.0 <10"
   },
   "testedLanes": [
     {
-      "id": "three",
-      "fixture": "fixtures/consumers/three",
-      "three": "0.185.1"
+      "id": "core-import",
+      "fixture": "fixtures/consumers/three/import-safety.mjs",
+      "node": ">=20",
+      "status": "unverified",
+      "evidenceRecords": []
     },
     {
-      "id": "react-18",
+      "id": "three-0.185.1",
+      "fixture": "fixtures/consumers/three",
+      "three": "0.185.1",
+      "status": "unverified",
+      "evidenceRecords": []
+    },
+    {
+      "id": "react-18.3.1-r3f-8.18.0",
       "fixture": "fixtures/consumers/react-18",
       "three": "0.185.1",
       "react": "18.3.1",
       "reactDom": "18.3.1",
       "reactThreeFiber": "8.18.0",
-      "reactThreeXr": "6.6.30"
+      "reactThreeXr": "6.6.30",
+      "status": "unverified",
+      "evidenceRecords": []
     },
     {
-      "id": "react-19",
+      "id": "react-19.2.7-r3f-9.6.1",
       "fixture": "fixtures/consumers/react-19",
       "three": "0.185.1",
       "react": "19.2.7",
       "reactDom": "19.2.7",
       "reactThreeFiber": "9.6.1",
-      "reactThreeXr": "6.6.30"
+      "reactThreeXr": "6.6.30",
+      "status": "unverified",
+      "evidenceRecords": []
+    },
+    {
+      "id": "react-xr-6.6.30",
+      "fixtures": ["fixtures/consumers/react-18", "fixtures/consumers/react-19"],
+      "reactThreeXr": "6.6.30",
+      "status": "unverified",
+      "evidenceRecords": []
+    },
+    {
+      "id": "iwer-vanilla-hand",
+      "fixture": "fixtures/consumers/three",
+      "iwer": "2.3.0",
+      "variant": "vanilla",
+      "selectionSource": "hand",
+      "status": "unverified",
+      "evidenceRecords": []
+    },
+    {
+      "id": "iwer-vanilla-controller",
+      "fixture": "fixtures/consumers/three",
+      "iwer": "2.3.0",
+      "variant": "vanilla",
+      "selectionSource": "controller",
+      "status": "unverified",
+      "evidenceRecords": []
+    },
+    {
+      "id": "iwer-react-hand",
+      "fixture": "fixtures/consumers/react-19",
+      "iwer": "2.3.0",
+      "variant": "react",
+      "selectionSource": "hand",
+      "status": "unverified",
+      "evidenceRecords": []
+    },
+    {
+      "id": "iwer-react-controller",
+      "fixture": "fixtures/consumers/react-19",
+      "iwer": "2.3.0",
+      "variant": "react",
+      "selectionSource": "controller",
+      "status": "unverified",
+      "evidenceRecords": []
     }
-  ]
+  ],
+  "verifiedClaims": [],
+  "provisionalRows": [
+    {
+      "id": "quest-3-vanilla",
+      "device": "Quest 3",
+      "exampleVariant": "vanilla",
+      "selectionSources": ["hand", "controller"],
+      "menuWrists": ["left", "right"],
+      "refreshRatesHz": [72, 90],
+      "horizonOsBuild": null,
+      "browserBuild": null,
+      "status": "provisional",
+      "evidenceRecords": []
+    },
+    {
+      "id": "quest-3-react",
+      "device": "Quest 3",
+      "exampleVariant": "react",
+      "selectionSources": ["hand", "controller"],
+      "menuWrists": ["left", "right"],
+      "refreshRatesHz": [72, 90],
+      "horizonOsBuild": null,
+      "browserBuild": null,
+      "status": "provisional",
+      "evidenceRecords": []
+    },
+    {
+      "id": "quest-3s-vanilla",
+      "device": "Quest 3S",
+      "exampleVariant": "vanilla",
+      "selectionSources": ["hand", "controller"],
+      "menuWrists": ["left", "right"],
+      "refreshRatesHz": [72, 90],
+      "horizonOsBuild": null,
+      "browserBuild": null,
+      "status": "provisional",
+      "evidenceRecords": []
+    },
+    {
+      "id": "quest-3s-react",
+      "device": "Quest 3S",
+      "exampleVariant": "react",
+      "selectionSources": ["hand", "controller"],
+      "menuWrists": ["left", "right"],
+      "refreshRatesHz": [72, 90],
+      "horizonOsBuild": null,
+      "browserBuild": null,
+      "status": "provisional",
+      "evidenceRecords": []
+    },
+    {
+      "id": "quest-2-vanilla",
+      "device": "Quest 2",
+      "exampleVariant": "vanilla",
+      "selectionSources": ["hand", "controller"],
+      "menuWrists": ["left", "right"],
+      "refreshRatesHz": [72, 90],
+      "horizonOsBuild": null,
+      "browserBuild": null,
+      "status": "provisional",
+      "evidenceRecords": []
+    },
+    {
+      "id": "quest-2-react",
+      "device": "Quest 2",
+      "exampleVariant": "react",
+      "selectionSources": ["hand", "controller"],
+      "menuWrists": ["left", "right"],
+      "refreshRatesHz": [72, 90],
+      "horizonOsBuild": null,
+      "browserBuild": null,
+      "status": "provisional",
+      "evidenceRecords": []
+    }
+  ],
+  "invalidatedEvidence": []
 }
