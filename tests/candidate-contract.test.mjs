@@ -13,60 +13,125 @@ import {
   verifyCandidateBundleMarkdownLinks,
   verifyCandidateFileList,
 } from '../scripts/candidate-package.mjs'
+import { rewriteCandidatePackageReadme } from '../scripts/staged-candidate.mjs'
 
-const PREDECESSOR_COMMIT = '6d57b41b3f28a981f2c88e9f7c3cd5dd0a8d7c91'
+const EVIDENCE_ID = 'automated-release-1111111111111111'
 
-test('candidate documentation preserves exact failed predecessor evidence without promoting it', () => {
+test('candidate evidence index applies only to exact passing candidate bytes and source', () => {
+  const candidateSha256 = 'a'.repeat(64)
+  const sourceCommit = 'b'.repeat(40)
+  const record = {
+    schemaVersion: 1,
+    kind: 'automated',
+    recordId: EVIDENCE_ID,
+    result: 'passed',
+    candidate: {
+      package: '@xleepy/wrist-menu',
+      version: '0.0.0',
+      sha256: candidateSha256,
+    },
+    source: {
+      commit: sourceCommit,
+      exampleCommit: sourceCommit,
+    },
+    gates: [
+      { id: 'core-behavior', status: 'passed' },
+      { id: 'allocation', status: 'passed' },
+    ],
+    validationCombinations: [],
+  }
+
   const index = createCandidateEvidenceIndex({
     candidate: {
       package: '@xleepy/wrist-menu',
       version: '0.0.0',
-      sha256: 'a'.repeat(64),
+      sha256: candidateSha256,
     },
     candidateSource: {
-      commit: 'b'.repeat(40),
+      commit: sourceCommit,
       worktreeClean: true,
     },
-    predecessorRecord: {
-      schemaVersion: 1,
-      recordId: 'automated-release-d5827ff6fbbe7c67',
-      result: 'failed',
-      candidate: {
-        package: '@xleepy/wrist-menu',
-        version: '0.0.0',
-        sha256: 'eef2c2de4a8c25a0226d5067a3735beeb177816c84a5265caf37a861adeff21d',
-      },
-      source: {
-        commit: PREDECESSOR_COMMIT,
-        exampleCommit: PREDECESSOR_COMMIT,
-      },
-      gates: [
-        { id: 'core-behavior', status: 'passed' },
-        { id: 'allocation', status: 'failed', detail: 'instrumentation unavailable' },
-      ],
-      validationCombinations: [],
-    },
+    predecessorRecord: record,
   })
 
   assert.deepEqual(index.candidate, {
     package: '@xleepy/wrist-menu',
     version: '0.0.0',
-    sha256: 'a'.repeat(64),
-    sourceCommit: 'b'.repeat(40),
+    sha256: candidateSha256,
+    sourceCommit,
     worktreeClean: true,
   })
   assert.deepEqual(index.exampleApp, {
-    revision: PREDECESSOR_COMMIT,
-    relation: 'exact-predecessor-evaluated-revision',
+    revision: sourceCommit,
+    relation: 'exact-evaluated-revision',
   })
-  assert.equal(index.evidence.recordId, 'automated-release-d5827ff6fbbe7c67')
-  assert.equal(index.evidence.result, 'failed')
-  assert.equal(index.evidence.sourceCommit, PREDECESSOR_COMMIT)
-  assert.equal(index.evidence.appliesToCandidate, false)
-  assert.deepEqual(index.evidence.failedGates, [
-    { id: 'allocation', detail: 'instrumentation unavailable' },
-  ])
+  assert.equal(index.evidence.recordId, EVIDENCE_ID)
+  assert.equal(index.evidence.result, 'passed')
+  assert.equal(index.evidence.sourceCommit, sourceCommit)
+  assert.equal(index.evidence.appliesToCandidate, true)
+  assert.deepEqual(index.evidence.failedGates, [])
   assert.equal(index.compatibilityClaimsPromoted, false)
+
+  assert.equal(
+    createCandidateEvidenceIndex({
+      candidate: {
+        package: '@xleepy/wrist-menu',
+        version: '0.0.0',
+        sha256: 'c'.repeat(64),
+      },
+      candidateSource: {
+        commit: sourceCommit,
+        worktreeClean: true,
+      },
+      predecessorRecord: record,
+    }).evidence.appliesToCandidate,
+    false,
+  )
+  assert.equal(
+    createCandidateEvidenceIndex({
+      candidate: {
+        package: '@xleepy/wrist-menu',
+        version: '0.0.0',
+        sha256: candidateSha256,
+      },
+      candidateSource: {
+        commit: 'd'.repeat(40),
+        worktreeClean: true,
+      },
+      predecessorRecord: record,
+    }).evidence.appliesToCandidate,
+    false,
+  )
+  assert.throws(
+    () =>
+      createCandidateEvidenceIndex({
+        candidate: {
+          package: '@xleepy/wrist-menu',
+          version: '0.0.0',
+          sha256: candidateSha256,
+        },
+        candidateSource: {
+          commit: sourceCommit,
+          worktreeClean: true,
+        },
+        predecessorRecord: { ...record, result: 'failed' },
+      }),
+    /candidate evidence must retain a passing result/,
+  )
+})
+
+test('staged package README pins repository-relative links to the exact source commit', () => {
+  const sourceCommit = 'a'.repeat(40)
+  const rewritten = rewriteCandidatePackageReadme(
+    '[guide](docs/0.0.0/index.md) [section](docs/0.0.0/index.md#entry-points) [web](https://example.com)\n',
+    sourceCommit,
+  )
+  assert.match(
+    rewritten,
+    new RegExp(`https://github\\.com/xleepy/wrist-menu/blob/${sourceCommit}/docs/0\\.0\\.0/index\\.md`),
+  )
+  assert.match(rewritten, /index\.md#entry-points/)
+  assert.match(rewritten, /\[web\]\(https:\/\/example\.com\)/)
 })
 
 test('candidate extraction fails closed on missing or additional package files', () => {
@@ -212,16 +277,14 @@ test('versioned documentation covers the candidate contract and exact breaking m
   assert.match(migration, /source of truth/i)
   assert.match(migration, /keep stable\s+function identity/i)
 
-  assert.match(compatibility, new RegExp(PREDECESSOR_COMMIT, 'g'))
-  assert.match(compatibility, /automated-release-d5827ff6fbbe7c67/)
-  assert.match(
-    compatibility,
-    /\.\.\/evidence\/automated-release-d5827ff6fbbe7c67\/evidence-record\.json/,
-  )
-  assert.match(compatibility, /verdict is \*\*failed\*\*/)
-  assert.match(compatibility, /68 instrumented property writes/)
-  assert.match(compatibility, /promote no provisional device row/)
+  assert.match(compatibility, /evidence-index\.json/)
+  assert.match(compatibility, /appliesToCandidate: true/)
+  assert.match(compatibility, /digest or source\s+mismatch fails closed/i)
+  assert.match(compatibility, /promotes no physical Validation Combination/i)
   assert.match(release, /documentation\.revision/)
   assert.match(release, /working-tree/)
+  assert.match(release, /same staging function/i)
+  assert.match(release, /exact staged archive/i)
+  assert.match(release, /appliesToCandidate: true/)
   assert.match(release, /restore the local override/i)
 })
