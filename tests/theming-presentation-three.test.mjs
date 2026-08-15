@@ -18,8 +18,6 @@ import {
   threeWristMenuBlocksSceneInput,
   updateThreeWristMenu,
 } from '../dist/three/index.js'
-import { ManagedWristMenuPresentation } from '../dist/three/presentation.js'
-import { WristMenuPresentation } from '../dist/three/wrist-menu-presentation.js'
 import { controllerActionSnapshot } from '../fixtures/controller-action.mjs'
 import {
   reachScrollSnapshot,
@@ -56,7 +54,6 @@ function presentationModel(overrides = {}) {
 }
 
 test('resolved theme tokens restyle and resize the default Command slab', () => {
-  const presentation = new WristMenuPresentation()
   const theme = {
     ...defaultThemeTokens,
     panelWidthMeters: 0.24,
@@ -65,18 +62,23 @@ test('resolved theme tokens restyle and resize the default Command slab', () => 
     hoveredItemColor: 0xabcdef,
   }
 
-  presentation.setModel(presentationModel({ theme }), true)
+  const presentation = defaultThreeWristMenuPresentationFactory(
+    presentationModel({ theme }),
+  )
+  const panel = presentation.menuViewport.object.parent.getObjectByName(
+    'wrist-menu-command-slab',
+  )
 
-  assert.equal(presentation.panelMesh.material.color.getHex(), 0x010203)
+  assert.equal(panel.material.color.getHex(), 0x010203)
   assert.equal(
-    presentation.panelMesh.scale.x,
+    panel.scale.x,
     theme.panelWidthMeters / defaultThemeTokens.panelWidthMeters,
   )
   assert.equal(
-    presentation.panelMesh.scale.y,
+    panel.scale.y,
     theme.viewportHeightMeters / defaultThemeTokens.viewportHeightMeters,
   )
-  const row = presentation.group.children.find(
+  const row = presentation.root.children.find(
     ({ name }) => name === 'wrist-menu-action-visual:spawn',
   )
   assert.equal(row.material.color.getHex(), 0xffffff)
@@ -91,9 +93,16 @@ test('resolved theme tokens restyle and resize the default Command slab', () => 
 test('shared oriented-box targeting preserves world-meter semantics under presentation scale', () => {
   let hit
   let viewport
-  const managed = new ManagedWristMenuPresentation(
-    presentationModel(),
-    () => {
+  const menu = createThreeWristMenuState({
+    renderer: {
+      xr: {
+        getSession: () => null,
+        getReferenceSpace: () => null,
+      },
+    },
+    snapshot: controllerActionSnapshot,
+    onEvent: () => undefined,
+    presentationFactory: () => {
       const root = new Group()
       root.scale.set(2, 0.5, 3)
       viewport = new Mesh(
@@ -107,7 +116,7 @@ test('shared oriented-box targeting preserves world-meter semantics under presen
       root.add(viewport, hit)
       return {
         root,
-        hitRegions: [{ itemId: 'spawn', object: hit }],
+        hitRegions: [{ itemId: 'spawn-cube', object: hit }],
         menuViewport: { object: viewport },
         update() {},
         dispose() {
@@ -118,19 +127,85 @@ test('shared oriented-box targeting preserves world-meter semantics under presen
         },
       }
     },
-  )
+  })
 
   const pressedPoint = hit.localToWorld(
     new Vector3(0, 0, hit.geometry.parameters.depth / 2 + 0.005 / 3),
   )
   assert.equal(
-    managed.fingertipObservation(pressedPoint, 0.005)?.phase,
+    menu.presentation.fingertipObservation(pressedPoint, 0.005)?.phase,
     'pressed',
   )
   const panelPoint = viewport.localToWorld(new Vector3(0, 0.1, 0))
-  assert.ok(Math.abs(managed.panelLocalY(panelPoint) - 0.05) < 1e-9)
+  assert.ok(Math.abs(menu.presentation.panelLocalY(panelPoint) - 0.05) < 1e-9)
 
-  managed.dispose()
+  disposeThreeWristMenu(menu)
+})
+
+test('targetability updates refresh custom Hit Region declarations', () => {
+  const fixture = createWristXrFixture({ menuKind: 'controller' })
+  fixture.setWristMatrix(new Matrix4().makeRotationY(-Math.PI / 2))
+  let targetableHit
+  let decorativeHit
+  const menu = createThreeWristMenuState({
+    renderer: fixture.renderer,
+    snapshot: controllerActionSnapshot,
+    onEvent: () => undefined,
+    presentationFactory: () => {
+      const root = new Group()
+      const viewport = new Mesh(
+        new BoxGeometry(0.192, 0.27, 0.004),
+        new MeshBasicMaterial({ visible: false }),
+      )
+      targetableHit = new Mesh(
+        new BoxGeometry(0.176, 0.02, 0.008),
+        new MeshBasicMaterial({ visible: false }),
+      )
+      decorativeHit = new Mesh(
+        new BoxGeometry(0.176, 0.02, 0.008),
+        new MeshBasicMaterial({ visible: false }),
+      )
+      root.add(viewport, targetableHit, decorativeHit)
+      let activeHit = decorativeHit
+      return {
+        root,
+        get hitRegions() {
+          return [{ itemId: 'spawn-cube', object: activeHit }]
+        },
+        menuViewport: { object: viewport },
+        update(model) {
+          activeHit = model.targetable ? targetableHit : decorativeHit
+        },
+        dispose() {
+          viewport.geometry.dispose()
+          viewport.material.dispose()
+          targetableHit.geometry.dispose()
+          targetableHit.material.dispose()
+          decorativeHit.geometry.dispose()
+          decorativeHit.material.dispose()
+        },
+      }
+    },
+  })
+
+  updateThreeWristMenu(menu, { time: 16, frame: fixture.frame })
+  updateThreeWristMenu(menu, { time: 32, frame: fixture.frame })
+  assert.equal(
+    menu.presentation.itemIdForIntersection({ object: targetableHit }),
+    'spawn-cube',
+  )
+
+  menu.presentation.setTargetable(false)
+  assert.equal(
+    menu.presentation.itemIdForIntersection({ object: targetableHit }),
+    undefined,
+  )
+  assert.equal(
+    menu.presentation.itemIdForIntersection({ object: decorativeHit }),
+    'spawn-cube',
+  )
+
+  disposeThreeWristMenu(menu)
 })
 
 test('a custom factory receives only the curated model and preserves controller selection, shielding, and disposal', () => {

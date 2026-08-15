@@ -12,12 +12,14 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 import {
-  buildCandidateUnavailableEvidenceRecord,
   canonicalJson,
   createRetainedReportManifest,
   publishImmutableEvidenceBundle,
   verifyImmutableEvidenceBundle,
 } from '../scripts/release-evidence-lib.mjs'
+import {
+  finalizeCandidateUnavailableEvidence,
+} from '../scripts/release-gate-evaluation.mjs'
 
 const digest = (value) => createHash('sha256').update(value).digest('hex')
 
@@ -30,28 +32,21 @@ async function stageBundle(path) {
     version: '0.0.0',
     availability: 'unavailable',
   }
-  const normalizedResolved = {
-    candidate,
-    evidenceRecord: 'SELF',
-    testedLanes: [
-      { id: 'core-import', status: 'failed', evidenceRecords: ['SELF'] },
-    ],
-  }
+  const compatibility = { testedLanes: [{ id: 'core-import' }] }
   const input = {
-    candidate,
-    source: {
-      commit: 'b'.repeat(40),
-      exampleCommit: 'b'.repeat(40),
-      committedAt: '2026-08-08T00:00:00Z',
+    evidenceContext: {
+      compatibility,
+      candidate,
+      source: {
+        commit: 'b'.repeat(40),
+        exampleCommit: 'b'.repeat(40),
+        committedAt: '2026-08-08T00:00:00Z',
+      },
+      lockfiles: [{ path: 'package-lock.json', sha256: 'c'.repeat(64) }],
+      protocol: { id: 'automated-release', version: 1, sha256: 'd'.repeat(64) },
+      instrumentation: { id: 'test', version: 1, sha256: 'e'.repeat(64) },
     },
-    lockfiles: [{ path: 'package-lock.json', sha256: 'c'.repeat(64) }],
-    protocol: { id: 'automated-release', version: 1, sha256: 'd'.repeat(64) },
-    instrumentation: { id: 'test', version: 1, sha256: 'e'.repeat(64) },
-    testedLanes: ['core-import'],
-    validationCombinations: [],
-    resolvedCompatibilitySha256: digest(canonicalJson(normalizedResolved)),
     bundleManifest,
-    rawReportDirectory: 'RAW_DIRECTORY_PLACEHOLDER',
     failure: {
       stage: 'build',
       command: 'npm run build',
@@ -59,22 +54,13 @@ async function stageBundle(path) {
       report: 'raw/report.json',
     },
   }
-  const preliminary = buildCandidateUnavailableEvidenceRecord(input)
-  const recordId = preliminary.recordId
-  const evidenceRecord = `artifacts/release-evidence/${recordId}/evidence-record.json`
-  const resolved = {
-    candidate,
-    evidenceRecord,
-    testedLanes: [
-      { id: 'core-import', status: 'failed', evidenceRecords: [evidenceRecord] },
-    ],
-  }
-  const record = canonicalJson(buildCandidateUnavailableEvidenceRecord({
-    ...input,
-    rawReportDirectory: `artifacts/release-evidence/${recordId}/raw`,
-  }))
+  const finalized = finalizeCandidateUnavailableEvidence(input)
+  const record = canonicalJson(finalized.record)
   await writeFile(resolve(path, 'evidence-record.json'), record)
-  await writeFile(resolve(path, 'compatibility.resolved.json'), canonicalJson(resolved))
+  await writeFile(
+    resolve(path, 'compatibility.resolved.json'),
+    canonicalJson(finalized.resolvedCompatibility),
+  )
   await writeFile(
     resolve(path, 'evidence-record.sha256'),
     `${digest(record)}  evidence-record.json\n`,

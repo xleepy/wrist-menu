@@ -11,7 +11,6 @@ import type {
   PresentationToggleItem,
   ThemeTokens,
 } from '../core/index.js'
-import { defaultThemeTokens } from '../core/index.js'
 import { VISIBLE_SLOTS } from '../core/scroll-state.js'
 import {
   classifyAtlasRowVisual,
@@ -161,6 +160,7 @@ function applyAtlasUv(
   uvs.needsUpdate = true
 }
 
+/** Default Presentation adapter implementation; its factory is the public seam. */
 export class WristMenuPresentation {
   readonly group = new Group()
   readonly hitRegions: Mesh[] = []
@@ -177,17 +177,17 @@ export class WristMenuPresentation {
   private measuredRows: readonly MeasuredRow[] = []
   private scrollOffset = 0
   private scrollOwned = false
-  private theme = defaultThemeTokens
+  private theme: ThemeTokens
   private modelRevision = -1
   private poolBound = false
   private targetable = false
 
-  constructor(initialModel?: PresentationModel) {
+  constructor(initialModel: PresentationModel) {
     this.group.name = 'wrist-menu-attachment-root'
-    this.theme = initialModel?.theme ?? defaultThemeTokens
-    this.allRows = rowsFor(initialModel?.items ?? [])
+    this.theme = initialModel.theme
+    this.allRows = rowsFor(initialModel.items)
     this.measuredRows = measureRows(this.allRows)
-    this.modelRevision = initialModel?.revision ?? -1
+    this.modelRevision = initialModel.revision
     this.atlas = new WristMenuPresentationAtlas(this.allRows, this.theme)
     this.resources.push(this.atlas)
 
@@ -299,7 +299,7 @@ export class WristMenuPresentation {
     this.resources.push(this.footerGeometry, footerMaterial)
     this.visualMaterials.push(footerMaterial)
 
-    if (initialModel !== undefined) this.setModel(initialModel, false)
+    this.update(initialModel)
   }
 
   private updateFooterAtlasState(scrollOwned: boolean, force = false) {
@@ -319,20 +319,6 @@ export class WristMenuPresentation {
     )
     this.footerMesh.userData['wristMenuAtlasStateCues'] = cues
     this.footerMesh.userData['wristMenuAtlasStateCue'] = cues[0]
-  }
-
-  renderItems(items: readonly PresentationItem[]) {
-    this.allRows = rowsFor(items)
-    this.measuredRows = measureRows(this.allRows)
-    this.atlas.redraw(this.allRows, this.theme)
-    this.updateFooterAtlasState(this.scrollOwned, true)
-    this.updatePool(true)
-  }
-
-  setScrollOffset(offset: number) {
-    if (this.scrollOffset === offset) return
-    this.scrollOffset = offset
-    this.updatePool(true)
   }
 
   private updatePool(rebindLayout: boolean) {
@@ -460,8 +446,10 @@ export class WristMenuPresentation {
     this.poolBound = true
   }
 
-  setModel(model: PresentationModel, targetable: boolean) {
-    this.theme = model.theme ?? defaultThemeTokens
+  update(model: PresentationModel) {
+    this.theme = model.theme
+    this.targetable =
+      model.targetable && model.visible && !model.scrollBarrierActive
     const heightScale = reachHeightScale(this.theme)
     const rowWidth = reachRowWidth(this.theme)
     this.panelMesh.scale.set(
@@ -495,19 +483,17 @@ export class WristMenuPresentation {
     this.scrollOffset = model.scrollOffset
     this.updatePool(structureChanged || scrollChanged || !this.poolBound)
     this.group.visible = model.visible
-    this.setTargetable(targetable && model.visible && !model.scrollBarrierActive)
+    for (const hitRegion of this.hitRegions) {
+      hitRegion.raycast = this.targetable && hitRegion.visible
+        ? interactiveRaycast
+        : decorativeRaycast
+    }
+    this.viewportMesh.raycast = this.targetable && this.viewportMesh.visible
+      ? interactiveRaycast
+      : decorativeRaycast
     for (const material of this.visualMaterials) {
       material.opacity = model.opacity
       material.depthWrite = model.opacity >= 1
-    }
-  }
-
-  setTargetable(targetable: boolean) {
-    this.targetable = targetable
-    for (const hitRegion of this.hitRegions) {
-      if (hitRegion.visible) {
-        hitRegion.raycast = targetable ? interactiveRaycast : decorativeRaycast
-      }
     }
   }
 

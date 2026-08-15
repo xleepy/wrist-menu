@@ -3,6 +3,8 @@ import { BoxGeometry, Group, Mesh, MeshBasicMaterial } from 'three'
 const ROW_HEIGHT = 0.02
 const ROW_SPACING = 0.0225
 const HIT_DEPTH = 0.008
+const decorativeRaycast = () => undefined
+const interactiveRaycast = Mesh.prototype.raycast
 
 function presentationRows(items) {
   return items.flatMap((item) => {
@@ -34,6 +36,7 @@ export function createEquivalentPresentationFactory(log = {}) {
     const viewportGeometry = new BoxGeometry(1, 1, 0.004)
     const viewportMaterial = new MeshBasicMaterial({ visible: false })
     const viewport = new Mesh(viewportGeometry, viewportMaterial)
+    viewport.raycast = decorativeRaycast
     viewport.position.z = -0.004
     root.add(viewport)
     const hitRegions = new Map()
@@ -45,6 +48,7 @@ export function createEquivalentPresentationFactory(log = {}) {
       const geometry = new BoxGeometry(1, ROW_HEIGHT, HIT_DEPTH)
       const material = new MeshBasicMaterial({ visible: false })
       const object = new Mesh(geometry, material)
+      object.raycast = decorativeRaycast
       object.position.z = HIT_DEPTH
       root.add(object)
       region = { geometry, material, object }
@@ -63,12 +67,20 @@ export function createEquivalentPresentationFactory(log = {}) {
       update(model) {
         log.updateModels.push(model)
         root.visible = model.visible
+        const targetable =
+          model.targetable && model.visible && !model.scrollBarrierActive
+        viewport.raycast = targetable
+          ? interactiveRaycast
+          : decorativeRaycast
         viewport.scale.set(
           model.theme.panelWidthMeters,
           model.theme.viewportHeightMeters,
           1,
         )
-        for (const { object } of hitRegions.values()) object.visible = false
+        for (const { object } of hitRegions.values()) {
+          object.visible = false
+          object.raycast = decorativeRaycast
+        }
 
         const rows = presentationRows(model.items)
         const startRow = Math.floor(model.scrollOffset)
@@ -90,6 +102,9 @@ export function createEquivalentPresentationFactory(log = {}) {
           if (Math.abs(y) + ROW_HEIGHT / 2 > viewportHalfHeight) continue
           const region = ensureHitRegion(row.itemId)
           region.object.visible = model.visible
+          region.object.raycast = targetable
+            ? interactiveRaycast
+            : decorativeRaycast
           region.object.position.y = y
           region.object.scale.x = model.theme.panelWidthMeters - 0.016
         }
