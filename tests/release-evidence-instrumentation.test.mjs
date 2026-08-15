@@ -21,9 +21,8 @@ import {
 } from '../fixtures/consumers/runtime-evidence.mjs'
 import { verifyImportSafety } from '../fixtures/consumers/import-safety.mjs'
 import {
-  assertCompleteJourneyCoverage,
-  buildRendererJourneyCoverage,
   runRendererJourneyEvidence,
+  verifyRendererJourneyEvidence,
 } from '../fixtures/consumers/journey-evidence.mjs'
 import { evaluateAutomatedReleaseGates } from '../scripts/release-gate-evaluation.mjs'
 
@@ -161,6 +160,30 @@ function makeValidJourneyReport(integration = 'react') {
       makeValidJourney(integration, 'controller'),
     ],
   }
+}
+
+async function runJourneyEvidence({
+  rendererIntegration = 'react',
+  sourceKind = 'hand',
+  semanticCases = makeValidSemanticCases(),
+  sceneEventShield = makeValidSceneEventShield(
+    rendererIntegration,
+    sourceKind,
+  ),
+} = {}) {
+  return verifyRendererJourneyEvidence({
+    status: 'passed',
+    driver: rendererIntegration === 'three'
+      ? 'packed-three-renderer-xr'
+      : 'packed-react-renderer-xr',
+    sourceKind,
+    semanticCases,
+    sceneEventShield: {
+      ...sceneEventShield,
+      rendererIntegration,
+      selectionSourceKind: sourceKind,
+    },
+  })
 }
 
 test('Three allocation evidence observes transient resource construction by ordinal', () => {
@@ -307,35 +330,26 @@ test('import evidence fails closed with observed resources, listeners, and rende
   }
 })
 
-test('renderer journey evidence rejects Core-only samples and inferred shield booleans', () => {
+test('renderer journey evidence rejects unknown adapters and inferred shield booleans', async () => {
   const semanticCases = makeValidSemanticCases()
   const sceneEventShield = makeValidSceneEventShield()
 
-  assert.throws(
-    () => buildRendererJourneyCoverage({
-      driver: 'candidate-public-core-with-IWER-source-metadata',
-      sourceKind: 'hand',
-      semanticCases,
-      sceneEventShield,
-    }),
-    /production renderer\/XR seam/,
+  await assert.rejects(
+    runRendererJourneyEvidence({ rendererIntegration: 'core' }),
+    /unknown Renderer Integration/,
   )
-  const coverage = buildRendererJourneyCoverage({
-    driver: 'packed-react-renderer-xr',
-    sourceKind: 'hand',
+  const evidence = await runJourneyEvidence({
     semanticCases,
     sceneEventShield,
   })
-  assertCompleteJourneyCoverage(coverage)
+  assert.equal(evidence.status, 'passed')
 
   const inferred = structuredClone(sceneEventShield)
   inferred.cases[0].observations = {
     sceneActions: inferred.actionTypes.map((type) => ({ type, blocked: true })),
   }
-  assert.throws(
-    () => buildRendererJourneyCoverage({
-      driver: 'packed-react-renderer-xr',
-      sourceKind: 'hand',
+  await assert.rejects(
+    runJourneyEvidence({
       semanticCases,
       sceneEventShield: inferred,
     }),
@@ -345,29 +359,128 @@ test('renderer journey evidence rejects Core-only samples and inferred shield bo
 
 test('one journey-evidence interface sequences scenarios for either Renderer Integration adapter', async () => {
   const observed = { semantic: [], shield: [] }
+  const scrollOffsets = [
+    0, 1, 2, 3,
+    3, 4, 5, 6,
+    6, 5, 4, 3,
+    3, 2, 1, 0,
+  ]
   const evidence = await runRendererJourneyEvidence({
     rendererIntegration: 'react',
     sourceKind: 'hand',
-    runSemanticCases(scenarios) {
-      observed.semantic = scenarios.map(({ id }) => id)
-      return makeValidSemanticCases().map((entry) => ({
-        ...entry,
-        observations: {
-          ...entry.observations,
-          runs: entry.observations.runs.map((run) => ({
-            ...run,
-            wristMenuEvents: [],
-          })),
+    createSemanticRun({ scenario, wrist }) {
+      observed.semantic.push(`${scenario.id}:${wrist}`)
+      let time = 0
+      let visibleState = true
+      let disconnected = false
+      let reentered = false
+      let scrollIndex = -1
+      let scrollOffset = 0
+      let selectionIntents = 0
+      let selectedAfterReentry = false
+      let frames = 0
+      let switched = false
+      let definition = 'standard'
+      const events = []
+      return {
+        sourceKind: 'hand',
+        async step(nextTime) {
+          time = nextTime
+          frames += 1
+          if (
+            scenario.behavior === 'visibilitySessionReentry' &&
+            reentered && time >= 828 && !selectedAfterReentry
+          ) {
+            selectionIntents += 1
+            selectedAfterReentry = true
+            events.push({ type: 'selection-intent' })
+          }
         },
-      }))
+        async aim() {
+          if (scenario.behavior === 'scrolling') {
+            scrollIndex += 1
+            scrollOffset = scrollOffsets[scrollIndex]
+          }
+        },
+        moveSelectionAway() {},
+        disconnectMenuSource() { disconnected = true },
+        switchInputMode() { switched = true },
+        sourceSwitched: () => switched,
+        activeTransient: async () => ({
+          kind: 'scene-input-claim',
+          claimed: true,
+        }),
+        transientCleared: () => switched,
+        visible() {
+          if (!visibleState || disconnected || definition === 'empty') return false
+          if (scenario.behavior === 'freshRevealHideDwell') {
+            return time >= 316 && time < 332
+          }
+          if (scenario.behavior === 'visibilitySessionReentry') {
+            return reentered ? time >= 764 : time >= 316
+          }
+          return true
+        },
+        revealPhase: () => (time >= 316 ? 'visible' : 'hidden'),
+        scrollOffset: () => scrollOffset,
+        presentationSignature: () => ['grid:true', 'shape:cube'],
+        selectionIntentCount: () => selectionIntents,
+        terminalEvents: () => switched
+          ? [{ type: 'selection-cancellation' }]
+          : [],
+        setVisibility(state) { visibleState = state === 'visible' },
+        async endAndReenterSession() {
+          reentered = true
+          return {
+            sessionEnded: true,
+            sessionCleanup: true,
+            newSessionIdentity: true,
+          }
+        },
+        async setMenuDefinition(kind) { definition = kind },
+        iwerFrames: () => frames,
+        rendererFrames: () => frames,
+        wristMenuEvents: () => events,
+        async dispose() {},
+      }
     },
-    runSceneEventShieldCases(scenarios) {
-      observed.shield = scenarios.map(({ id }) => id)
-      return makeValidSceneEventShield().cases
+    createSceneEventShieldRun({ scenario }) {
+      observed.shield.push(scenario.id)
+      let active = true
+      let present = true
+      let frames = 0
+      return {
+        dispatchPath: 'react-event-manager',
+        sourceKind: 'hand',
+        async step() { frames += 1 },
+        async aim() { active = true },
+        moveSelectionAway() { active = false },
+        disconnectMenuSource() { active = false },
+        placeBehindMenu() {},
+        placeBehindOutsideMenu() {},
+        dispatchSceneActions: () => sceneActionTypes.map((type) => ({
+          type,
+          behindTargetDeliveries: active ? 0 : 1,
+        })),
+        terminalEvents: () => terminalEventsByShieldCase[scenario.id]
+          .map((type) => ({ type })),
+        sourceNeutralized: () => !active,
+        menuPresent: () => present,
+        async unmount() { present = false },
+        iwerFrames: () => frames,
+        rendererFrames: () => frames,
+        wristMenuEvents: () => [],
+        async dispose() {},
+      }
     },
   })
 
-  assert.deepEqual(observed.semantic, semanticCaseIds)
+  assert.deepEqual(
+    observed.semantic,
+    semanticCaseIds.flatMap((id) =>
+      id === 'both-wrists' ? [`${id}:left`, `${id}:right`] : [`${id}:left`],
+    ),
+  )
   assert.deepEqual(observed.shield, [
     'commit',
     'cancel',
@@ -380,7 +493,7 @@ test('one journey-evidence interface sequences scenarios for either Renderer Int
   assert.equal(evidence.coverage.sceneEventShield, evidence.sceneEventShield)
 })
 
-test('renderer journey evidence rejects incomplete input-switching proof', () => {
+test('renderer journey evidence rejects incomplete input-switching proof', async () => {
   const mutations = [
     (run) => { run.activeTransientBefore.claimed = false },
     (run) => { run.sourceSwitched = false },
@@ -397,19 +510,16 @@ test('renderer journey evidence rejects incomplete input-switching proof', () =>
     )
     mutate(inputSwitching.observations.runs[0])
 
-    assert.throws(
-      () => buildRendererJourneyCoverage({
-        driver: 'packed-react-renderer-xr',
-        sourceKind: 'hand',
+    await assert.rejects(
+      runJourneyEvidence({
         semanticCases,
-        sceneEventShield: makeValidSceneEventShield(),
       }),
       /input-switching/,
     )
   }
 })
 
-test('renderer journey evidence rejects incomplete session lifecycle and reentry proof', () => {
+test('renderer journey evidence rejects incomplete session lifecycle and reentry proof', async () => {
   const mutations = [
     (run) => { run.visibilityHidden = false },
     (run) => { run.visibilityRestored = false },
@@ -428,19 +538,16 @@ test('renderer journey evidence rejects incomplete session lifecycle and reentry
     )
     mutate(lifecycle.observations.runs[0])
 
-    assert.throws(
-      () => buildRendererJourneyCoverage({
-        driver: 'packed-react-renderer-xr',
-        sourceKind: 'hand',
+    await assert.rejects(
+      runJourneyEvidence({
         semanticCases,
-        sceneEventShield: makeValidSceneEventShield(),
       }),
       /visibility-session-reentry/,
     )
   }
 })
 
-test('renderer journey evidence rejects discontinuous or unrearmed scrolling proof', () => {
+test('renderer journey evidence rejects discontinuous or unrearmed scrolling proof', async () => {
   const mutations = [
     (run) => { run.offsetSamples = [0, 0.01, 0.02] },
     (run) => { run.offsetSamples = [0, 0.01, 0.01, 0.03] },
@@ -457,21 +564,19 @@ test('renderer journey evidence rejects discontinuous or unrearmed scrolling pro
     const scrolling = semanticCases.find(({ id }) => id === 'scrolling')
     mutate(scrolling.observations.runs[0])
 
-    assert.throws(
-      () => buildRendererJourneyCoverage({
-        driver: 'packed-react-renderer-xr',
+    await assert.rejects(
+      runJourneyEvidence({
         sourceKind: 'controller',
         semanticCases,
-        sceneEventShield: makeValidSceneEventShield(),
       }),
       /scrolling/,
     )
   }
 })
 
-test('renderer journey evidence rejects wrong shield terminals or missing recovery phases', () => {
+test('renderer journey evidence rejects wrong shield terminals or missing recovery phases', async () => {
   const mutations = [
-    (shield) => { shield.actionTypes.pop() },
+    (shield) => { shield.cases.pop() },
     (shield) => {
       shield.cases[0].observations.dispatches[0]
         .behindTargetDeliveries = 1
@@ -518,11 +623,8 @@ test('renderer journey evidence rejects wrong shield terminals or missing recove
     const sceneEventShield = makeValidSceneEventShield()
     mutate(sceneEventShield)
 
-    assert.throws(
-      () => buildRendererJourneyCoverage({
-        driver: 'packed-react-renderer-xr',
-        sourceKind: 'hand',
-        semanticCases: makeValidSemanticCases(),
+    await assert.rejects(
+      runJourneyEvidence({
         sceneEventShield,
       }),
       /Scene Event Shield/,
@@ -530,7 +632,7 @@ test('renderer journey evidence rejects wrong shield terminals or missing recove
   }
 })
 
-function evaluateJourneyReports(react19Report) {
+function evaluateJourneyReports(react19Report, options = {}) {
   const candidateSha256 = 'a'.repeat(64)
   const report = (journeyReport, testedLanes) => ({
     ...journeyReport,
@@ -538,24 +640,27 @@ function evaluateJourneyReports(react19Report) {
     testedLanes,
   })
   return evaluateAutomatedReleaseGates({
-    compatibility: {
-      testedLanes: [
-        'core-import',
-        'three-0.185.1',
-        'react-18.3.1-r3f-8.18.0',
-        'react-19.2.7-r3f-9.6.1',
-        'react-xr-6.6.30',
-        'iwer-vanilla-hand',
-        'iwer-vanilla-controller',
-        'iwer-react-hand',
-        'iwer-react-controller',
-      ].map((id) => ({ id })),
+    evidenceContext: {
+      compatibility: {
+        testedLanes: [
+          'core-import',
+          'three-0.185.1',
+          'react-18.3.1-r3f-8.18.0',
+          'react-19.2.7-r3f-9.6.1',
+          'react-xr-6.6.30',
+          'iwer-vanilla-hand',
+          'iwer-vanilla-controller',
+          'iwer-react-hand',
+          'iwer-react-controller',
+          ...(options.additionalLaneIds ?? []),
+        ].map((id) => ({ id })),
+      },
+      protocol: { id: 'test', version: 1, sha256: 'b'.repeat(64), requiredGateIds: [] },
+      candidate: { sha256: candidateSha256 },
+      source: {},
+      lockfiles: [],
+      instrumentation: {},
     },
-    protocol: { id: 'test', version: 1, sha256: 'b'.repeat(64), requiredGateIds: [] },
-    candidate: { sha256: candidateSha256 },
-    source: {},
-    lockfiles: [],
-    instrumentation: {},
     prerequisiteResults: Array.from({ length: 5 }, () => ({ status: 'passed' })),
     deterministicResult: { status: 'passed' },
     deterministicReport: { status: 'passed' },
@@ -563,11 +668,14 @@ function evaluateJourneyReports(react19Report) {
     automatedResult: { status: 'passed' },
     automatedReport: { gates: {} },
     exampleResult: { status: 'passed' },
-    threeReport: report(makeValidJourneyReport('three'), [
-      'three-0.185.1',
-      'iwer-vanilla-hand',
-      'iwer-vanilla-controller',
-    ]),
+    threeReport: report(
+      options.threeReport ?? makeValidJourneyReport('three'),
+      options.threeTestedLanes ?? [
+        'three-0.185.1',
+        'iwer-vanilla-hand',
+        'iwer-vanilla-controller',
+      ],
+    ),
     react18Report: report(makeValidJourneyReport('react'), [
       'react-18.3.1-r3f-8.18.0',
       'react-xr-6.6.30',
@@ -637,4 +745,21 @@ test('Release Gate evaluation fails closed on passed journey reports with weaken
       'failed',
     )
   }
+})
+
+test('Release Gate evaluation fails closed for unknown lanes and unmapped reports', () => {
+  const unknownLane = evaluateJourneyReports(makeValidJourneyReport(), {
+    additionalLaneIds: ['unknown-renderer-lane'],
+  })
+  assert.equal(unknownLane.laneStates['unknown-renderer-lane'], false)
+
+  const unmappedReport = evaluateJourneyReports(makeValidJourneyReport(), {
+    threeTestedLanes: ['unmapped-three-report-lane'],
+  })
+  assert.equal(unmappedReport.laneStates['three-0.185.1'], false)
+  assert.equal(unmappedReport.reports.sceneEventShield.status, 'failed')
+  assert.equal(
+    unmappedReport.gates.find(({ id }) => id === 'three-consumer').status,
+    'failed',
+  )
 })

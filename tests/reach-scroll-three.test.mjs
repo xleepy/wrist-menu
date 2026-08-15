@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { Raycaster, Vector3 } from 'three'
 
 import {
   defaultThemeTokens,
@@ -153,5 +154,22 @@ test('Presentation Model updates expose the latest interaction and Menu Value cu
     'selected',
     'selection-ownership',
   ])
+  presentation.dispose()
+})
+
+test('the default Presentation adapter applies model targetability itself', () => {
+  const initial = presentationModel([rowAction(0)])
+  const presentation = defaultThreeWristMenuPresentationFactory(initial)
+  const target = presentation.hitRegions[0].object
+  presentation.root.updateMatrixWorld(true)
+  const targetPosition = target.getWorldPosition(new Vector3())
+  const ray = new Raycaster(
+    new Vector3(targetPosition.x, targetPosition.y, targetPosition.z + 1),
+    new Vector3(0, 0, -1),
+  )
+
+  assert.ok(ray.intersectObject(presentation.root, true).length > 0)
+  presentation.update({ ...initial, targetable: false })
+  assert.equal(ray.intersectObject(presentation.root, true).length, 0)
   presentation.dispose()
 })

@@ -244,12 +244,14 @@ async function main() {
       availability: 'unavailable',
     }
     const finalized = finalizeCandidateUnavailableEvidence({
-      compatibility,
-      candidate,
-      source,
-      lockfiles,
-      protocol: protocolIdentity,
-      instrumentation,
+      evidenceContext: {
+        compatibility,
+        candidate,
+        source,
+        lockfiles,
+        protocol: protocolIdentity,
+        instrumentation,
+      },
       bundleManifest: await createRetainedReportManifest(workingDirectory),
       failure: {
         stage,
@@ -397,12 +399,17 @@ async function main() {
       sha256: candidate.sha256,
     }
     const evaluation = evaluateAutomatedReleaseGates({
-      compatibility,
-      protocol: { ...protocolIdentity, requiredGateIds: protocol.requiredGateIds },
-      candidate: candidateIdentity,
-      source,
-      lockfiles,
-      instrumentation,
+      evidenceContext: {
+        compatibility,
+        protocol: {
+          ...protocolIdentity,
+          requiredGateIds: protocol.requiredGateIds,
+        },
+        candidate: candidateIdentity,
+        source,
+        lockfiles,
+        instrumentation,
+      },
       prerequisiteResults,
       deterministicResult,
       deterministicReport,

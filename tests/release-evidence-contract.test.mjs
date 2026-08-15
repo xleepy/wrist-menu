@@ -114,12 +114,14 @@ test('an automated Evidence Record is reproducible and fails closed', () => {
   assert.ok(Object.isFrozen(first))
 
   const finalized = finalizeAutomatedReleaseEvidence({
-    compatibility: { testedLanes: [{ id: 'core-import' }] },
-    protocol: { ...input.protocol, requiredGateIds: input.requiredGateIds },
-    candidate: input.candidate,
-    source: input.source,
-    lockfiles: input.lockfiles,
-    instrumentation: input.instrumentation,
+    evidenceContext: {
+      compatibility: { testedLanes: [{ id: 'core-import' }] },
+      protocol: { ...input.protocol, requiredGateIds: input.requiredGateIds },
+      candidate: input.candidate,
+      source: input.source,
+      lockfiles: input.lockfiles,
+      instrumentation: input.instrumentation,
+    },
     testedLanes: input.testedLanes,
     laneStates: { 'core-import': true },
     gates: input.gates,

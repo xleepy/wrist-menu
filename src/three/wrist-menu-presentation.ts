@@ -27,6 +27,7 @@ import {
 } from './reach-layout.js'
 
 const decorativeRaycast: Mesh['raycast'] = () => undefined
+const interactiveRaycast = Mesh.prototype.raycast
 
 type InteractivePresentationItem =
   | PresentationActionItem
@@ -179,6 +180,7 @@ export class WristMenuPresentation {
   private theme: ThemeTokens
   private modelRevision = -1
   private poolBound = false
+  private targetable = false
 
   constructor(initialModel: PresentationModel) {
     this.group.name = 'wrist-menu-attachment-root'
@@ -427,7 +429,9 @@ export class WristMenuPresentation {
 
       if (fullyVisible) {
         slot.hitMesh.visible = true
-        slot.hitMesh.raycast = decorativeRaycast
+        slot.hitMesh.raycast = this.targetable
+          ? interactiveRaycast
+          : decorativeRaycast
         slot.hitMesh.userData['wristMenuItemId'] = row.id
         slot.hitMesh.userData['wristMenuDisabled'] = row.disabled
         slot.hitMesh.userData['wristMenuSelected'] =
@@ -444,6 +448,8 @@ export class WristMenuPresentation {
 
   update(model: PresentationModel) {
     this.theme = model.theme
+    this.targetable =
+      model.targetable && model.visible && !model.scrollBarrierActive
     const heightScale = reachHeightScale(this.theme)
     const rowWidth = reachRowWidth(this.theme)
     this.panelMesh.scale.set(
@@ -477,6 +483,14 @@ export class WristMenuPresentation {
     this.scrollOffset = model.scrollOffset
     this.updatePool(structureChanged || scrollChanged || !this.poolBound)
     this.group.visible = model.visible
+    for (const hitRegion of this.hitRegions) {
+      hitRegion.raycast = this.targetable && hitRegion.visible
+        ? interactiveRaycast
+        : decorativeRaycast
+    }
+    this.viewportMesh.raycast = this.targetable && this.viewportMesh.visible
+      ? interactiveRaycast
+      : decorativeRaycast
     for (const material of this.visualMaterials) {
       material.opacity = model.opacity
       material.depthWrite = model.opacity >= 1

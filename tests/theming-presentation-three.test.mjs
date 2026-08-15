@@ -18,7 +18,6 @@ import {
   threeWristMenuBlocksSceneInput,
   updateThreeWristMenu,
 } from '../dist/three/index.js'
-import { ManagedWristMenuPresentation } from '../dist/three/presentation.js'
 import { controllerActionSnapshot } from '../fixtures/controller-action.mjs'
 import {
   reachScrollSnapshot,
@@ -94,9 +93,16 @@ test('resolved theme tokens restyle and resize the default Command slab', () => 
 test('shared oriented-box targeting preserves world-meter semantics under presentation scale', () => {
   let hit
   let viewport
-  const managed = new ManagedWristMenuPresentation(
-    presentationModel(),
-    () => {
+  const menu = createThreeWristMenuState({
+    renderer: {
+      xr: {
+        getSession: () => null,
+        getReferenceSpace: () => null,
+      },
+    },
+    snapshot: controllerActionSnapshot,
+    onEvent: () => undefined,
+    presentationFactory: () => {
       const root = new Group()
       root.scale.set(2, 0.5, 3)
       viewport = new Mesh(
@@ -110,7 +116,7 @@ test('shared oriented-box targeting preserves world-meter semantics under presen
       root.add(viewport, hit)
       return {
         root,
-        hitRegions: [{ itemId: 'spawn', object: hit }],
+        hitRegions: [{ itemId: 'spawn-cube', object: hit }],
         menuViewport: { object: viewport },
         update() {},
         dispose() {
@@ -121,19 +127,19 @@ test('shared oriented-box targeting preserves world-meter semantics under presen
         },
       }
     },
-  )
+  })
 
   const pressedPoint = hit.localToWorld(
     new Vector3(0, 0, hit.geometry.parameters.depth / 2 + 0.005 / 3),
   )
   assert.equal(
-    managed.fingertipObservation(pressedPoint, 0.005)?.phase,
+    menu.presentation.fingertipObservation(pressedPoint, 0.005)?.phase,
     'pressed',
   )
   const panelPoint = viewport.localToWorld(new Vector3(0, 0.1, 0))
-  assert.ok(Math.abs(managed.panelLocalY(panelPoint) - 0.05) < 1e-9)
+  assert.ok(Math.abs(menu.presentation.panelLocalY(panelPoint) - 0.05) < 1e-9)
 
-  managed.dispose()
+  disposeThreeWristMenu(menu)
 })
 
 test('a custom factory receives only the curated model and preserves controller selection, shielding, and disposal', () => {

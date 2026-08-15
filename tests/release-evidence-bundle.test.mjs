@@ -34,16 +34,18 @@ async function stageBundle(path) {
   }
   const compatibility = { testedLanes: [{ id: 'core-import' }] }
   const input = {
-    compatibility,
-    candidate,
-    source: {
-      commit: 'b'.repeat(40),
-      exampleCommit: 'b'.repeat(40),
-      committedAt: '2026-08-08T00:00:00Z',
+    evidenceContext: {
+      compatibility,
+      candidate,
+      source: {
+        commit: 'b'.repeat(40),
+        exampleCommit: 'b'.repeat(40),
+        committedAt: '2026-08-08T00:00:00Z',
+      },
+      lockfiles: [{ path: 'package-lock.json', sha256: 'c'.repeat(64) }],
+      protocol: { id: 'automated-release', version: 1, sha256: 'd'.repeat(64) },
+      instrumentation: { id: 'test', version: 1, sha256: 'e'.repeat(64) },
     },
-    lockfiles: [{ path: 'package-lock.json', sha256: 'c'.repeat(64) }],
-    protocol: { id: 'automated-release', version: 1, sha256: 'd'.repeat(64) },
-    instrumentation: { id: 'test', version: 1, sha256: 'e'.repeat(64) },
     bundleManifest,
     failure: {
       stage: 'build',

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-import { assertCompleteJourneyCoverage } from '../fixtures/consumers/journey-evidence.mjs'
+import { verifyRendererJourneyEvidence } from '../fixtures/consumers/journey-evidence.mjs'
 import {
   evaluatePerformanceBaselineGate,
   performanceBaselinePrerequisites,
@@ -74,7 +74,7 @@ function journeyCombinationPassed(report, integration, sourceKind) {
   )) return false
 
   try {
-    assertCompleteJourneyCoverage(coverage)
+    verifyRendererJourneyEvidence(coverage)
     assert.deepEqual(coverage.sceneEventShield, shield)
   } catch {
     return false
@@ -85,6 +85,7 @@ function journeyCombinationPassed(report, integration, sourceKind) {
 }
 
 function testedLaneStates({
+  testedLaneIds,
   consumerResult,
   candidateSha256,
   threeReport,
@@ -94,7 +95,9 @@ function testedLaneStates({
 }) {
   const passed = (report, laneId) =>
     consumerLanePassed(consumerResult, report, laneId, candidateSha256)
-  const states = {
+  const states = Object.assign(
+    Object.fromEntries(testedLaneIds.map((id) => [id, false])),
+    {
     'three-0.185.1': passed(threeReport, 'three-0.185.1'),
     'react-18.3.1-r3f-8.18.0': passed(
       react18Report,
@@ -111,7 +114,8 @@ function testedLaneStates({
     'iwer-vanilla-controller': passed(threeReport, 'iwer-vanilla-controller'),
     'iwer-react-hand': passed(react19Report, 'iwer-react-hand'),
     'iwer-react-controller': passed(react19Report, 'iwer-react-controller'),
-  }
+    },
+  )
   states['core-import'] =
     consumerResult?.status === 'passed' &&
     importReports.every(
@@ -129,13 +133,55 @@ function sceneEventShieldReport({
   react19Report,
 }) {
   const combinations = [
-    ['three-hand', threeReport, 'raw/three-iwer-lanes.json', 'three-0.185.1', 'three', 'hand'],
-    ['three-controller', threeReport, 'raw/three-iwer-lanes.json', 'three-0.185.1', 'three', 'controller'],
-    ['react-18-hand', react18Report, 'raw/react-18-xr-iwer-lanes.json', 'react-18.3.1-r3f-8.18.0', 'react', 'hand'],
-    ['react-18-controller', react18Report, 'raw/react-18-xr-iwer-lanes.json', 'react-18.3.1-r3f-8.18.0', 'react', 'controller'],
-    ['react-19-hand', react19Report, 'raw/react-19-xr-iwer-lanes.json', 'react-19.2.7-r3f-9.6.1', 'react', 'hand'],
-    ['react-19-controller', react19Report, 'raw/react-19-xr-iwer-lanes.json', 'react-19.2.7-r3f-9.6.1', 'react', 'controller'],
-  ].map(([id, report, reportPath, laneId, integration, sourceKind]) => ({
+    {
+      id: 'three-hand',
+      report: threeReport,
+      reportPath: 'raw/three-iwer-lanes.json',
+      laneId: 'three-0.185.1',
+      integration: 'three',
+      sourceKind: 'hand',
+    },
+    {
+      id: 'three-controller',
+      report: threeReport,
+      reportPath: 'raw/three-iwer-lanes.json',
+      laneId: 'three-0.185.1',
+      integration: 'three',
+      sourceKind: 'controller',
+    },
+    {
+      id: 'react-18-hand',
+      report: react18Report,
+      reportPath: 'raw/react-18-xr-iwer-lanes.json',
+      laneId: 'react-18.3.1-r3f-8.18.0',
+      integration: 'react',
+      sourceKind: 'hand',
+    },
+    {
+      id: 'react-18-controller',
+      report: react18Report,
+      reportPath: 'raw/react-18-xr-iwer-lanes.json',
+      laneId: 'react-18.3.1-r3f-8.18.0',
+      integration: 'react',
+      sourceKind: 'controller',
+    },
+    {
+      id: 'react-19-hand',
+      report: react19Report,
+      reportPath: 'raw/react-19-xr-iwer-lanes.json',
+      laneId: 'react-19.2.7-r3f-9.6.1',
+      integration: 'react',
+      sourceKind: 'hand',
+    },
+    {
+      id: 'react-19-controller',
+      report: react19Report,
+      reportPath: 'raw/react-19-xr-iwer-lanes.json',
+      laneId: 'react-19.2.7-r3f-9.6.1',
+      integration: 'react',
+      sourceKind: 'controller',
+    },
+  ].map(({ id, report, reportPath, laneId, integration, sourceKind }) => ({
     id,
     integration,
     sourceKind,
@@ -206,12 +252,7 @@ function performanceReport({
 
 /** Interpret retained reports into exact Tested Lanes and Release Gates. */
 export function evaluateAutomatedReleaseGates({
-  compatibility,
-  protocol,
-  candidate,
-  source,
-  lockfiles,
-  instrumentation,
+  evidenceContext,
   prerequisiteResults,
   deterministicResult,
   deterministicReport,
@@ -226,7 +267,13 @@ export function evaluateAutomatedReleaseGates({
   importReports,
   performanceBaselinePolicy,
 }) {
+  const {
+    compatibility,
+    protocol,
+    candidate,
+  } = evidenceContext
   const laneStates = testedLaneStates({
+    testedLaneIds: compatibility.testedLanes.map(({ id }) => id),
     consumerResult,
     candidateSha256: candidate.sha256,
     threeReport,
@@ -314,12 +361,7 @@ export function evaluateAutomatedReleaseGates({
     ),
   ]
   return Object.freeze({
-    compatibility,
-    protocol,
-    candidate,
-    source,
-    lockfiles,
-    instrumentation,
+    evidenceContext,
     testedLanes: Object.freeze(compatibility.testedLanes.map(({ id }) => id)),
     laneStates: Object.freeze(laneStates),
     reports: Object.freeze({ importSafety, sceneEventShield, performanceBaseline }),
@@ -332,24 +374,32 @@ export function finalizeAutomatedReleaseEvidence(
   evaluation,
   { bundleManifest, artifactDirectory = 'artifacts/release-evidence' },
 ) {
+  const {
+    compatibility,
+    protocol,
+    candidate,
+    source,
+    lockfiles,
+    instrumentation,
+  } = evaluation.evidenceContext
   const resolvedTemplate = resolveCompatibilityEvidence(
-    evaluation.compatibility,
-    evaluation.candidate,
+    compatibility,
+    candidate,
     evaluation.laneStates,
     'SELF',
   )
   const input = {
-    candidate: evaluation.candidate,
-    source: evaluation.source,
-    lockfiles: evaluation.lockfiles,
+    candidate,
+    source,
+    lockfiles,
     protocol: {
-      id: evaluation.protocol.id,
-      version: evaluation.protocol.version,
-      sha256: evaluation.protocol.sha256,
+      id: protocol.id,
+      version: protocol.version,
+      sha256: protocol.sha256,
     },
-    instrumentation: evaluation.instrumentation,
+    instrumentation,
     rawReportDirectory: 'RAW_DIRECTORY_PLACEHOLDER',
-    requiredGateIds: evaluation.protocol.requiredGateIds,
+    requiredGateIds: protocol.requiredGateIds,
     gates: evaluation.gates,
     testedLanes: evaluation.testedLanes,
     validationCombinations: [],
@@ -367,7 +417,7 @@ export function finalizeAutomatedReleaseEvidence(
     recordDirectory,
     record,
     resolvedCompatibility: resolveCompatibilityEvidence(
-      evaluation.compatibility,
+      compatibility,
       record.candidate,
       evaluation.laneStates,
       evidenceRecord,
@@ -377,16 +427,19 @@ export function finalizeAutomatedReleaseEvidence(
 
 /** Build fail-closed evidence when no candidate can be produced. */
 export function finalizeCandidateUnavailableEvidence({
-  compatibility,
-  protocol,
-  candidate,
-  source,
-  lockfiles,
-  instrumentation,
+  evidenceContext,
   failure,
   bundleManifest,
   artifactDirectory = 'artifacts/release-evidence',
 }) {
+  const {
+    compatibility,
+    protocol,
+    candidate,
+    source,
+    lockfiles,
+    instrumentation,
+  } = evidenceContext
   const testedLanes = compatibility.testedLanes.map(({ id }) => id)
   const laneStates = Object.fromEntries(testedLanes.map((id) => [id, false]))
   const resolvedTemplate = resolveCompatibilityEvidence(
