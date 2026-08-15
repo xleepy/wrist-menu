@@ -494,4 +494,4 @@ const report = {
 }
 
 await writeLaneReport('automated-package-gates.json', report)
-console.log(JSON.stringify(report, null, 2))
+console.log('wrote automated-package-gates.json')

@@ -35,6 +35,7 @@ import { instrumentExactPackageAllocations } from './instrument-exact-allocation
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const npmCli = process.env.npm_execpath
 const artifactRoot = resolve(root, 'artifacts', 'release-evidence')
+const subprocessMaxBuffer = 16 * 1024 * 1024
 const protocolPath = resolve(root, 'evidence', 'protocols', 'automated-v1.json')
 const baselinePath = resolve(root, 'evidence', 'baselines', 'performance-v1.json')
 const lockfilePaths = [
@@ -81,6 +82,7 @@ function runNpm(script, environment = {}) {
       cwd: root,
       encoding: 'utf8',
       env: { ...process.env, ...environment },
+      maxBuffer: subprocessMaxBuffer,
     },
   )
   return {
@@ -88,7 +90,7 @@ function runNpm(script, environment = {}) {
     status: result.status === 0 ? 'passed' : 'failed',
     exitCode: result.status,
     stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
+    stderr: result.stderr || result.error?.message || '',
   }
 }
 
@@ -97,13 +99,14 @@ function runNode(script, args, environment = {}, cwd = root) {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, ...environment },
+    maxBuffer: subprocessMaxBuffer,
   })
   return {
     command: `node ${relative(root, resolve(cwd, script))}`,
     status: result.status === 0 ? 'passed' : 'failed',
     exitCode: result.status,
     stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
+    stderr: result.stderr || result.error?.message || '',
   }
 }
 

@@ -507,6 +507,11 @@ test('React performance evidence runs through both packed public consumer lanes 
   assert.match(vanillaInstrumentation, /from ['"]\.\.\/performance-workload\.mjs['"]/)
   assert.match(instrumentation, /from ['"]\.\/reach-scroll-workload\.mjs['"]/)
   assert.match(vanillaInstrumentation, /from ['"]\.\.\/reach-scroll-workload\.mjs['"]/)
+  assert.match(vanillaInstrumentation, /writeLaneReport\('automated-package-gates\.json'/)
+  assert.doesNotMatch(
+    vanillaInstrumentation,
+    /console\.log\(JSON\.stringify\(report/,
+  )
   assert.doesNotMatch(instrumentation, /controller-action-journey/)
   assert.match(instrumentation, /instrumentUniqueAddedFrameSubscription/)
   assert.doesNotMatch(
