@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#06110f" />
+    <title>Primitive Workshop — Three.js</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <header class="hud">
+        <div>
+          <p class="eyebrow">Vanilla Three.js Example Variant</p>
+          <h1>Primitive Workshop</h1>
+          <p id="status">Loading workshop…</p>
+        </div>
+        <div class="actions">
+          <button id="enter-vr" type="button">Enter VR</button>
+          <button id="spawn" type="button">Spawn at cursor</button>
+        </div>
+      </header>
+      <canvas id="workshop" aria-label="Primitive Workshop scene"></canvas>
+      <aside>
+        Point at the table to move the Placement Cursor. Use the Wrist Menu to
+        choose and spawn shapes, remove a selected object, toggle grid behavior,
+        switch wrists, and drag the long menu to scroll.
+      </aside>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
