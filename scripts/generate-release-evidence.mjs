@@ -11,7 +11,6 @@ import {
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { digestNamedCandidate } from './candidate-tarball.mjs'
 import {
   EXACT_ALLOCATION_INSTRUMENTATION,
   EXACT_ALLOCATION_MARKER_FILENAME,
@@ -31,6 +30,7 @@ import {
   verifyImmutableEvidenceBundle,
 } from './release-evidence-lib.mjs'
 import { instrumentExactPackageAllocations } from './instrument-exact-allocations.mjs'
+import { packStagedCandidatePackage } from './staged-candidate.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const npmCli = process.env.npm_execpath
@@ -49,6 +49,10 @@ const instrumentationPaths = [
   resolve(root, 'scripts', 'instrument-exact-allocations.mjs'),
   resolve(root, 'scripts', 'deterministic-release-traces.mjs'),
   resolve(root, 'scripts', 'release-gate-evaluation.mjs'),
+  resolve(root, 'scripts', 'staged-candidate.mjs'),
+  resolve(root, 'scripts', 'candidate-tarball.mjs'),
+  resolve(root, 'scripts', 'test-consumers.mjs'),
+  resolve(root, 'scripts', 'test-examples.mjs'),
   resolve(root, 'fixtures', 'consumers', 'exact-allocation-evidence.mjs'),
   resolve(root, 'fixtures', 'consumers', 'import-safety.mjs'),
   resolve(root, 'fixtures', 'consumers', 'journey-evidence.mjs'),
@@ -329,19 +333,24 @@ async function main() {
 
     let candidate
     try {
-      candidate = await digestNamedCandidate(root)
+      candidate = await packStagedCandidatePackage({
+        root,
+        sourceCommit,
+        outputDirectory: rawDirectory,
+        npmCli,
+      })
     } catch (error) {
       const result = {
-        command: 'digest packed candidate',
+        command: 'pack exact staged candidate',
         status: 'failed',
         exitCode: 1,
         stdout: '',
         stderr: error instanceof Error ? error.message : String(error),
       }
-      const report = 'raw/candidate-digest.json'
+      const report = 'raw/candidate-staging.json'
       await writeCommandLog(resolve(workingDirectory, report), result)
       await publishCandidateUnavailable({
-        stage: 'candidate-digest',
+        stage: 'candidate-staging',
         result,
         report,
       })
@@ -361,6 +370,8 @@ async function main() {
 
     const evidenceEnvironment = {
       WRIST_MENU_EVIDENCE_DIRECTORY: rawDirectory,
+      WRIST_MENU_CANDIDATE_PATH: candidate.candidatePath,
+      WRIST_MENU_CANDIDATE_SHA256: candidate.sha256,
     }
     const consumerResult = runNpm('test:consumers', evidenceEnvironment)
     await writeCommandLog(
@@ -445,7 +456,7 @@ async function main() {
       automatedResult,
     )
 
-    const exampleResult = runNpm('test:examples')
+    const exampleResult = runNpm('test:examples', evidenceEnvironment)
     await writeCommandLog(
       resolve(rawDirectory, 'packed-example-command.json'),
       exampleResult,
@@ -485,7 +496,7 @@ async function main() {
     const candidateIdentity = {
       package: '@xleepy/wrist-menu',
       version: '0.0.0',
-      tarball: relative(root, candidate.candidatePath).replaceAll('\\', '/'),
+      tarball: relative(workingDirectory, candidate.candidatePath).replaceAll('\\', '/'),
       sha256: candidate.sha256,
     }
     const evaluation = evaluateAutomatedReleaseGates({
