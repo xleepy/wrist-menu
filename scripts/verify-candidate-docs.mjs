@@ -107,6 +107,7 @@ try {
   )
 
   console.log(`verified extracted candidate ${candidate.package.sha256}`)
+  console.log(`candidate evidence appliesToCandidate: ${candidate.evidence.appliesToCandidate}`)
   console.log('restored clean locked candidate-docs consumer checkout')
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
