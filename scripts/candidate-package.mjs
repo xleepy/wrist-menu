@@ -49,12 +49,35 @@ export function verifyCandidateFileList(filePaths) {
   )
 }
 
+/**
+ * Exact candidate evidence policy: the one place that decides which Evidence
+ * Record may back a candidate. Callers supply record-vs-candidate equality
+ * separately; this predicate owns record acceptance.
+ */
+export function assertExactPassingAutomatedEvidence(record) {
+  if (record?.kind !== 'automated') {
+    throw new TypeError('candidate evidence must be an automated Evidence Record')
+  }
+  if (record?.result !== 'passed') {
+    throw new TypeError('candidate evidence must retain a passing result')
+  }
+  requireIdentity(record?.recordId, AUTOMATED_EVIDENCE_ID, 'evidence record id')
+  if (!Array.isArray(record.gates)) {
+    throw new TypeError('candidate Evidence Record must contain Release Gates')
+  }
+  if ((record.validationCombinations?.length ?? 0) !== 0) {
+    throw new TypeError('automated evidence must not imply physical validation')
+  }
+  return record
+}
+
 /** Build the generated documentation index without changing evidence meaning. */
 export function createCandidateEvidenceIndex({
   candidate,
   candidateSource,
-  predecessorRecord,
+  evidenceRecord,
 }) {
+  assertExactPassingAutomatedEvidence(evidenceRecord)
   const candidateSha256 = requireIdentity(
     candidate?.sha256,
     SHA256,
@@ -66,38 +89,25 @@ export function createCandidateEvidenceIndex({
     'candidate source commit',
   )
   const evidenceRecordId = requireIdentity(
-    predecessorRecord?.recordId,
+    evidenceRecord?.recordId,
     AUTOMATED_EVIDENCE_ID,
     'evidence record id',
   )
   const evidenceSourceCommit = requireIdentity(
-    predecessorRecord?.source?.commit,
+    evidenceRecord?.source?.commit,
     COMMIT,
     'evidence source commit',
   )
   const exampleRevision = requireIdentity(
-    predecessorRecord?.source?.exampleCommit,
+    evidenceRecord?.source?.exampleCommit,
     COMMIT,
     'Example App revision',
   )
   const evidenceCandidateSha256 = requireIdentity(
-    predecessorRecord?.candidate?.sha256,
+    evidenceRecord?.candidate?.sha256,
     SHA256,
     'evidence candidate sha256',
   )
-
-  if (predecessorRecord?.kind !== 'automated') {
-    throw new TypeError('candidate evidence must be an automated Evidence Record')
-  }
-  if (predecessorRecord?.result !== 'passed') {
-    throw new TypeError('candidate evidence must retain a passing result')
-  }
-  if (!Array.isArray(predecessorRecord.gates)) {
-    throw new TypeError('candidate Evidence Record must contain Release Gates')
-  }
-  if ((predecessorRecord.validationCombinations?.length ?? 0) !== 0) {
-    throw new TypeError('automated evidence must not imply physical validation')
-  }
 
   const appliesToCandidate =
     candidateSha256 === evidenceCandidateSha256 &&
@@ -118,11 +128,11 @@ export function createCandidateEvidenceIndex({
     },
     evidence: {
       recordId: evidenceRecordId,
-      result: predecessorRecord.result,
+      result: evidenceRecord.result,
       sourceCommit: evidenceSourceCommit,
       candidateSha256: evidenceCandidateSha256,
       appliesToCandidate,
-      failedGates: predecessorRecord.gates
+      failedGates: evidenceRecord.gates
         .filter(({ status }) => status === 'failed')
         .map(({ id, detail }) => ({ id, ...(detail === undefined ? {} : { detail }) })),
     },
@@ -425,8 +435,7 @@ export async function verifyCandidateBundle(bundleDirectory) {
   )
   const evidenceRecord = await verifyImmutableEvidenceBundle(evidenceDirectory)
   assert.equal(evidenceRecord.recordId, evidenceRecordId)
-  assert.equal(evidenceRecord.kind, 'automated')
-  assert.equal(evidenceRecord.result, 'passed')
+  assertExactPassingAutomatedEvidence(evidenceRecord)
   assert.equal(evidenceRecord.source.commit, candidate.source.commit)
   assert.equal(evidenceRecord.source.exampleCommit, candidate.source.commit)
   assert.equal(evidenceRecord.candidate.package, candidate.package.package)
@@ -441,7 +450,7 @@ export async function verifyCandidateBundle(bundleDirectory) {
     createCandidateEvidenceIndex({
       candidate: candidate.package,
       candidateSource: candidate.source,
-      predecessorRecord: evidenceRecord,
+      evidenceRecord,
     }),
   )
   assert.equal(evidenceIndex.evidence.appliesToCandidate, true)
@@ -488,19 +497,9 @@ export async function buildCandidateBundle({
   if (typeof npmCli !== 'string' || npmCli.length === 0) {
     throw new Error('run candidate generation through npm')
   }
-  const predecessorRecord = await verifyImmutableEvidenceBundle(
-    evidenceBundleDirectory,
+  const evidenceRecord = assertExactPassingAutomatedEvidence(
+    await verifyImmutableEvidenceBundle(evidenceBundleDirectory),
   )
-  if (
-    predecessorRecord.kind !== 'automated' ||
-    predecessorRecord.result !== 'passed' ||
-    !AUTOMATED_EVIDENCE_ID.test(predecessorRecord.recordId) ||
-    (predecessorRecord.validationCombinations?.length ?? 0) !== 0
-  ) {
-    throw new Error(
-      'candidate generation requires an exact passing automated Evidence Record',
-    )
-  }
 
   const docsDirectory = resolve(root, 'docs', '0.0.0')
   const sourceBefore = await captureCandidateSourceState(root)
@@ -509,8 +508,8 @@ export async function buildCandidateBundle({
   const sourceCommit = sourceBefore.commit
   const worktreeClean = sourceBefore.clean
   if (
-    predecessorRecord.source?.commit !== sourceCommit ||
-    predecessorRecord.source?.exampleCommit !== sourceCommit
+    evidenceRecord.source?.commit !== sourceCommit ||
+    evidenceRecord.source?.exampleCommit !== sourceCommit
   ) {
     throw new Error(
       'Evidence Record source revision does not match the candidate source commit',
@@ -525,14 +524,13 @@ export async function buildCandidateBundle({
       outputDirectory: stagingRoot,
       npmCli,
     })
-    verifyCandidateFileList(packed.files)
 
     const sourceArchive = packed.candidatePath
     const candidateSha256 = packed.sha256
     if (
-      predecessorRecord.candidate?.package !== '@xleepy/wrist-menu' ||
-      predecessorRecord.candidate?.version !== '0.0.0' ||
-      predecessorRecord.candidate?.sha256 !== candidateSha256
+      evidenceRecord.candidate?.package !== '@xleepy/wrist-menu' ||
+      evidenceRecord.candidate?.version !== '0.0.0' ||
+      evidenceRecord.candidate?.sha256 !== candidateSha256
     ) {
       throw new Error(
         'Evidence Record candidate digest does not match the exact staged candidate bytes',
@@ -603,7 +601,7 @@ export async function buildCandidateBundle({
     const copiedEvidenceDirectory = resolve(
       documentationDirectory,
       'evidence',
-      predecessorRecord.recordId,
+      evidenceRecord.recordId,
     )
     await mkdir(resolve(documentationDirectory, 'evidence'), { recursive: true })
     await cp(evidenceBundleDirectory, copiedEvidenceDirectory, { recursive: true })
@@ -620,7 +618,7 @@ export async function buildCandidateBundle({
     const evidenceIndex = createCandidateEvidenceIndex({
       candidate: packageIdentity,
       candidateSource: source,
-      predecessorRecord,
+      evidenceRecord,
     })
     assert.equal(
       evidenceIndex.evidence.appliesToCandidate,
@@ -657,9 +655,9 @@ export async function buildCandidateBundle({
         ],
       },
       evidence: {
-        path: `documentation/evidence/${predecessorRecord.recordId}`,
-        recordId: predecessorRecord.recordId,
-        result: predecessorRecord.result,
+        path: `documentation/evidence/${evidenceRecord.recordId}`,
+        recordId: evidenceRecord.recordId,
+        result: evidenceRecord.result,
         appliesToCandidate: evidenceIndex.evidence.appliesToCandidate,
       },
     }

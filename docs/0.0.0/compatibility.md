@@ -35,3 +35,19 @@ reported by `evidence-index.json`. The index must report
 Passing automated evidence still promotes no physical Validation Combination.
 Stable compatibility claims remain gated on the independent Quest validation
 and stable-release requirements described by the validation policy.
+
+## Prior failed evidence
+
+The earlier automated Evidence Record
+`automated-release-d5827ff6fbbe7c67` — source and Example App commit
+`6d57b41b3f28a981f2c88e9f7c3cd5dd0a8d7c91`, candidate SHA-256
+`eef2c2de4a8c25a0226d5067a3735beeb177816c84a5265caf37a861adeff21d` — holds an
+immutable **failed** verdict: exact JavaScript object-allocation
+instrumentation was unavailable, an identical Frame Sample observed 68
+instrumented property writes, construction observed no required atlas texture
+or upload version, and the React Example Variant exposed no direct
+package-update/renderer counters. Its deterministic, import, exact consumer,
+React XR, IWER, lifecycle, Scene Event Shield, and packed-example gates passed,
+but partial results do not change the failed overall verdict. That record
+predates the exact candidate handshake: it applies to no current candidate
+bytes and promotes no claim.
