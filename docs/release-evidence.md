@@ -23,8 +23,9 @@ Run `npm run evidence` only from a clean, committed worktree. The command:
 The staged candidate tarball lives inside the immutable record's `raw/` subtree,
 so the Evidence Record byte manifest covers the exact package that its gates
 installed. Consumer scripts accept an explicit candidate path and SHA only when
-the bytes at that path hash to the supplied digest; normal non-evidence runs keep
-the existing `npm pack` artifact fallback.
+the bytes at that path hash to the supplied digest, and setting only one of the
+two variables fails closed; normal non-evidence runs keep the existing
+`npm pack` artifact fallback.
 
 Before the Node allocation lane imports its packed candidate, automation
 classifies every package-owned JavaScript allocation site represented by the
