@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { access, readFile, readdir, rename } from 'node:fs/promises'
+import { access, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
 
 const SHA256 = /^[a-f0-9]{64}$/
@@ -55,6 +55,36 @@ export async function createRetainedReportManifest(bundleDirectory) {
       return { path, bytes: bytes.byteLength, sha256: sha256(bytes) }
     }),
   )
+}
+
+async function readJsonOr(path, fallback) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      try {
+        await writeFile(path, canonicalJson(fallback), { flag: 'wx' })
+      } catch (writeError) {
+        if (writeError?.code !== 'EEXIST') throw writeError
+      }
+    }
+    return fallback
+  }
+}
+
+/** Observe expected raw reports, retaining fail-closed evidence when absent. */
+export async function prepareRetainedReportBundle(
+  bundleDirectory,
+  expectedReports,
+) {
+  const reports = await Promise.all(
+    expectedReports.map(({ path, fallback }) =>
+      readJsonOr(resolve(bundleDirectory, path), fallback),
+    ),
+  )
+  return Object.freeze({
+    reports: Object.freeze(reports),
+  })
 }
 
 export async function verifyImmutableEvidenceBundle(bundleDirectory) {
