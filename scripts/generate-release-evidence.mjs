@@ -24,6 +24,7 @@ import {
 import {
   canonicalJson,
   createRetainedReportManifest,
+  prepareRetainedReportBundle,
   publishImmutableEvidenceBundle,
   sha256,
   validateCompatibilityManifest,
@@ -136,14 +137,6 @@ async function writeCommandLog(path, result) {
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'))
-}
-
-async function readJsonOr(path, fallback) {
-  try {
-    return await readJson(path)
-  } catch {
-    return fallback
-  }
 }
 
 async function fileDigest(path) {
@@ -462,35 +455,48 @@ async function main() {
       exampleResult,
     )
 
-    const deterministicReport = await readJsonOr(deterministicPath, {
-      status: 'failed',
-    })
-    const threeReport = await readJsonOr(
-      resolve(rawDirectory, 'three-iwer-lanes.json'),
-      { status: 'failed' },
-    )
-    const react18Report = await readJsonOr(
-      resolve(rawDirectory, 'react-18-xr-iwer-lanes.json'),
-      { status: 'failed' },
-    )
-    const react19Report = await readJsonOr(
-      resolve(rawDirectory, 'react-19-xr-iwer-lanes.json'),
-      { status: 'failed' },
-    )
-    const automatedReport = await readJsonOr(
-      resolve(rawDirectory, 'automated-package-gates.json'),
-      { gates: {} },
-    )
     const importReportNames = [
       'core-three-import-safety.json',
       'react-18-import-safety.json',
       'react-19-import-safety.json',
     ]
-    const importReports = await Promise.all(
-      importReportNames.map((name) =>
-        readJsonOr(resolve(rawDirectory, name), { status: 'failed' }),
-      ),
+    const retainedReportBundle = await prepareRetainedReportBundle(
+      workingDirectory,
+      [
+        {
+          path: 'raw/deterministic-boundaries.json',
+          fallback: { status: 'failed' },
+        },
+        {
+          path: 'raw/three-iwer-lanes.json',
+          fallback: { status: 'failed' },
+        },
+        {
+          path: 'raw/react-18-xr-iwer-lanes.json',
+          fallback: { status: 'failed' },
+        },
+        {
+          path: 'raw/react-19-xr-iwer-lanes.json',
+          fallback: { status: 'failed' },
+        },
+        {
+          path: 'raw/automated-package-gates.json',
+          fallback: { gates: {} },
+        },
+        ...importReportNames.map((name) => ({
+          path: `raw/${name}`,
+          fallback: { status: 'failed' },
+        })),
+      ],
     )
+    const [
+      deterministicReport,
+      threeReport,
+      react18Report,
+      react19Report,
+      automatedReport,
+      ...importReports
+    ] = retainedReportBundle.reports
     const performanceBaselinePolicy = await readJson(baselinePath)
 
     const candidateIdentity = {

@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
 import test from 'node:test'
 
 import {
   buildAutomatedEvidenceRecord,
   buildCandidateUnavailableEvidenceRecord,
   consumerLanePassed,
+  createRetainedReportManifest,
   evidenceInvalidationReasons,
+  prepareRetainedReportBundle,
   validateCompatibilityManifest,
 } from '../scripts/release-evidence-lib.mjs'
 import {
@@ -45,6 +49,97 @@ test('spawn failures retain an integer exit code and complete diagnostics', () =
       stderr: 'process stderr\nspawn ENOBUFS',
     },
   )
+})
+
+test('a retained report bundle materializes missing fail-closed evidence before finalization', async () => {
+  const temporaryRoot = await mkdtemp(
+    resolve(tmpdir(), 'wrist-menu-retained-reports-'),
+  )
+  try {
+    const rawDirectory = resolve(temporaryRoot, 'raw')
+    const missingReportPath = resolve(rawDirectory, 'three-iwer-lanes.json')
+    const malformedReportPath = resolve(rawDirectory, 'malformed.json')
+    const malformedReportBytes = '{ malformed JSON\n'
+    const failedReport = { status: 'failed' }
+    await mkdir(rawDirectory)
+    await writeFile(malformedReportPath, malformedReportBytes)
+
+    const retainedReportBundle = await prepareRetainedReportBundle(
+      temporaryRoot,
+      [
+        {
+          path: 'raw/three-iwer-lanes.json',
+          fallback: failedReport,
+        },
+        {
+          path: 'raw/malformed.json',
+          fallback: failedReport,
+        },
+      ],
+    )
+    const [threeReport, malformedReport] = retainedReportBundle.reports
+    assert.deepEqual([threeReport, malformedReport], [failedReport, failedReport])
+    assert.equal(
+      await readFile(malformedReportPath, 'utf8'),
+      malformedReportBytes,
+    )
+
+    const bundleManifest = await createRetainedReportManifest(temporaryRoot)
+    const evaluation = {
+      evidenceContext: {
+        compatibility: { testedLanes: [{ id: 'three-0.185.1' }] },
+        protocol: {
+          id: 'automated-release',
+          version: 1,
+          sha256: 'a'.repeat(64),
+          requiredGateIds: ['three-consumer'],
+        },
+        candidate: {
+          package: '@xleepy/wrist-menu',
+          version: '0.0.0',
+          sha256: 'b'.repeat(64),
+        },
+        source: {
+          commit: 'c'.repeat(40),
+          exampleCommit: 'c'.repeat(40),
+          committedAt: '2026-08-30T00:00:00Z',
+        },
+        lockfiles: [],
+        instrumentation: { id: 'test', version: 1 },
+      },
+      testedLanes: ['three-0.185.1'],
+      laneStates: { 'three-0.185.1': false },
+      gates: [
+        {
+          id: 'three-consumer',
+          status: threeReport.status,
+          report: 'raw/three-iwer-lanes.json',
+        },
+      ],
+    }
+    const finalized = finalizeAutomatedReleaseEvidence(evaluation, {
+      bundleManifest,
+    })
+    const failedReportBytes = '{\n  "status": "failed"\n}\n'
+    assert.equal(finalized.record.result, 'failed')
+    assert.deepEqual(
+      finalized.record.gates.find(({ id }) => id === 'three-consumer'),
+      {
+        id: 'three-consumer',
+        status: 'failed',
+        report: 'raw/three-iwer-lanes.json',
+      },
+    )
+    assert.equal(await readFile(missingReportPath, 'utf8'), failedReportBytes)
+    assert.equal(
+      finalized.record.bundleManifest.find(
+        ({ path }) => path === 'raw/three-iwer-lanes.json',
+      )?.bytes,
+      Buffer.byteLength(failedReportBytes),
+    )
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
 })
 
 test('the compatibility manifest separates policy, exact lanes, claims, and physical provisional rows', async () => {
